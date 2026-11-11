@@ -1,0 +1,69 @@
+/* 书签下拉浮层（独立 BrowserWindow）专属样式。
+   窗口无边框，宽度 300px、高度由主进程按条目数估算（封顶 380px），
+   条目超出时在内部滚动。主题变量沿用 style.css + theme-nyx.css。 */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-tab, #171413);
+  color: var(--text-main, #ece7df);
+  font-family: "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+  font-size: 12px;
+  user-select: none;
+}
+
+/* 列表容器：占满窗口高度，纵向滚动（细滚动条） */
+.bm-menu-list {
+  height: 100%;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.bm-menu-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.bm-menu-list::-webkit-scrollbar-thumb {
+  background: var(--border, #2c313c);
+  border-radius: 3px;
+}
+
+/* 书签项：可点，点击后主进程在激活标签打开 URL 并自动关闭浮层 */
+.bm-menu-item {
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: var(--text-dim, #8b93a5);
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.bm-menu-item:hover {
+  background: var(--bg-tab-active, #241f1c);
+  color: var(--text-main, #ece7df);
+}
+
+/* 子文件夹标题：加粗不可点，子项靠缩进递归展示 */
+.bm-menu-folder {
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: var(--text-main, #ece7df);
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 空文件夹提示 */
+.bm-menu-empty {
+  padding: 12px 10px;
+  color: var(--text-dim, #8b93a5);
+  text-align: center;
+}

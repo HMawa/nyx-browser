@@ -1,0 +1,1141 @@
+/* ==================================================================
+   Nyx · 主题包（墨夜 Ink Night 及同源三主题）
+   ------------------------------------------------------------------
+   用法：在 style.css / proxy-center.css / settings.css 之后加载本文件。
+
+   设计目标（"简约 + 艺术气息"）：
+     1. 单一变量真相 —— 把原先散在三个 CSS 里硬编码的紫色 rgba() 全部
+        收敛成变量，换主题只改变量，不动任何布局。
+     2. 质感替代平色 —— 发丝级边框、极淡的暖色噪点、内高光。
+     3. 一个强调色 —— 全局只有一处亮色（墨夜=暖金），其余全靠层次与留白。
+     4. 字体分层 —— 标题走衬线（宋/明朝体）作"墨"的隐喻，正文走雅黑保可读。
+
+   主题切换：<html data-theme="ink">（默认）
+             aurora = 极光 / paper = 素纸 / quiet = 静谧
+   ================================================================== */
+
+/* ==================================================================
+   一、主题令牌
+   ================================================================== */
+
+/* ---------------- 墨夜 Ink Night（默认）---------------- */
+:root,
+[data-theme="ink"] {
+  /* 底层：墨色五阶，全部偏暖（R≥G≥B），避免冷灰发脏 */
+  --bg: #0c0a09;
+  --bg-shell: #0c0a09;
+  --bg-deep: #080706;
+  --bg-panel: #121010;
+  --bg-tab: #171413;
+  --bg-tab-hover: #1e1a18;
+  --bg-tab-active: #241f1c;
+  --bg-row: #171413;
+  --bg-row-hover: #1e1a18;
+  --bg-head: #121010;
+  --bg-input: #141110;
+  --bg-float: #141111;
+  --bg-code: #0a0908;
+
+  /* 发丝边框：暗底上不用实色灰，用暖白低透明叠加，边界会呼吸 */
+  --border: rgba(214, 196, 168, 0.13);
+  --border-soft: rgba(214, 196, 168, 0.07);
+  --border-strong: rgba(214, 196, 168, 0.22);
+
+  /* 文字：暖白三阶 */
+  --text: #ece7df;
+  --text-main: #ece7df;
+  --text-dim: #9d968c;
+  --text-faint: #6e6862;
+
+  /* 强调：暖金。全局唯一亮色 */
+  --accent: #c8a45c;
+  --accent-soft: #e0c489;
+  --accent-ink: #1a1408;
+  --accent-04: rgba(200, 164, 92, 0.04);
+  --accent-06: rgba(200, 164, 92, 0.06);
+  --accent-10: rgba(200, 164, 92, 0.1);
+  --accent-14: rgba(200, 164, 92, 0.14);
+  --accent-18: rgba(200, 164, 92, 0.18);
+  --accent-24: rgba(200, 164, 92, 0.24);
+  --accent-40: rgba(200, 164, 92, 0.4);
+  --accent-55: rgba(200, 164, 92, 0.55);
+  --accent-glow: rgba(200, 164, 92, 0.16);
+
+  /* 语义色：降饱和，与墨底同族 */
+  --ok: #5fb3a1;
+  --ok-soft: #8ed0c1;
+  --warn: #d4a24a;
+  --warn-soft: #e8c375;
+  --danger: #c05a5a;
+  --danger-soft: #e08e8e;
+  --danger-14: rgba(192, 90, 90, 0.14);
+  --ok-14: rgba(95, 179, 161, 0.14);
+  --warn-14: rgba(212, 162, 74, 0.14);
+  --on-accent: #14110c;
+
+  /* 形状 */
+  --r-sm: 6px;
+  --r-md: 9px;
+  --r-lg: 13px;
+  --r-pill: 999px;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 14px 34px rgba(0, 0, 0, 0.55);
+  --ring: 0 0 0 3px var(--accent-glow);
+  --ring-danger: 0 0 0 3px rgba(192, 90, 90, 0.16);
+
+  /* 噪点：极淡暖色颗粒，给纯平色块一点"纸"的不均匀 */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+
+  /* 工具箱专用（原先在 style.css 里另起了一套，这里统一接管） */
+  --tb-bg: #0e0c0b;
+  --tb-card: #161312;
+  --tb-chip: #221e1b;
+}
+
+/* ---------------- 极光 Aurora ---------------- */
+[data-theme="aurora"] {
+  --bg: #080b16;
+  --bg-shell: #080b16;
+  --bg-deep: #05070f;
+  --bg-panel: #0d1220;
+  --bg-tab: #111827;
+  --bg-tab-hover: #16203a;
+  --bg-tab-active: #1b2745;
+  --bg-row: #111827;
+  --bg-row-hover: #16203a;
+  --bg-head: #0d1220;
+  --bg-input: #0f1626;
+  --bg-float: #0f1524;
+  --bg-code: #060911;
+
+  --border: rgba(150, 200, 255, 0.13);
+  --border-soft: rgba(150, 200, 255, 0.07);
+  --border-strong: rgba(150, 200, 255, 0.22);
+
+  --text: #e6edfa;
+  --text-main: #e6edfa;
+  --text-dim: #8f9cb8;
+  --text-faint: #5f6a80;
+
+  --accent: #4fd6c8;
+  --accent-soft: #93ece1;
+  --accent-ink: #04201d;
+  --accent-04: rgba(79, 214, 200, 0.04);
+  --accent-06: rgba(79, 214, 200, 0.06);
+  --accent-10: rgba(79, 214, 200, 0.1);
+  --accent-14: rgba(79, 214, 200, 0.14);
+  --accent-18: rgba(79, 214, 200, 0.18);
+  --accent-24: rgba(79, 214, 200, 0.24);
+  --accent-40: rgba(79, 214, 200, 0.4);
+  --accent-55: rgba(79, 214, 200, 0.55);
+  --accent-glow: rgba(79, 214, 200, 0.18);
+
+  --ok: #4ade80;
+  --ok-soft: #86efac;
+  --warn: #f0b429;
+  --warn-soft: #fcd34d;
+  --danger: #f0616d;
+  --danger-soft: #fca5a5;
+  --danger-14: rgba(240, 97, 109, 0.14);
+  --ok-14: rgba(74, 222, 128, 0.14);
+  --warn-14: rgba(240, 180, 41, 0.14);
+  --on-accent: #04201d;
+
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+
+  --tb-bg: #070a13;
+  --tb-card: #0e1424;
+  --tb-chip: #17203a;
+}
+
+/* ---------------- 素纸 Paper（浅色）---------------- */
+[data-theme="paper"] {
+  --bg: #f5f1e8;
+  --bg-shell: #f5f1e8;
+  --bg-deep: #ebe5d8;
+  --bg-panel: #faf7f1;
+  --bg-tab: #efe9dd;
+  --bg-tab-hover: #e8e1d3;
+  --bg-tab-active: #fdfbf7;
+  --bg-row: #faf7f1;
+  --bg-row-hover: #f1ece1;
+  --bg-head: #faf7f1;
+  --bg-input: #fdfbf7;
+  --bg-float: #fdfbf7;
+  --bg-code: #f0ebe0;
+
+  --border: rgba(58, 48, 34, 0.16);
+  --border-soft: rgba(58, 48, 34, 0.09);
+  --border-strong: rgba(58, 48, 34, 0.28);
+
+  --text: #241f18;
+  --text-main: #241f18;
+  --text-dim: #6d6558;
+  --text-faint: #98907f;
+
+  --accent: #9a6b1f;
+  --accent-soft: #7d5514;
+  --accent-ink: #fdfbf7;
+  --accent-04: rgba(154, 107, 31, 0.04);
+  --accent-06: rgba(154, 107, 31, 0.07);
+  --accent-10: rgba(154, 107, 31, 0.1);
+  --accent-14: rgba(154, 107, 31, 0.14);
+  --accent-18: rgba(154, 107, 31, 0.18);
+  --accent-24: rgba(154, 107, 31, 0.24);
+  --accent-40: rgba(154, 107, 31, 0.42);
+  --accent-55: rgba(154, 107, 31, 0.55);
+  --accent-glow: rgba(154, 107, 31, 0.16);
+
+  --ok: #2f7d63;
+  --ok-soft: #256b54;
+  --warn: #a9761a;
+  --warn-soft: #8a6013;
+  --danger: #b3413f;
+  --danger-soft: #94312f;
+  --danger-14: rgba(179, 65, 63, 0.12);
+  --ok-14: rgba(47, 125, 99, 0.12);
+  --warn-14: rgba(169, 118, 26, 0.12);
+  --on-accent: #fdfbf7;
+
+  --shadow-1: 0 1px 2px rgba(58, 48, 34, 0.1);
+  --shadow-2: 0 14px 34px rgba(58, 48, 34, 0.16);
+  --ring-danger: 0 0 0 3px rgba(179, 65, 63, 0.14);
+
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+
+  --tb-bg: #f0ebe0;
+  --tb-card: #faf7f1;
+  --tb-chip: #e8e1d3;
+}
+
+/* ---------------- 静谧 Quiet（单色 + 一丝青）---------------- */
+[data-theme="quiet"] {
+  --bg: #17181a;
+  --bg-shell: #17181a;
+  --bg-deep: #121315;
+  --bg-panel: #1c1d20;
+  --bg-tab: #202124;
+  --bg-tab-hover: #26272b;
+  --bg-tab-active: #2b2d31;
+  --bg-row: #202124;
+  --bg-row-hover: #26272b;
+  --bg-head: #1c1d20;
+  --bg-input: #1e1f22;
+  --bg-float: #1e1f22;
+  --bg-code: #131416;
+
+  --border: rgba(255, 255, 255, 0.1);
+  --border-soft: rgba(255, 255, 255, 0.055);
+  --border-strong: rgba(255, 255, 255, 0.18);
+
+  --text: #e4e5e7;
+  --text-main: #e4e5e7;
+  --text-dim: #8e9095;
+  --text-faint: #65676b;
+
+  --accent: #6fb3c0;
+  --accent-soft: #9ad4de;
+  --accent-ink: #0d1a1d;
+  --accent-04: rgba(111, 179, 192, 0.04);
+  --accent-06: rgba(111, 179, 192, 0.06);
+  --accent-10: rgba(111, 179, 192, 0.1);
+  --accent-14: rgba(111, 179, 192, 0.14);
+  --accent-18: rgba(111, 179, 192, 0.18);
+  --accent-24: rgba(111, 179, 192, 0.24);
+  --accent-40: rgba(111, 179, 192, 0.4);
+  --accent-55: rgba(111, 179, 192, 0.55);
+  --accent-glow: rgba(111, 179, 192, 0.16);
+
+  --ok: #6fae8f;
+  --ok-soft: #9ccdb4;
+  --warn: #c0a468;
+  --warn-soft: #dcc48f;
+  --danger: #b96b6b;
+  --danger-soft: #d99a9a;
+  --danger-14: rgba(185, 107, 107, 0.14);
+  --ok-14: rgba(111, 174, 143, 0.14);
+  --warn-14: rgba(192, 164, 104, 0.14);
+  --on-accent: #101c1e;
+
+  --tb-bg: #141517;
+  --tb-card: #1e1f22;
+  --tb-chip: #2a2c30;
+}
+
+/* ==================================================================
+   二、外壳：标签栏 + 工具栏
+   ================================================================== */
+
+html,
+body {
+  background: var(--bg-shell);
+  color: var(--text-main);
+  /* 中文优先，等宽留给代码；西文用 Inter 若有则生效 */
+  font-family: "Microsoft YaHei UI", "PingFang SC", "Segoe UI", system-ui, "Noto Sans SC", sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 外壳底色：垂直方向的极淡渐变 + 噪点，替代纯平色块 */
+.shell {
+  position: relative;
+  background-image: linear-gradient(180deg, var(--accent-04) 0%, transparent 62%), var(--grain);
+  background-color: var(--bg-shell);
+  border-bottom: 1px solid var(--border-soft);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25), var(--shadow-1);
+}
+
+/* 顶栏底部的一条"墨线"：靠左侧 1/3 渐隐，是整套 UI 的签名 */
+.shell::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    var(--accent) 0%,
+    var(--accent-40) 22%,
+    var(--border-soft) 55%,
+    transparent 100%
+  );
+  opacity: 0.85;
+}
+
+/* ---------------- 标签栏 ---------------- */
+.tabbar {
+  background: transparent;
+}
+
+.tab {
+  position: relative;
+  height: 30px;
+  border-radius: var(--r-md);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  letter-spacing: 0.1px;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.tab:hover {
+  background: var(--bg-tab);
+  border-color: var(--border-soft);
+  color: var(--text-main);
+}
+
+/* 激活标签：浅色胶囊 + 金色顶线，不再是描边方框 */
+.tab.active {
+  background: var(--bg-tab-active);
+  border-color: var(--border-soft);
+  color: var(--text-main);
+  box-shadow: var(--shadow-1);
+}
+
+.tab.active::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 22px;
+  height: 2px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+}
+
+.tab-title {
+  font-size: 12px;
+}
+
+.tab-close {
+  border-radius: var(--r-sm);
+  color: var(--text-faint);
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.tab-close:hover {
+  background: var(--danger-14);
+  color: var(--danger-soft);
+}
+
+/* 加载指示：由实心圆点改为金色细环 */
+.tab-spinner {
+  width: 11px;
+  height: 11px;
+  background: transparent;
+  border: 1.5px solid var(--accent-24);
+  border-top-color: var(--accent);
+  animation: nyx-spin 0.75s linear infinite;
+}
+
+@keyframes nyx-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------------- 工具栏 ---------------- */
+.toolbar {
+  background: transparent;
+}
+
+.icon-btn {
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-dim);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--accent-06);
+  border-color: var(--border);
+  color: var(--accent-soft);
+}
+
+.icon-btn:active:not(:disabled) {
+  background: var(--accent-10);
+}
+
+.icon-btn:disabled {
+  opacity: 0.28;
+}
+
+/* 地址栏：唯一"有重量"的控件 —— 内凹底 + 聚焦时金环 */
+.address {
+  height: 34px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-lg);
+  background: var(--bg-input);
+  color: var(--text-main);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.22);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.address::placeholder {
+  color: var(--text-faint);
+}
+
+.address:hover {
+  border-color: var(--border);
+}
+
+.address:focus {
+  border-color: var(--accent-55);
+  background: var(--bg-float);
+  box-shadow: var(--ring), inset 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+/* ---------------- 链路徽标 / 模式开关 ---------------- */
+.link-badge {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-pill);
+  background: var(--bg-tab);
+  color: var(--text-dim);
+  letter-spacing: 0.3px;
+}
+
+.link-badge.link-proxy {
+  border-color: var(--accent-40);
+  background: var(--accent-10);
+  color: var(--accent-soft);
+}
+
+.mode-group {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-pill);
+  background: var(--bg-tab);
+}
+
+.mode-switch {
+  background: var(--border-strong);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.mode-switch .knob {
+  background: var(--text-dim);
+  box-shadow: var(--shadow-1);
+}
+
+.mode-switch[aria-checked="true"] {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.mode-switch[aria-checked="true"] .knob {
+  background: var(--on-accent);
+}
+
+body.private-mode .shell {
+  /* 隐私模式：边框转为金色 + 顶部一层极淡金色洗色，作为"已上锁"的整体信号 */
+  border-bottom-color: var(--accent-40);
+  background-image: linear-gradient(180deg, var(--accent-10) 0%, transparent 70%), var(--grain);
+}
+
+/* ---------------- 提示（toast） ---------------- */
+.notice {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-lg);
+  background: var(--bg-float);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(6px);
+}
+
+.notice-error {
+  border-color: var(--border);
+  border-left-color: var(--danger);
+  background: var(--bg-float);
+}
+
+.notice-warn {
+  border-color: var(--border);
+  border-left-color: var(--warn);
+  background: var(--bg-float);
+}
+
+.notice-title {
+  letter-spacing: 0.2px;
+}
+
+.notice-error .notice-title {
+  color: var(--danger-soft);
+}
+
+.notice-warn .notice-title {
+  color: var(--warn-soft);
+}
+
+/* ==================================================================
+   三、工具箱：统一到同一套令牌
+   ================================================================== */
+
+.toolbox {
+  background: var(--tb-bg);
+  background-image: var(--grain);
+  border-left: 1px solid var(--border);
+  box-shadow: -18px 0 40px rgba(0, 0, 0, 0.35);
+}
+
+.tb-head {
+  border-bottom: 1px solid var(--border-soft);
+  background: linear-gradient(180deg, var(--accent-04), transparent);
+}
+
+/* 标题走衬线，与"墨"的隐喻一致 */
+.tb-title {
+  font-family: "Songti SC", "Source Han Serif SC", "Noto Serif SC", Georgia, "SimSun", serif;
+  font-size: 13px;
+  letter-spacing: 3px;
+  color: var(--accent-soft);
+}
+
+/* 页签组：胶囊底座 + 金色滑块 */
+.tb-nav {
+  background: var(--bg-deep);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-pill);
+  padding: 3px;
+}
+
+.tb-nav-btn {
+  border-radius: var(--r-pill);
+  color: var(--text-dim);
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.tb-nav-btn:hover {
+  color: var(--text-main);
+}
+
+.tb-nav-btn.is-on {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.tb-group {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-lg);
+  background: var(--tb-card);
+  background-image: linear-gradient(180deg, var(--accent-04), transparent 40%);
+}
+
+.tb-group-title {
+  color: var(--accent-soft);
+  letter-spacing: 1.4px;
+  font-weight: 600;
+}
+
+.tb-btn {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-tab);
+  color: var(--text-main);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.tb-btn:hover:not(:disabled) {
+  background: var(--accent-06);
+  border-color: var(--accent-40);
+  color: var(--accent-soft);
+}
+
+.tb-btn-primary {
+  border-color: var(--accent-40);
+  background: var(--accent-10);
+  color: var(--accent-soft);
+}
+
+.tb-btn-primary:hover:not(:disabled) {
+  background: var(--accent-18);
+  border-color: var(--accent-55);
+  color: var(--accent);
+}
+
+.tb-btn-danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger-soft);
+}
+
+.tb-input,
+.tb-select {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm);
+  background: var(--bg-input);
+  color: var(--text-main);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.tb-input:focus,
+.tb-select:focus {
+  border-color: var(--accent-55);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.tb-check input {
+  accent-color: var(--accent);
+}
+
+/* 筛选胶囊（真实类名 .tb-chip，计数在 .tb-chip-count） */
+.tb-chip {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-pill);
+  background: var(--tb-chip);
+  color: var(--text-dim);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.tb-chip:hover {
+  border-color: var(--border);
+  background: var(--bg-tab-hover);
+  color: var(--text-main);
+}
+
+.tb-chip.is-on {
+  border-color: var(--accent-40);
+  background: var(--accent-14);
+  color: var(--accent-soft);
+  font-weight: 600;
+}
+
+.tb-chip-count {
+  color: inherit;
+}
+
+/* 资源条目：列表项本身是卡片，靠"左金线 + 淡金底"表达命中/选中 */
+.tb-item {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  background: var(--tb-card);
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.tb-item:hover {
+  border-color: var(--border);
+  background: var(--bg-tab-hover);
+}
+
+.tb-item.is-hit {
+  border-color: var(--accent-40);
+  background: var(--accent-06);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.tb-item-name {
+  color: var(--text-main);
+}
+
+.tb-item-sub {
+  color: var(--text-faint);
+}
+
+/* 抓包行（真实类名 .tb-net） */
+.tb-net {
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: var(--tb-card);
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+
+.tb-net:hover {
+  border-color: var(--border);
+  background: var(--bg-tab-hover);
+}
+
+.tb-net.is-open {
+  border-color: var(--accent-40);
+  background: var(--accent-10);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.tb-net-host,
+.tb-net-size,
+.tb-net-type {
+  color: var(--text-faint);
+}
+
+/* 状态码配色 */
+.tb-net-status.st-ok {
+  color: var(--ok-soft);
+}
+
+.tb-net-status.st-redirect {
+  color: var(--warn-soft);
+}
+
+.tb-net-status.st-bad {
+  color: var(--danger-soft);
+}
+
+/* 类型标签：统一改为"低饱和同族色"，不再七种颜色抢戏。
+   注意：真实样式里 .tb-kind-* 与 .tb-item-kind 同权重，本文件后加载即可覆盖。 */
+.tb-item-kind,
+.tb-kind-video,
+.tb-kind-audio,
+.tb-kind-image,
+.tb-kind-hls,
+.tb-kind-dash,
+.tb-kind-doc,
+.tb-kind-font {
+  border: none;
+  background: var(--accent-10);
+  color: var(--text-dim);
+}
+
+/* 只保留一处区分度：图片与文档用金色，便于在长列表里扫读 */
+.tb-kind-image,
+.tb-kind-doc {
+  background: var(--accent-14);
+  color: var(--accent-soft);
+}
+
+.tb-drawer {
+  border-left: 1px solid var(--border);
+  background: var(--tb-bg);
+  box-shadow: -18px 0 40px rgba(0, 0, 0, 0.4);
+}
+
+.tb-kv-key {
+  color: var(--text-faint);
+}
+
+.tb-toast {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-float);
+  box-shadow: var(--shadow-2);
+}
+
+/* 滚动条：极细，悬停才明显 */
+.tb-pane::-webkit-scrollbar-thumb,
+.tb-list::-webkit-scrollbar-thumb,
+.tb-drawer-body::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--r-pill);
+}
+
+.tb-pane::-webkit-scrollbar-thumb:hover,
+.tb-list::-webkit-scrollbar-thumb:hover,
+.tb-drawer-body::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-40);
+}
+
+/* ==================================================================
+   四、设置中心 / 代理中心：把硬编码的紫色换成金色令牌
+   ================================================================== */
+
+/* 导航项：激活态改为"金色竖线 + 低饱和底"，比整块高亮更克制 */
+.nav-item {
+  position: relative;
+  border-radius: var(--r-md);
+  color: var(--text-dim);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.nav-item:hover {
+  background: var(--bg-row-hover);
+  color: var(--text-main);
+}
+
+.nav-item.active {
+  background: var(--accent-10);
+  border-color: transparent;
+  color: var(--accent-soft);
+  font-weight: 600;
+}
+
+.nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 16px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+}
+
+.settings-nav {
+  background: var(--bg-panel);
+  background-image: var(--grain);
+  border-right: 1px solid var(--border-soft);
+}
+
+.settings-brand h1,
+.sec-head h2 {
+  font-family: "Songti SC", "Source Han Serif SC", "Noto Serif SC", Georgia, "SimSun", serif;
+  letter-spacing: 1.6px;
+  font-weight: 600;
+}
+
+.settings-brand {
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.sec-head {
+  border-bottom: 1px solid var(--border-soft);
+  background: linear-gradient(180deg, var(--accent-04), transparent);
+}
+
+.sec-head p {
+  color: var(--text-dim);
+}
+
+/* 卡片与行 */
+.info-card,
+.set-row {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-lg);
+  background: var(--bg-row);
+}
+
+.info-card {
+  overflow: hidden;
+}
+
+.set-row:hover {
+  border-color: var(--border);
+  background: var(--bg-row-hover);
+}
+
+.info-head {
+  border-bottom: 1px solid var(--border-soft);
+  background: linear-gradient(180deg, var(--accent-04), transparent);
+}
+
+.info-head h3,
+.set-row-title {
+  letter-spacing: 0.15px;
+}
+
+.hint {
+  color: var(--text-faint);
+}
+
+/* 徽标：pill + 语义底色 */
+.badge {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-pill);
+  background: var(--bg-tab);
+  color: var(--text-dim);
+  letter-spacing: 0.3px;
+}
+
+.badge.ok,
+.badge.is-ok {
+  border-color: var(--accent-40);
+  background: var(--accent-10);
+  color: var(--accent-soft);
+}
+
+.badge.warn,
+.badge.is-warn {
+  border-color: rgba(212, 162, 74, 0.42);
+  background: var(--warn-14);
+  color: var(--warn-soft);
+}
+
+.badge.bad,
+.badge.is-bad {
+  border-color: rgba(192, 90, 90, 0.42);
+  background: var(--danger-14);
+  color: var(--danger-soft);
+}
+
+/* 按钮 */
+.btn {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-tab);
+  color: var(--text-main);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--accent-06);
+  border-color: var(--accent-40);
+  color: var(--accent-soft);
+}
+
+.btn-primary {
+  border-color: var(--accent-55);
+  background: var(--accent-14);
+  color: var(--accent-soft);
+  font-weight: 600;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-24);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.btn-danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger-soft);
+  box-shadow: var(--ring-danger);
+}
+
+.btn:disabled {
+  opacity: 0.36;
+}
+
+/* 输入类：与地址栏同一套语言 */
+.text-input,
+select,
+textarea {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  background: var(--bg-input);
+  color: var(--text-main);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.text-input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent-55);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+  outline: none;
+}
+
+/* 开关：金色滑轨 */
+.set-switch input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+/* ---------------- 代理中心专用：清扫残留的硬编码紫 ---------------- */
+/* 以下规则对应 proxy-center.css 里直接写死的 #8b5cf6 / rgba(139,92,246,…)，
+   不改结构、只换色，因此可以安全地整份后置覆盖。 */
+
+/* 状态灯：改为"实心点 + 同色柔光晕"，比纯色块更有呼吸感 */
+.pc-dot,
+.status-dot {
+  box-shadow: 0 0 0 3px var(--accent-10);
+}
+
+.status-dot.ok,
+.pc-dot.ok {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px var(--ok-14);
+}
+
+.status-dot.warn,
+.pc-dot.warn {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px var(--warn-14);
+}
+
+.status-dot.bad,
+.pc-dot.bad {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-14);
+}
+
+/* 主按钮：改用金底墨字，避免亮紫配白字在深底上过曝 */
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+/* 危险按钮 */
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger-14);
+  border-color: var(--danger);
+  color: var(--danger-soft);
+}
+
+/* 列表行的"当前/选中"高亮 */
+.list-row.is-on,
+.node-row.is-on,
+.sub-row.is-on {
+  border-color: var(--accent-40);
+  background: var(--accent-10);
+}
+
+/* 分节虚线分隔 */
+hr,
+.sep {
+  border-color: var(--border-soft);
+}
+
+/* 表格细线 */
+.proxy-table th,
+.proxy-table td,
+table th,
+table td {
+  border-color: var(--border-soft);
+}
+
+/* 滚动条统一 */
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--r-pill);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-40);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 日志 / 代码视图（proxy-center.css 里写死 #0c0e12 + #9aa3b5） */
+.log-box,
+.log-view,
+.console,
+pre {
+  background: var(--bg-code);
+  color: var(--text-dim);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm);
+}
+
+/* 分区内的次要说明文字 */
+.meta-k,
+.stat-k,
+.field-label {
+  color: var(--text-faint);
+}
+
+/* 分区状态点（代理中心） */
+.badge-dot,
+.dot {
+  border-radius: 50%;
+}
+
+.dot.ok,
+.status-ok {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px var(--ok-14);
+}
+
+.dot.warn,
+.status-warn {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px var(--warn-14);
+}
+
+.dot.bad,
+.status-bad {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-14);
+}
+
+/* 代理中心表格：表头略深 + 首行金色描边，数据区靠斑马纹分层 */
+.proxy-table th,
+table th {
+  background: var(--bg-head);
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border-soft);
+  letter-spacing: 0.4px;
+  font-weight: 600;
+}
+
+.proxy-table td,
+table td {
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.proxy-table tbody tr:hover,
+table tbody tr:hover {
+  background: var(--bg-row-hover);
+}
+
+/* 代码 / 日志块 */
+pre,
+code,
+.log-view,
+.mono {
+  background: var(--bg-code);
+  color: var(--text-dim);
+  border-radius: var(--r-sm);
+  font-family: "Cascadia Mono", "JetBrains Mono", Consolas, "Courier New", monospace;
+}
+
+/* ==================================================================
+   五、动效与可访问性
+   ================================================================== */
+
+/* 尊重系统"减少动态效果"设置 */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* 浅色主题下取消内凹阴影，避免"脏" */
+[data-theme="paper"] .address,
+[data-theme="paper"] .mode-switch {
+  box-shadow: none;
+}
+
+[data-theme="paper"] .toolbox,
+[data-theme="paper"] .tb-drawer {
+  box-shadow: -14px 0 30px rgba(58, 48, 34, 0.1);
+}
+
+/* 焦点可见性：键盘用户必须看得到落点（原先完全被 outline:none 抹掉） */
+:focus-visible {
+  outline: 2px solid var(--accent-55);
+  outline-offset: 1px;
+}

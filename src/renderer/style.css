@@ -1,0 +1,1952 @@
+/* Nyx 渲染层样式：极简深色 UI 外壳，总高度固定 124px（与主进程 UI_HEIGHT 保持一致；1.2.4 新增书签栏 +32px） */
+
+:root {
+  --height-shell: 124px;
+  --height-tabbar: 40px;
+  --height-toolbar: 52px;
+  --height-bookmark-bar: 32px;
+
+  --bg-shell: #0f1115;
+  --bg-tab: #1a1d24;
+  --bg-tab-active: #262b35;
+  --bg-input: #1b1f27;
+  --border: #2c313c;
+
+  --text-main: #e6e8ee;
+  --text-dim: #8b93a5;
+
+  --accent: #8b5cf6;
+  --accent-soft: #a78bfa;
+  --danger: #ef4444;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg-shell);
+  color: var(--text-main);
+  font-family: "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* 外壳固定高度，其余区域留给标签视图 */
+.shell {
+  height: var(--height-shell);
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-shell);
+}
+
+/* ---------------- 标签栏 ---------------- */
+.tabbar {
+  height: var(--height-tabbar);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  background: var(--bg-shell);
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  max-width: 200px;
+  height: 28px;
+  padding: 0 6px 0 10px;
+  border-radius: 8px;
+  background: var(--bg-tab);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.tab:hover {
+  background: var(--bg-tab-active);
+  color: var(--text-main);
+}
+
+.tab.active {
+  background: var(--bg-tab-active);
+  color: var(--text-main);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.tab-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+
+.tab-spinner {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  flex: 0 0 auto;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.tab-close {
+  width: 18px;
+  height: 18px;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 5px;
+  color: inherit;
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+.tab-close:hover {
+  background: rgba(239, 68, 68, 0.22);
+  color: #ffe4e6;
+}
+
+/* ---------------- 工具栏 ---------------- */
+.toolbar {
+  height: var(--height-toolbar);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  background: var(--bg-shell);
+}
+
+.nav-group {
+  display: flex;
+  gap: 4px;
+}
+
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-tab);
+  color: var(--text-main);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--bg-tab-active);
+  border-color: var(--accent);
+}
+
+.icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* ---------------- 工具栏书签星标（v1.4.0） ----------------
+   地址栏与工具箱按钮之间的 ☆/★。
+   每条规则都要求元素同时带 .icon-btn 与 .bm-star 两个类，因此不会外溢到
+   其它图标按钮；只改颜色/背景/透明度/transform，不碰 backdrop-filter，
+   也不加 position / z-index，玻璃霓虹层的模糊与辉光可原样叠加。
+   动效节奏沿用 .icon-btn 的 0.12s 与玻璃层的 --fx-dur，不重写 transition。 */
+.icon-btn.bm-star {
+  flex: 0 0 auto; /* 地址栏 flex:1 展开时不被挤扁 */
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px; /* 比常规 14px 图标略大，保证星形的视觉重量 */
+  line-height: 1;
+  color: var(--text-dim);
+}
+
+/* 未收藏：hover 提亮字色，并给一层极淡的强调底色（描边沿用主题层的 --border，不抢戏） */
+.icon-btn.bm-star:hover:not(:disabled):not(.is-on):not(.is-pressed) {
+  color: var(--text-main);
+  background: var(--accent-06);
+}
+
+/* 已收藏：强调色字 + 很淡的强调底；描边沿用既有 .icon-btn.is-on 的 --accent 实边 */
+.icon-btn.bm-star.is-on {
+  color: var(--accent);
+  background: var(--accent-14);
+}
+
+/* 已收藏时再 hover：底色加深一档，避免与未收藏态混淆 */
+.icon-btn.bm-star.is-on:hover:not(:disabled):not(.is-pressed) {
+  background: var(--accent-24);
+}
+
+/* 按下轻微回弹；玻璃层的 :active 是 scale(0.95)，这里收到 0.96 */
+.icon-btn.bm-star:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+/* 长按（v1.5.0）：长按期间由 JS 加 .is-pressed、松手或超时移除。
+   只是观感反馈 —— 星形 ★/☆ 文案由 JS 控制，这里不写 content；
+   写在本段最后并排除 :disabled，确保压过上面的 hover / .is-on / :active 取值。 */
+.icon-btn.bm-star.is-pressed:not(:disabled) {
+  background: var(--accent-14);
+  color: var(--accent);
+  transform: scale(0.94);
+  transition: transform 0.1s ease;
+}
+
+/* 不可用（无活动页 / 内部页）：降到 --text-faint 并固定光标，hover 不响应。
+   这里显式 opacity:1 —— 沿用 .icon-btn:disabled 的 0.35 会让淡色星形糊成一团。 */
+.icon-btn.bm-star:disabled {
+  color: var(--text-faint);
+  opacity: 1;
+  cursor: default;
+}
+
+/* 键盘焦点：主题层的 outline 保留，再用 --ring 令牌补一圈软环（与 .address:focus 同一套令牌） */
+.icon-btn.bm-star:focus-visible {
+  box-shadow: var(--ring);
+}
+
+/* 降低动效偏好：把玻璃层的上浮与缩放一起关掉（长按的 scale 同样取消） */
+@media (prefers-reduced-motion: reduce) {
+  .icon-btn.bm-star,
+  .icon-btn.bm-star:hover:not(:disabled),
+  .icon-btn.bm-star:active:not(:disabled),
+  .icon-btn.bm-star.is-pressed:not(:disabled) {
+    transform: none;
+    transition: none;
+  }
+}
+
+.new-tab {
+  flex: 0 0 auto;
+}
+
+/* 代理中心入口：文字按钮，独立窗口不占标签额度 */
+.proxy-entry {
+  width: auto;
+  padding: 0 10px;
+  font-size: 12px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.address {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-input);
+  color: var(--text-main);
+  font-size: 13px;
+  outline: none;
+  user-select: text;
+}
+
+.address:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.18);
+}
+
+/* ---------------- 模式开关 ---------------- */
+.mode-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 3px 8px 3px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-tab);
+}
+
+.mode-label {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* 出站链路指示：普通模式下代理不可用时显示"直连"，隐私模式恒为"代理" */
+.link-badge {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-tab);
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.link-badge.link-proxy {
+  border-color: var(--accent);
+  color: var(--accent-soft);
+}
+
+.mode-switch {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  border: none;
+  border-radius: 11px;
+  background: #414858;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s ease;
+}
+
+.mode-switch .knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #e6e8ee;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.mode-switch[aria-checked="true"] {
+  background: var(--accent);
+}
+
+.mode-switch[aria-checked="true"] .knob {
+  transform: translateX(18px);
+  background: #fff;
+}
+
+/* 隐私模式下的整体提示色 */
+body.private-mode .mode-label {
+  color: var(--accent-soft);
+  font-weight: 600;
+}
+
+body.private-mode .shell {
+  border-bottom-color: var(--accent);
+}
+
+/* ---------------- 用户提示（toast） ----------------
+   注意：标签内容由 WebContentsView 覆盖在 124px 外壳之下，
+   提示必须落在顶部外壳区域内，否则会被标签视图遮挡。 */
+.notice {
+  position: fixed;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  max-width: 640px;
+  padding: 7px 10px 8px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #1a1d24;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+}
+
+.notice-error {
+  border-color: var(--danger);
+  background: #2a1718;
+}
+
+.notice-warn {
+  border-color: #f59e0b;
+  background: #2a2216;
+}
+
+.notice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.notice-title {
+  font-size: 12px;
+  color: var(--text-main);
+}
+
+.notice-error .notice-title {
+  color: #fca5a5;
+}
+
+.notice-warn .notice-title {
+  color: #fcd34d;
+}
+
+.notice-close {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.notice-close:hover {
+  color: var(--text-main);
+}
+
+.notice-body {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  user-select: text;
+}
+
+/* 顶栏元素显隐（由设置中心「外观」控制） */
+.shell .hidden {
+  display: none !important;
+}
+
+/* ---------------- 书签栏（1.2.4：地址栏下方常驻一行，仿 Edge 书签栏） ----------------
+   书签平铺为文本按钮，文件夹为「标题 + ▾」按钮，点击弹出独立浮层窗口；
+   「管理」按钮固定最右侧，不随书签横向滚动。
+   配色全部走现有主题变量，深色 / 浅色主题自动跟随；隐私模式下同样常驻显示。 */
+.bookmark-bar {
+  height: var(--height-bookmark-bar);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
+  background: var(--bg-shell);
+  border-top: 1px solid var(--border);
+}
+
+/* 书签项滚动区：不换行、横向滚动，避免书签过多时撑破书签栏 */
+.bookmark-bar-items {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.bookmark-bar-items::-webkit-scrollbar {
+  height: 4px;
+}
+
+.bookmark-bar-items::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+
+.bookmark-bar-items::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.bm-item {
+  flex: 0 0 auto;
+  max-width: 180px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.bm-item:hover {
+  background: var(--bg-tab-active);
+  color: var(--text-main);
+  border-color: var(--border);
+}
+
+.bm-item:active {
+  transform: translateY(1px);
+}
+
+/* 文件夹按钮：与书签平铺同级，靠「标题 + ▾」区分 */
+.bm-folder {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+/* 「管理」按钮：固定在书签栏最右侧，不随书签横向滚动 */
+.bm-manage {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--text-main);
+  border-color: var(--border);
+}
+
+/* ==================================================================
+   工具箱抽屉
+   ------------------------------------------------------------------
+   面板本身属于 124px 外壳之外的浮层：主进程会同步把标签视图宽度收窄
+   （TabManager.setRightInset），因此面板区域不会被 WebContentsView 盖住。
+   宽度只由 --tb-width 一个变量决定，renderer.js 改它、主进程按它收窄。
+   ================================================================== */
+
+:root {
+  --tb-width: 460px;
+  --tb-bg: #111419;
+  --tb-card: #151922;
+  --tb-chip: #20242e;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.toolbox {
+  position: fixed;
+  top: var(--height-shell);
+  right: 0;
+  height: calc(100vh - var(--height-shell));
+  width: var(--tb-width);
+  display: flex;
+  flex-direction: column;
+  background: var(--tb-bg);
+  border-left: 1px solid var(--border);
+  z-index: 900;
+  overflow: hidden;
+}
+
+/* ---------------- 头部与页签 ---------------- */
+
+.tb-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tb-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+}
+
+.tb-nav {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-tab);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+}
+
+.tb-nav-btn {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.tb-nav-btn:hover {
+  color: var(--text-main);
+}
+
+.tb-nav-btn.is-on {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ---- 页签栏溢出横滑 ----
+   8 个页签在 460px 面板里放不下。这里不再压缩文字，改为「按钮保持自然宽度 +
+   容器横向滚动」：滚轮（纵向转横向）、键盘聚焦、切换页签都会把目标滚进视野。
+   两端渐隐提示由 toolbox-ui.js 维护的 data-fade 驱动，颜色全部从主题令牌派生，
+   因此素纸等浅色主题同样成立，不引入任何新色值。 */
+#tb-nav {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  /* 渐隐遮罩用的不透明色：由文字主色派生（遮罩只取 alpha，颜色本身不显示） */
+  --tb-fade-ink: color-mix(in srgb, var(--text-main) 100%, transparent);
+}
+
+#tb-nav .tb-nav-btn {
+  flex: 0 0 auto;
+  min-width: 44px;
+  padding: 0 9px;
+}
+
+/* 极细横向滚动条：3px，轨道透明，拇指由 --text-dim 派生 */
+#tb-nav::-webkit-scrollbar {
+  height: 3px;
+}
+
+#tb-nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#tb-nav::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-dim) 30%, transparent);
+  border-radius: 2px;
+}
+
+#tb-nav::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-dim) 48%, transparent);
+}
+
+/* 只在确实还能滚的方向上渐隐，避免没有溢出时两端无故发虚 */
+#tb-nav[data-fade='end'] {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    var(--tb-fade-ink) 0,
+    var(--tb-fade-ink) calc(100% - 18px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    var(--tb-fade-ink) 0,
+    var(--tb-fade-ink) calc(100% - 18px),
+    transparent 100%
+  );
+}
+
+#tb-nav[data-fade='start'] {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    var(--tb-fade-ink) 18px,
+    var(--tb-fade-ink) 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    var(--tb-fade-ink) 18px,
+    var(--tb-fade-ink) 100%
+  );
+}
+
+#tb-nav[data-fade='both'] {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    var(--tb-fade-ink) 18px,
+    var(--tb-fade-ink) calc(100% - 18px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    var(--tb-fade-ink) 18px,
+    var(--tb-fade-ink) calc(100% - 18px),
+    transparent 100%
+  );
+}
+
+/* 贴边页签会被渐隐区削掉一圈，焦点环内收一点保证完整可见 */
+#tb-nav .tb-nav-btn:focus-visible {
+  outline-offset: -1px;
+}
+
+.tb-head-btn {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+.icon-btn.is-on {
+  border-color: var(--accent);
+  color: var(--accent-soft);
+}
+
+/* ---------------- 页容器 ---------------- */
+
+.tb-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  overflow: hidden;
+}
+
+.tb-scroll {
+  overflow-y: auto;
+}
+
+.tb-pane::-webkit-scrollbar,
+.tb-list::-webkit-scrollbar,
+.tb-drawer-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.tb-pane::-webkit-scrollbar-thumb,
+.tb-list::-webkit-scrollbar-thumb,
+.tb-drawer-body::-webkit-scrollbar-thumb {
+  background: #2c313c;
+  border-radius: 4px;
+}
+
+.tb-pane::-webkit-scrollbar-thumb:hover,
+.tb-list::-webkit-scrollbar-thumb:hover,
+.tb-drawer-body::-webkit-scrollbar-thumb:hover {
+  background: #3a4150;
+}
+
+/* ---------------- 通用控件 ---------------- */
+
+.tb-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+
+.tb-btn {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-tab);
+  color: var(--text-main);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.tb-btn:hover:not(:disabled) {
+  background: var(--bg-tab-active);
+  border-color: var(--accent);
+}
+
+.tb-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.tb-btn-primary {
+  border-color: var(--accent);
+  color: #ddd6fe;
+}
+
+.tb-btn.is-on {
+  border-color: var(--accent);
+  color: var(--accent-soft);
+}
+
+.tb-btn-danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: #fca5a5;
+}
+
+.tb-input,
+.tb-select {
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text-main);
+  font-size: 12px;
+  outline: none;
+  user-select: text;
+  min-width: 0;
+}
+
+.tb-textarea {
+  min-height: 72px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text-main);
+  font-size: 12px;
+  line-height: 1.55;
+  outline: none;
+  resize: vertical;
+  user-select: text;
+  min-width: 0;
+  font-family: inherit;
+}
+
+.tb-textarea:focus {
+  border-color: var(--accent);
+}
+
+.tb-result {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+
+.tb-input:focus,
+.tb-select:focus {
+  border-color: var(--accent);
+}
+
+.tb-select {
+  cursor: pointer;
+  flex: 1;
+}
+
+.tb-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tb-check input {
+  accent-color: var(--accent);
+  margin: 0;
+  cursor: pointer;
+}
+
+.tb-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tb-field-label {
+  flex: 0 0 44px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.tb-group {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--tb-card);
+  flex: 0 0 auto;
+}
+
+.tb-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-soft);
+  letter-spacing: 0.4px;
+}
+
+.tb-note {
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-dim);
+  user-select: text;
+}
+
+.tb-meta {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.tb-kv {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 3px 8px;
+  font-size: 11px;
+  user-select: text;
+}
+
+.tb-kv-key {
+  color: var(--text-dim);
+}
+
+.tb-kv-val {
+  color: var(--text-main);
+  word-break: break-all;
+}
+
+/* 筛选胶囊 */
+.tb-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.tb-chip {
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--tb-chip);
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tb-chip:hover {
+  color: var(--text-main);
+}
+
+.tb-chip.is-on {
+  border-color: var(--accent);
+  background: rgba(139, 92, 246, 0.18);
+  color: var(--accent-soft);
+}
+
+.tb-chip-count {
+  opacity: 0.65;
+  margin-left: 3px;
+}
+
+/* 抓包「只看失败」独立开关（v1.8.0）：视觉与选中态完全复用 .tb-chip，
+   只靠左边距与类型胶囊区分 —— 它是开关，不与类型互斥。 */
+.tb-chip-toggle {
+  margin-left: 4px;
+}
+
+/* ---------------- 列表 ---------------- */
+
+.tb-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.tb-item {
+  display: flex;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--tb-card);
+  flex: 0 0 auto;
+}
+
+.tb-item:hover {
+  border-color: #3d4452;
+}
+
+.tb-item.is-hit {
+  border-color: var(--accent);
+}
+
+.tb-item-kind {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  font-size: 10px;
+  line-height: 16px;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: #2a2f3c;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.tb-kind-video { background: #3b2350; color: #d8b4fe; }
+.tb-kind-audio { background: #123a3a; color: #7dd3fc; }
+.tb-kind-image { background: #14331f; color: #86efac; }
+.tb-kind-hls   { background: #3a2a12; color: #fcd34d; }
+.tb-kind-dash  { background: #3a2a12; color: #fcd34d; }
+.tb-kind-doc   { background: #1e2a45; color: #93c5fd; }
+.tb-kind-font  { background: #2a2f3c; color: #cbd5e1; }
+
+.tb-item-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.tb-item-name {
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-all;
+  user-select: text;
+}
+
+.tb-item-sub {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-dim);
+  word-break: break-all;
+  user-select: text;
+}
+
+.tb-item-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.tb-mini {
+  height: 21px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tab);
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tb-mini:hover {
+  border-color: var(--accent);
+  color: var(--text-main);
+}
+
+/* ---------------- 历史 · 按站点视图（v1.6.0） ----------------
+   视图切换胶囊复用 .tb-chips / .tb-chip，这里只补聚合行与明细行。 */
+
+/* 聚合行：可点开 / 收起，图标 + 域名 + 次数/最近访问 + 折叠箭头 */
+.tb-site {
+  align-items: center;
+  cursor: pointer;
+}
+
+.tb-site:hover {
+  border-color: var(--border-strong);
+}
+
+.tb-site.is-open {
+  border-color: var(--accent-40);
+  background: var(--accent-06);
+}
+
+/* 站点图标：16×16 圆角块，真图标与首字母色块共用同一尺寸，
+   异步补图标时行内不会跳动（与地址栏建议同款观感）。 */
+.tb-site-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--text-main) 10%, transparent);
+}
+
+.tb-site-icon-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* 首字母色块：色相由域名哈希派生（--site-hue 由 JS 写入），
+   饱和度压低不抢主题色；这里的白字是彩色底上的中性对比色，
+   与 addr-suggest.css 的 .as-mono 完全一致，不属于主题色值。 */
+.tb-site-mono {
+  background: hsl(var(--site-hue, 210) 34% 36%);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+/* 折叠箭头：展开后转 90° 指下 */
+.tb-site-caret {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-faint);
+  transition: transform 0.12s ease, color 0.12s ease;
+}
+
+.tb-site.is-open .tb-site-caret {
+  transform: rotate(90deg);
+  color: var(--accent);
+}
+
+/* 展开后的明细：左侧细线表明从属关系，条目只读（复制用） */
+.tb-site-detail {
+  margin: -2px 0 0 25px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tb-site-url {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  font-size: 11px;
+  color: var(--text-dim);
+  user-select: text;
+}
+
+.tb-site-url-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tb-site-url-time {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* 明细超过 50 条时的说明 */
+.tb-site-more {
+  padding: 2px 6px;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+/* 历史 · 自定义时间段输入行（v1.8.0）：两个 date 输入 + 应用按钮，
+   输入框与按钮分别复用 .tb-input / .tb-btn，这里只调整成一行紧凑排布。 */
+.tb-date-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+/* [hidden] 必须显式压掉 display:flex，否则选中其它时间段时这行不会藏起来 */
+.tb-date-row[hidden] {
+  display: none;
+}
+
+.tb-date-row .tb-input {
+  flex: 1 1 120px;
+  min-width: 108px;
+  height: 26px;
+  padding: 0 7px;
+  font-size: 11px;
+}
+
+/* 原生日期控件跟随主题明暗，避免暗色主题里日历图标糊成一团 */
+.tb-date-row .tb-date {
+  color-scheme: dark;
+}
+
+[data-theme="paper"] .tb-date-row .tb-date {
+  color-scheme: light;
+}
+
+.tb-date-row .tb-date::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+}
+
+.tb-date-sep {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.tb-date-apply {
+  flex: 0 0 auto;
+  height: 26px;
+  padding: 0 10px;
+}
+
+/* 动效偏好：折叠箭头不做旋转动画 */
+@media (prefers-reduced-motion: reduce) {
+  .tb-site-caret {
+    transition: none;
+  }
+}
+
+/* 抓包行：单行紧凑布局 */
+.tb-net {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: var(--tb-card);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.tb-net:hover {
+  border-color: var(--accent);
+}
+
+/* 抓包行的站点图标（v1.7.0）：与历史聚合行共用 .tb-site-icon；
+   抓包行是按 baseline 排的两段文本，图标单独居中对齐才不偏上下。 */
+.tb-net .tb-site-icon {
+  align-self: center;
+}
+
+/* 慢请求标记（v1.11.0）：只看阈值，与「慢请求」开关是否打开无关；
+   开关只影响筛选，标记始终提示「这条很慢」。 */
+.tb-slow-tag {
+  flex: 0 0 auto;
+  align-self: center;
+  height: 15px;
+  padding: 0 5px;
+  border: 1px solid var(--danger-14);
+  border-radius: 4px;
+  background: var(--danger-14);
+  color: var(--danger-soft);
+  font-size: 10px;
+  line-height: 13px;
+}
+
+/* 抓包工具条第二行（v1.11.0）：排序切换 + 慢请求开关 + 阈值输入 */
+.tb-net-extra {
+  align-items: center;
+}
+
+.tb-slow-input {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 22px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.tb-net.is-open {
+  border-color: var(--accent);
+  background: #1d2130;
+}
+
+.tb-net-status {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-family: Consolas, monospace;
+  width: 30px;
+  text-align: right;
+}
+
+.tb-net-status.st-ok { color: #86efac; }
+.tb-net-status.st-redirect { color: #fcd34d; }
+.tb-net-status.st-bad { color: #fca5a5; }
+.tb-net-status.st-pending { color: var(--text-dim); }
+
+.tb-net-type {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-dim);
+  width: 42px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.tb-net-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.tb-net-url {
+  font-size: 11px;
+  font-family: Consolas, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: text;
+}
+
+.tb-net-host {
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tb-net-size {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: Consolas, monospace;
+}
+
+.tb-net-media {
+  color: #fcd34d;
+}
+
+/* ---------------- 抓包详情 · 耗时瀑布条（v1.9.0） ----------------
+   条形宽度按该请求自身的分段占比（--tb-seg-w 由 JS 写入），高度 6px、圆角；
+   两段颜色都从强调色令牌派生，四套主题自动跟随。 */
+.tb-timing {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-row);
+}
+
+.tb-timing-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 两段齐全时的图例：「等待 120 ms · 下载 340 ms」（v1.10.0） */
+.tb-timing-legend {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--text-faint);
+}
+
+/* 两段之和与 duration 有取整差异时的「≈」标记（hover 有说明） */
+.tb-timing-approx {
+  font-size: 10px;
+  color: var(--accent-soft);
+  cursor: help;
+}
+
+.tb-timing-bar {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--border-soft);
+}
+
+.tb-timing-seg {
+  display: block;
+  height: 100%;
+  width: var(--tb-seg-w, 100%);
+}
+
+/* 等待响应段：实心强调色 */
+.tb-timing-seg-wait {
+  background: var(--accent);
+}
+
+/* 内容下载段：强调色 40% 淡染，与等待段一眼可区分 */
+.tb-timing-seg-body {
+  background: var(--accent-40);
+}
+
+.tb-timing-total {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+}
+
+/* >10s 的「慢」标记：纯视觉标签，不参与任何数据计算 */
+.tb-timing-slow {
+  flex: 0 0 auto;
+  height: 15px;
+  padding: 0 5px;
+  border: 1px solid var(--danger-14);
+  border-radius: 4px;
+  background: var(--danger-14);
+  color: var(--danger-soft);
+  font-size: 10px;
+  line-height: 13px;
+}
+
+/* 无耗时（进行中 / 没有数据）：一行灰字，不画空条 */
+.tb-timing-unknown {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* ---------------- 抓包详情 · 多请求瀑布时间轴（v1.12.0） ----------------
+   每条请求一行；条的 left / width 由 JS 写入（--wf-left / --wf-w），
+   条内按 timing 拆两段（--wf-seg-w）；刻度位置用 --wf-tick。全部取主题令牌。 */
+.tb-wf {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  background: var(--bg-row);
+  font-size: 11px;
+  color: var(--text-main);
+}
+
+.tb-wf-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+/* 瀑布区类型筛选胶囊（v1.13.0）：复用 .tb-chips / .tb-chip，只补上下间距 */
+.tb-wf-types {
+  margin: 2px 0 4px;
+}
+
+/* 顶部刻度轴：5 个等距标签压在一条细线上 */
+.tb-wf-ticks {
+  position: relative;
+  height: 16px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.tb-wf-tick {
+  position: absolute;
+  top: 0;
+  left: var(--wf-tick, 0%);
+  transform: translateX(-50%);
+  font-size: 10px;
+  line-height: 12px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.tb-wf-tick.is-first {
+  transform: none;
+}
+
+.tb-wf-tick.is-last {
+  transform: translateX(-100%);
+}
+
+/* 行：短域名 + 状态码 / 轨道 / 耗时，整行可点 */
+.tb-wf-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 3px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.tb-wf-row:hover {
+  background: var(--accent-06);
+}
+
+.tb-wf-row.is-open {
+  background: var(--accent-10);
+}
+
+.tb-wf-label {
+  flex: 0 0 auto;
+  width: 116px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.tb-wf-track {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 40px;
+  height: 8px;
+  border-radius: 3px;
+  background: var(--border-soft);
+  overflow: hidden;
+}
+
+.tb-wf-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--wf-left, 0%);
+  width: var(--wf-w, 0%);
+  display: flex;
+  min-width: 1px;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.tb-wf-seg {
+  display: block;
+  height: 100%;
+  width: var(--wf-seg-w, 100%);
+}
+
+/* 等待段实心强调色、下载段淡染（与详情里的单条瀑布条同一套配色） */
+.tb-wf-seg-wait {
+  background: var(--accent);
+}
+
+.tb-wf-seg-body {
+  background: var(--accent-40);
+}
+
+/* 失败请求：整条转语义色 */
+.tb-wf-row.is-failed .tb-wf-seg-wait {
+  background: var(--danger);
+}
+
+.tb-wf-row.is-failed .tb-wf-seg-body {
+  background: color-mix(in srgb, var(--danger) 50%, transparent);
+}
+
+/* 进行中：整行半透明（条给最小可见宽度，耗时位显示 …） */
+.tb-wf-row.is-pending {
+  opacity: 0.6;
+}
+
+/* 条尾被时间轴截断的标记（放在条内，避免被轨道 overflow 裁掉） */
+.tb-wf-clip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  font-size: 9px;
+  color: var(--danger-soft);
+  pointer-events: none;
+}
+
+.tb-wf-dur {
+  flex: 0 0 auto;
+  width: 52px;
+  text-align: right;
+  font-size: 10px;
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------- 结果卡片（元素拾取等） ---------------- */
+
+.tb-card {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #10131a;
+  padding: 8px 9px;
+  font-size: 11px;
+  line-height: 1.6;
+  user-select: text;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.tb-card-row {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 2px 8px;
+}
+
+.tb-card-key {
+  color: var(--text-dim);
+}
+
+.tb-card-val {
+  color: var(--text-main);
+  word-break: break-all;
+  font-family: Consolas, monospace;
+}
+
+.tb-pre {
+  margin: 6px 0 0;
+  padding: 6px 7px;
+  border-radius: 6px;
+  background: #0a0c11;
+  border: 1px solid var(--border);
+  color: #cbd5e1;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 220px;
+  overflow: auto;
+  user-select: text;
+}
+
+/* ---------------- 详情浮层（覆盖在工具箱面板之上） ---------------- */
+
+.tb-drawer {
+  position: fixed;
+  top: var(--height-shell);
+  right: 0;
+  width: var(--tb-width);
+  height: calc(100vh - var(--height-shell));
+  display: flex;
+  flex-direction: column;
+  background: #0d1016;
+  border-left: 1px solid var(--border);
+  z-index: 960;
+}
+
+.tb-drawer-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tb-drawer-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: text;
+}
+
+.tb-drawer-nav {
+  margin: 8px 10px;
+  flex: 0 0 auto;
+}
+
+.tb-drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ---------------- 面板内提示 ---------------- */
+
+.tb-toast {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #1a1d24;
+  color: var(--text-main);
+  font-size: 11px;
+  line-height: 1.55;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
+  user-select: text;
+}
+
+.tb-toast.is-warn {
+  border-color: #f59e0b;
+  color: #fcd34d;
+}
+
+.tb-toast.is-err {
+  border-color: var(--danger);
+  color: #fca5a5;
+}
+
+.tb-empty {
+  padding: 18px 10px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.7;
+}
+
+
+
+/* ------------------------- 工具箱 · 视频增强 ------------------------- */
+
+#pane-video {
+  gap: 9px;
+}
+
+#pane-video .tb-group {
+  gap: 8px;
+}
+
+.tb-input-sm {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+
+.tb-note-warn {
+  padding: 7px 9px;
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.07);
+  color: #d8a1a1;
+}
+
+#video-info .tb-kv-val {
+  word-break: break-all;
+}
+
+#video-rates .tb-chip,
+#video-seeks .tb-chip {
+  font-variant-numeric: tabular-nums;
+}
+
+#mouse-info {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------- 书签管理（工具箱内树形列表） ---------------- */
+.bm-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px 0 2px;
+  border-radius: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bm-tree-row:hover {
+  background: var(--bg-row-hover, #1e1a18);
+}
+
+.bm-tree-row.is-checked {
+  background: rgba(139, 92, 246, 0.10);
+}
+
+.bm-tree-children {
+  margin-left: 16px;
+  border-left: 1px dashed var(--border, #2c313c);
+  padding-left: 4px;
+}
+
+.bm-cb {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent, #8b5cf6);
+  cursor: pointer;
+}
+
+.bm-arrow {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim, #8b93a5);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.bm-arrow:hover {
+  background: var(--bg-tab-active, #241f1c);
+  color: var(--text-main, #ece7df);
+}
+
+.bm-arrow-spacer {
+  flex: 0 0 auto;
+  width: 18px;
+}
+
+.bm-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bm-label-folder {
+  font-weight: 600;
+}
+
+.bm-label-url {
+  color: var(--text-dim, #8b93a5);
+}
+
+.bm-ops {
+  flex: 0 0 auto;
+  display: none;
+  gap: 2px;
+}
+
+.bm-tree-row:hover .bm-ops {
+  display: flex;
+}
+
+.bm-op {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim, #8b93a5);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.bm-op:hover {
+  background: var(--bg-tab-active, #241f1c);
+  color: var(--text-main, #ece7df);
+  border-color: var(--border, #2c313c);
+}
+
+.bm-empty {
+  padding: 40px 0;
+  color: var(--text-dim, #8b93a5);
+  text-align: center;
+}
+
+/* ---------------- 调试：控制台输出 ---------------- */
+.tb-console {
+  margin: 0;
+  padding: 8px 10px;
+  min-height: 60px;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border, #2c313c);
+  border-radius: 8px;
+  background: #0d0b0a;
+  color: #c8d3c0;
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+
+.tb-console .dbg-log { color: #c8d3c0; }
+.tb-console .dbg-warn { color: #e8c468; }
+.tb-console .dbg-error { color: #f08080; }
+.tb-console .dbg-result { color: #7fb3f5; }
+
+/* ---------------- Cookie 列表 ---------------- */
+.ck-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.ck-item:hover {
+  background: var(--bg-row-hover, #1e1a18);
+}
+
+.ck-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ck-name {
+  font-weight: 600;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ck-name .ck-domain {
+  color: var(--text-dim, #8b93a5);
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+.ck-sub {
+  color: var(--text-dim, #8b93a5);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ck-badges {
+  display: flex;
+  gap: 4px;
+}
+
+.ck-badge {
+  padding: 1px 5px;
+  border: 1px solid var(--border, #2c313c);
+  border-radius: 4px;
+  color: var(--text-dim, #8b93a5);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.ck-badge.is-secure {
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #4ade80;
+}
+
+.ck-badge.is-http {
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #f87171;
+}
+
+.ck-ops {
+  flex: 0 0 auto;
+  display: none;
+  gap: 4px;
+}
+
+.ck-item:hover .ck-ops {
+  display: flex;
+}

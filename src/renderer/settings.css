@@ -1,0 +1,809 @@
+/* Nyx 设置中心：左栏分区导航 + 右侧内容区
+   设计语言与代理中心共用（proxy-center.css 先加载，这里只做布局与补充组件） */
+
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ---------------- 外框：左导航 + 右内容 ---------------- */
+.settings-frame {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.settings-nav {
+  width: 208px;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 10px;
+  border-right: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.settings-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 6px 8px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.settings-brand h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.nav-item {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.nav-item:hover {
+  background: var(--bg-row-hover);
+  color: var(--text);
+}
+
+.nav-item.active {
+  background: rgba(139, 92, 246, 0.14);
+  border-color: rgba(139, 92, 246, 0.4);
+  color: var(--accent-soft);
+  font-weight: 600;
+}
+
+.nav-note {
+  padding: 6px 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border-soft);
+}
+
+/* ---------------- 内容区 ---------------- */
+.settings-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sec-panel {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sec-panel.active {
+  display: flex;
+}
+
+.sec-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sec-head {
+  flex: 0 0 auto;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.sec-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.sec-head p {
+  margin: 6px 0 0;
+  max-width: 760px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+/* 「网络与代理」分区内的 .layout 沿用 proxy-center.css 自带的内边距，无需重复覆盖 */
+
+/* ---------------- 设置行 / 卡片 ---------------- */
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-row);
+}
+
+.set-row + .set-row {
+  margin-top: 8px;
+}
+
+.set-row-main {
+  min-width: 0;
+}
+
+.set-row-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.set-row-desc {
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.set-row-ctl {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 开关（外观分区用，样式与代理中心的复选框开关一致） */
+.set-switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+
+.set-switch input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* 外观分区的下拉选择（主题切换）。
+   宽度写在样式里而不是内联 style —— 页面 CSP 的 style-src 'self' 会拦掉内联 style 属性 */
+.set-select {
+  width: 168px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-row, rgba(255, 255, 255, 0.03));
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.set-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.kernel-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+
+.kernel-bar .topbar-meta {
+  flex: 1 1 260px;
+}
+
+/* ---------------- 数据表（权限轨迹 / 密码库） ---------------- */
+.mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.mini-table th,
+.mini-table td {
+  padding: 7px 9px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-soft);
+  vertical-align: top;
+}
+
+.mini-table th {
+  color: var(--text-dim);
+  font-weight: 600;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.mini-table tbody tr:hover {
+  background: var(--bg-row-hover);
+}
+
+.mini-table td.mono {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.pill.ok {
+  border-color: rgba(52, 211, 153, 0.5);
+  color: var(--ok);
+}
+
+.pill.bad {
+  border-color: rgba(239, 68, 68, 0.5);
+  color: var(--danger-soft);
+}
+
+.pill.warn {
+  border-color: rgba(245, 158, 11, 0.5);
+  color: var(--warn);
+}
+
+.kv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px 16px;
+}
+
+.kv-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.kv-item .k {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.kv-item .v {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+
+.empty-note {
+  margin: 0;
+  padding: 10px 2px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.sec-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+/* 置顶导入 / 导出行（v1.15.0）：按钮与说明文字同一行时垂直居中，说明不挤压按钮 */
+#pinned-io-row {
+  align-items: center;
+}
+
+#pinned-io-row .hint {
+  margin: 0;
+}
+
+.about-body {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+/* ---------------- 内嵌「网络与代理」分区的适配 ---------------- */
+.kernel-bar {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.kernel-bar .brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kernel-bar .brand h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.kernel-bar .topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 更新提示是多行文案（版本 / 更新源 / 进度 / 更新说明），必须保留换行 */
+#update-hint {
+  white-space: pre-wrap;
+}
+
+/* 「关于与更新」的按钮组 */
+.update-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ---------------- 「启动与主页」输入控件 ---------------- */
+/* 配色变量来自 proxy-center.css（先于本文件加载），此处只补组件样式 */
+.field-row {
+  margin-top: 10px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* 纵向字段容器：标题在上、控件在下撑满（替代被 CSP 拦截的内联 style 布局） */
+.field-col {
+  flex: 1 1 0;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.field-col .text-input,
+.field-col .text-area {
+  width: 100%;
+  margin-top: 0;
+}
+
+.text-input,
+.text-area {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-row, rgba(255, 255, 255, 0.03));
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.text-input:focus,
+.text-area:focus {
+  outline: none;
+  border-color: rgba(139, 92, 246, 0.5);
+}
+
+.text-area {
+  resize: vertical;
+  min-height: 76px;
+}
+
+.radio-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.radio-opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+
+.radio-opt input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* ---------------- 扩展插件 ---------------- */
+
+.ext-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ext-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-row);
+}
+
+.ext-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ext-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ext-level {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+/* 支持度评级：高=可用，中=部分退化，低=装上也无实际作用 */
+.ext-level-high {
+  color: var(--ok);
+  border-color: rgba(52, 211, 153, 0.4);
+}
+
+.ext-level-medium {
+  color: var(--warn);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.ext-level-low {
+  color: var(--danger-soft);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.ext-state {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.ext-state.on {
+  color: var(--ok);
+}
+
+.ext-state.off {
+  color: var(--text-dim);
+}
+
+.ext-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.ext-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.ext-meta {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+
+.ext-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger-soft);
+}
+
+.ext-warn {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--warn);
+}
+
+/* ---------------- 硬件加速与 AI 能力 ---------------- */
+.hw-line {
+  margin: 2px 0 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-main);
+}
+
+.hw-ok {
+  color: #35b06e;
+}
+
+.hw-bad {
+  color: #c96a4a;
+}
+
+.hw-note {
+  margin: -6px 0 10px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+/* 下载设置：目录输入 + 按钮一行排布 */
+.download-dir-ctl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.download-dir-input {
+  flex: 1 1 220px;
+  min-width: 140px;
+  max-width: 300px;
+}
+
+.set-row-ctl.download-dir-ctl .btn-mini {
+  flex: 0 0 auto;
+}
+
+/* ---------------- 状态条强化（设置页覆盖）：提示更醒目 ---------------- */
+.settings-body .statusbar {
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--bg-row);
+  border-top: 1px solid var(--accent);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.settings-body .statusbar.error {
+  color: #fff;
+  background: var(--danger);
+}
+
+.settings-body .statusbar.ok {
+  color: var(--ok);
+  background: var(--bg-row);
+}
+
+/* 输入行里的输入框：与标签同排时撑满剩余宽度 */
+.field-row > input {
+  flex: 1 1 220px;
+  min-width: 160px;
+}
+
+/* ---------------- 抓包慢请求阈值（v1.16.0） ---------------- */
+.net-slow-row {
+  align-items: center;
+}
+
+.net-slow-input {
+  flex: 0 0 auto;
+  width: 104px;
+  min-width: 0;
+  text-align: right;
+}
+
+.net-slow-unit {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* 提示可能较长（读取失败 / 已保存的说明），允许换行但不要挤扁输入框 */
+#net-slow-hint {
+  flex: 1 1 180px;
+  min-width: 120px;
+  margin: 0;
+}
+
+/* ---------------- 更新源占用（v1.16.0） ---------------- */
+#update-footprint-grid {
+  margin-top: 10px;
+}
+
+.footprint-paths {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+
+/* 清理命令单独成块：等宽、可选中，避免和其它提示混成一段 */
+.footprint-cmd {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  border: 1px dashed var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg-row);
+  font-family: ui-monospace, SFMono-Regular, Consolas, 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+
+/* ---------------- 扩展版本历史（v1.16.0） ---------------- */
+.ext-history-versions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ext-history-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg-row);
+}
+
+/* 当前版本用强调色标出来，避免用户误点回滚 */
+.ext-history-row.is-current {
+  border-color: var(--accent-40);
+  background: var(--accent-06);
+}
+
+.ext-history-ver {
+  flex: 0 0 auto;
+  min-width: 58px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.ext-history-row.is-current .ext-history-ver {
+  color: var(--accent-soft);
+}
+
+.ext-history-meta {
+  flex: 1 1 140px;
+  min-width: 110px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.ext-history-row .btn-mini {
+  flex: 0 0 auto;
+}
+
+/* ---------------- 地址栏置顶分组（v1.16.0） ---------------- */
+.pinned-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pinned-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px;
+}
+
+.pinned-group-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pinned-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 行首小组标签：拖动时用来确认这一条属于哪组 */
+.pinned-group-tag {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid var(--accent-40);
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--accent-soft);
+  white-space: nowrap;
+}
+
+/* 分组下拉：唯一的跨组移动入口，靠右对齐 */
+.pinned-group-select {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg-row);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pinned-group-select:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.pinned-group-select:focus-visible {
+  outline: none;
+  border-color: var(--accent-55);
+  box-shadow: var(--ring);
+}
+
+.pinned-group-select:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 拖动反馈沿用扩展列表的视觉，颜色全部取自主题令牌 */
+.pinned-group-body .ext-item.is-dragging {
+  opacity: 0.5;
+}
+
+.pinned-group-body .ext-item.is-drop-target {
+  border-color: var(--accent-55);
+  background: var(--accent-06);
+}

@@ -1,0 +1,82 @@
+# ---- 依赖与构建产物 ----
+node_modules/
+dist/
+dist-next/
+dist-fix/
+temp/
+prototype/
+ai-models/
+# 注意：build/ 需要入库（build/icon.ico 被 electron-builder 引用，build/installer.nsh 是 NSIS 自定义脚本）
+
+# ---- 运行期产生的本地状态（Token、端口、日志）----
+*.log
+api-token.txt
+api-port.txt
+
+# ---- 内置代理内核的二进制与 geo 数据 ----
+# 体积大且可从上游复现，不随仓库分发。
+# 请在首次运行前执行 `npm run setup-vendor`（见 scripts/fetch-vendor.js），
+# 它会按 vendor/mihomo/VERSION.txt 记录的版本与 SHA256 校验后落盘。
+vendor/mihomo/mihomo.exe
+vendor/mihomo/geo/
+vendor/geo/geoip.dat.bak
+# vendor/mihomo/VERSION.txt 必须入库：它记录了内核版本、SHA256 与下载来源
+
+# ---- 仅供内部使用的记录（不对外发布）----
+.opensource-audit/
+*.result.json
+PROGRESS.md
+P0-FIX-net-declaration.md
+P1-MODE-API-endpoints.md
+P2-*.md
+P3-PROXY-KERNEL*.md
+EXT-COMPAT-report.md
+docs/evidence-R2/
+# 含真实出口 IP / ISP 信息与第三方产品截图，不对外发布
+docs/Nyx-代理中心三项能力-真机实测报告.md
+docs/Nyx-1.0.9-源码差异（vs 修复前）.txt
+# 仓库根目录的历史遗留副本（真正的入口是 src/main.js）
+/main.js
+/make-test-png.js
+
+# ---- 早期探针脚本与运行日志（历史遗留，不入库）----
+ai-*-probe.js
+hf-*.js
+hf-*.log
+ort-*.js
+ort-*.log
+ort-*.err
+ort-*.out
+ov-*.js
+ov-*.log
+ov-*.err
+ov-*.out
+ov*.txt
+tol-*.js
+tok-*.js
+py_*.txt
+tj_*.txt
+tj_cpu_out*.txt
+verify_*_out.txt
+dml_*.txt
+dml_out*.txt
+build_log*.txt
+build_out.txt
+pack*.log
+npm-*.log
+pip-*.log
+ai-install.log
+node_out.txt
+err.txt
+static_reshape.py
+
+# ---- 临时图片与备份文件 ----
+*-test.png
+*-test.bmp
+ai-frame-mid.png
+ai-upscaled.png
+*.bak
+*.bak_*
+temp-package*.json
+package_20*.json
+10000_words.txt

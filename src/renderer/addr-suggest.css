@@ -1,0 +1,248 @@
+/* 地址栏历史建议浮层（独立透明无边框 BrowserWindow，v1.3.0 新增）
+   窗口尺寸完全由主进程按条目数算好（宽 = 地址栏宽，高 = 条目数×30 + 12），
+   所以这里一切都用 100% 铺满，不做自适应布局。
+   颜色全部取 theme-nyx.css 的主题令牌，四套主题自动跟随，不写死色值。 */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  /* 透明窗口：底色由 .as-panel 自己画，body 必须完全透明 */
+  background: transparent !important;
+  color: var(--text-main, #ece7df);
+  font-family: "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+  font-size: 12px;
+  user-select: none;
+}
+
+/* style.css 里给主窗口 body 加了底幕与噪点层，浮层不需要（否则透明窗口会被涂满） */
+body::before,
+body::after {
+  display: none !important;
+}
+
+/* 面板：圆角 + 发丝描边 + 落影，全部画在透明窗口上 */
+.as-panel {
+  box-sizing: border-box;
+  height: 100%;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--bg-float, #141111);
+  border: 1px solid var(--border-strong, rgba(214, 196, 168, 0.22));
+  box-shadow: var(--shadow-2, 0 14px 34px rgba(0, 0, 0, 0.55));
+  overflow: hidden;
+}
+
+.as-list {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* 细滚动条：条目多于一屏时才会出现（上限 8 条，通常不出现） */
+.as-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.as-list::-webkit-scrollbar-thumb {
+  background: var(--border, rgba(214, 196, 168, 0.13));
+  border-radius: 3px;
+}
+
+/* 单条目：高度必须与主进程 ADDRESS_SUGGEST_ITEM_H（30）一致，否则窗口高度会错位 */
+.as-item {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--text-dim, #9d968c);
+  cursor: default;
+  line-height: 1.2;
+}
+
+/* 高亮：键盘导航与鼠标移入共用；用强调色的低透明叠加，保持"零新色值" */
+.as-item.is-on {
+  background: var(--accent-14, rgba(200, 164, 92, 0.14));
+  color: var(--text-main, #ece7df);
+}
+
+/* 标题：占主位，超长省略 */
+.as-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 网址：次要信息，右侧定宽省略 */
+.as-url {
+  flex: 0 1 auto;
+  max-width: 52%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--text-faint, #6e6862);
+}
+
+.as-item.is-on .as-url {
+  color: var(--text-dim, #9d968c);
+}
+
+/* 空状态：正常情况下主进程无命中会直接收起窗口，这里只做兜底 */
+.as-empty {
+  padding: 8px 10px;
+  color: var(--text-faint, #6e6862);
+}
+
+/* 来源徽标：只给「书签」加，历史条目不加噪。
+   颜色取强调色的低透明叠加 + 描边，四套主题自动跟随。 */
+.as-src {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  height: 16px;
+  line-height: 15px;
+  border-radius: 4px;
+  font-size: 10px;
+  white-space: nowrap;
+  color: var(--accent-soft, #e0c489);
+  background: var(--accent-14, rgba(200, 164, 92, 0.14));
+  border: 1px solid var(--accent-24, rgba(200, 164, 92, 0.24));
+}
+
+/* 命中片段高亮：叠一层强调色，不加下划线以免和网址里的连字符打架 */
+.as-hit {
+  background: var(--accent-24, rgba(200, 164, 92, 0.24));
+  color: var(--text-main, #ece7df);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+/* 高亮行里的命中片段再提一档背景，保证"当前行 + 命中"两层信息都看得见 */
+.as-item.is-on .as-hit {
+  background: var(--accent-40, rgba(200, 164, 92, 0.4));
+}
+
+/* 搜索直通行（v1.4.0）：徽标换成描边样式，与「书签」实底徽标区分开 */
+.as-src-search {
+  color: var(--text-dim, #9d968c);
+  background: transparent;
+  border-color: var(--border-strong, rgba(214, 196, 168, 0.22));
+}
+
+/* 历史条目的访问次数（频次加权的可见依据）：最淡的一档，不抢标题 */
+.as-visits {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-faint, #6e6862);
+  white-space: nowrap;
+}
+
+/* 搜索直通行与上面建议之间用一条内阴影分隔（不用 border/margin，避免改变窗口高度计算） */
+.as-item.as-search {
+  box-shadow: inset 0 1px 0 var(--border-soft, rgba(214, 196, 168, 0.07));
+}
+
+/* 站点图标（v1.5.0）：16×16 圆角块，真图标与首字母色块共用同一个占位尺寸，
+   所以"图标异步补进来"时行内不会跳动。 */
+.as-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--text-main) 10%, transparent);
+}
+
+.as-icon-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* 首字母色块：色相由域名哈希决定（同一站点永远同色），饱和度压住不抢主题色。
+   这里的白字是为彩色底服务的中性对比色，不属于主题色值。 */
+.as-mono {
+  background: hsl(var(--as-hue, 210) 34% 36%);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+/* 同站聚合折叠徽标（v1.6.0）：显示"该站点还有 N 条"，点它就地展开 */
+.as-more {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  height: 16px;
+  line-height: 15px;
+  border-radius: 8px;
+  font-size: 10px;
+  white-space: nowrap;
+  color: var(--accent-soft, #e0c489);
+  background: transparent;
+  border: 1px solid var(--accent-24, rgba(200, 164, 92, 0.24));
+  cursor: default;
+}
+
+.as-more:hover {
+  background: var(--accent-14, rgba(200, 164, 92, 0.14));
+  color: var(--accent, #c8a45c);
+}
+
+/* 「已打开 / 当前页」徽标（v1.7.0）：中性色，比书签徽标更低调——它只是提示，不是来源 */
+.as-open {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  height: 16px;
+  line-height: 15px;
+  border-radius: 4px;
+  font-size: 10px;
+  white-space: nowrap;
+  color: var(--text-dim, #9d968c);
+  background: color-mix(in srgb, var(--text-main) 8%, transparent);
+  border: 1px solid var(--border-soft, rgba(214, 196, 168, 0.07));
+}
+
+/* 可点击切换的「已打开」徽标（v1.8.0）：给一点可操作暗示 */
+.as-open-action {
+  cursor: pointer;
+  color: var(--accent-soft, #e0c489);
+  border-color: var(--accent-24, rgba(200, 164, 92, 0.24));
+}
+
+.as-open-action:hover {
+  background: var(--accent-14, rgba(200, 164, 92, 0.14));
+  color: var(--accent, #c8a45c);
+}
+
+/* 「剪贴板」来源徽标（v1.10.0）：与「书签」实底、搜索描边区分，用中性虚线描边 */
+.as-src-clip {
+  color: var(--text-dim, #9d968c);
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--border-strong, rgba(214, 196, 168, 0.22));
+}
+/* 「置顶」徽标（v1.11.0）：用强调色实底，视觉权重高于其它来源徽标 */
+.as-src-pin {
+  color: var(--accent, #c8a45c);
+  background: var(--accent-14, rgba(200, 164, 92, 0.14));
+  border-color: var(--accent-40, rgba(200, 164, 92, 0.4));
+}
+
+/* 「置顶分组」徽标（v1.16.0）：比置顶徽标更淡，只做分组提示，不再加底色权重 */
+.as-src-group {
+  color: var(--text-dim, #9d968c);
+  background: transparent;
+  border-color: var(--border-strong, rgba(214, 196, 168, 0.22));
+}

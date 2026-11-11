@@ -1,0 +1,748 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;"
+    />
+    <title>Nyx 设置</title>
+    <link rel="stylesheet" href="proxy-center.css" />
+    <link rel="stylesheet" href="settings.css" />
+    <!-- 主题包必须最后加载：靠同权重后置接管原样式里的硬编码颜色 -->
+    <link rel="stylesheet" href="theme-nyx.css" />
+    <!-- 玻璃霓虹层：与主窗口同一套毛玻璃质感与动效语言 -->
+    <link rel="stylesheet" href="theme-glass.css" />
+  </head>
+  <body class="settings-body">
+    <div class="settings-frame">
+      <!-- 左栏：分区导航（对标 Chrome / Edge 设置结构） -->
+      <aside class="settings-nav">
+        <div class="settings-brand">
+          <h1>设置</h1>
+          <span class="badge" id="nav-version">—</span>
+        </div>
+
+        <ul class="nav-list" id="nav-list">
+          <li><button type="button" class="nav-item active" data-sec="appearance">外观</button></li>
+          <li><button type="button" class="nav-item" data-sec="startup">启动与主页</button></li>
+          <li><button type="button" class="nav-item" data-sec="privacy">隐私与安全</button></li>
+          <li><button type="button" class="nav-item" data-sec="network">网络与代理</button></li>
+          <li><button type="button" class="nav-item" data-sec="downloads">下载</button></li>
+          <li><button type="button" class="nav-item" data-sec="extensions">扩展插件</button></li>
+          <li><button type="button" class="nav-item" data-sec="about">关于与更新</button></li>
+        </ul>
+
+        <p class="nav-note">
+          设置项即时生效；代理与内核状态在「网络与代理」分区内管理，扩展插件在「扩展插件」分区内管理。
+        </p>
+      </aside>
+
+      <main class="settings-main">
+        <!-- ============ 外观 ============ -->
+        <section class="sec-panel active" data-sec="appearance">
+          <header class="sec-head">
+            <h2>外观</h2>
+            <p>控制主窗口顶栏显示哪些元素。浏览器级功能入口已统一收进设置中心，顶栏只保留导航、地址栏与设置。</p>
+          </header>
+
+          <div class="sec-scroll">
+            <section class="info-card">
+              <div class="info-head">
+                <h3>顶栏元素</h3>
+                <span class="badge" id="appearance-state">—</span>
+              </div>
+              <div class="info-body">
+                <div class="set-row">
+                  <div class="set-row-main">
+                    <div class="set-row-title">显示出站链路徽标</div>
+                    <div class="set-row-desc">
+                      在顶栏显示当前出站链路（代理 / 直连）。关闭后链路状态仍可在「隐私与安全」里查看。
+                    </div>
+                  </div>
+                  <div class="set-row-ctl">
+                    <label class="set-switch">
+                      <input type="checkbox" id="pref-show-link-badge" />
+                      <span>显示</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="set-row">
+                  <div class="set-row-main">
+                    <div class="set-row-title">显示隐私模式开关</div>
+                    <div class="set-row-desc">
+                      在顶栏显示普通 / 隐私模式切换开关。关闭后只能通过菜单或托盘切换模式，隐私约束本身不受影响。
+                    </div>
+                  </div>
+                  <div class="set-row-ctl">
+                    <label class="set-switch">
+                      <input type="checkbox" id="pref-show-mode-switch" />
+                      <span>显示</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="set-row">
+                  <div class="set-row-main">
+                    <div class="set-row-title">界面主题</div>
+                    <div class="set-row-desc">
+                      墨夜（默认）/ 极光 / 素纸 / 静谧。只影响外观，不改变任何隐私与网络行为。
+                    </div>
+                  </div>
+                  <div class="set-row-ctl">
+                    <select id="pref-theme" class="set-select">
+                      <option value="ink">墨夜 Ink Night</option>
+                      <option value="aurora">极光 Aurora</option>
+                      <option value="paper">素纸 Paper</option>
+                      <option value="quiet">静谧 Quiet</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="sec-actions">
+                  <button type="button" class="btn" id="btn-appearance-reset">恢复默认外观</button>
+                </div>
+                <p class="hint" id="appearance-hint">开关改动会立即同步到主窗口顶栏。</p>
+              </div>
+            </section>
+
+            <!-- 地址栏置顶（v1.12.0）：右键建议即可置顶，这里管理顺序与删除 -->
+            <section class="info-card">
+              <div class="info-head">
+                <h3>地址栏置顶</h3>
+                <span class="badge" id="pinned-count">— 个</span>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  在地址栏建议里右键任意一条即可置顶 / 取消置顶（每组最多 5 条）。
+                  置顶项在命中的查询里排最前；按「工作 / 学习 / 其他」分组管理，
+                  组内可用拖动或 ↑ ↓ 调顺序，跨组请用行首的分组下拉。
+                </p>
+                <div class="ext-list" id="pinned-list">
+                  <p class="hint">正在读取置顶列表…</p>
+                </div>
+                <!-- 导入 / 导出（v1.15.0）：换机器时把置顶习惯带走 -->
+                <div class="sec-actions" id="pinned-io-row">
+                  <button class="btn btn-mini" type="button" id="btn-pinned-export">导出 JSON</button>
+                  <button class="btn btn-mini" type="button" id="btn-pinned-import">导入 JSON</button>
+                  <span class="hint" id="pinned-io-hint">导入按地址合并去重，每组最多 5 条。</span>
+                </div>
+              </div>
+            </section>
+
+            <!-- 抓包慢请求阈值（v1.16.0）：与工具箱「只看慢请求」共用主进程里的同一份偏好 -->
+            <section class="info-card">
+              <div class="info-head">
+                <h3>抓包慢请求阈值</h3>
+                <span class="badge" id="net-slow-badge">— ms</span>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  工具箱抓包列表的「只看慢请求」开关、每行后面的「慢」标记，以及详情里的瀑布统计，
+                  都按这个阈值判断。保存后立即生效，已经打开的抓包面板下一次刷新就会用新阈值。
+                </p>
+                <div class="sec-actions net-slow-row">
+                  <input
+                    type="number"
+                    id="net-slow-ms"
+                    class="text-input net-slow-input"
+                    aria-label="抓包慢请求阈值（毫秒）"
+                    min="50"
+                    max="10000"
+                    step="50"
+                    inputmode="numeric"
+                    spellcheck="false"
+                  />
+                  <span class="net-slow-unit">毫秒</span>
+                  <button type="button" class="btn" id="btn-net-slow-save">保存</button>
+                  <span class="hint" id="net-slow-hint">正在读取…</span>
+                </div>
+              </div>
+            </section>
+
+            <!-- 硬件加速：GPU 只读探测 -->
+            <section class="info-card">
+              <div class="info-head">
+                <h3>硬件加速</h3>
+                <span class="badge" id="hw-badge">探测中…</span>
+              </div>
+              <div class="info-body" id="hw-body"></div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ============ 启动与主页 ============ -->
+        <section class="sec-panel" data-sec="startup">
+          <header class="sec-head">
+            <h2>启动与主页</h2>
+            <p>配置新标签页打开什么、浏览器启动时打开哪些页面。地址改动即时保存、新标签立即生效；启动方式改动在下次启动生效。</p>
+          </header>
+
+          <div class="sec-scroll">
+            <section class="info-card">
+              <div class="info-head">
+                <h3>新标签页</h3>
+                <span class="badge" id="home-newtab-badge">—</span>
+              </div>
+              <div class="info-body">
+                <div class="field-row">
+                  <input
+                    type="text"
+                    id="home-newtab-url"
+                    class="text-input"
+                    placeholder="留空 = 空白页；也可填 https://example.com"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                </div>
+                <p class="hint">
+                  新建标签、以及启动方式选「打开新标签页」时使用的地址。不写协议时按域名自动补 https，写关键词则交给默认搜索引擎。
+                </p>
+              </div>
+            </section>
+
+            <section class="info-card">
+              <div class="info-head">
+                <h3>启动时</h3>
+                <span class="badge" id="home-startup-badge">—</span>
+              </div>
+              <div class="info-body">
+                <div class="radio-row">
+                  <label class="radio-opt">
+                    <input type="radio" name="startup-mode" value="newTab" id="startup-mode-newtab" />
+                    <span>打开新标签页</span>
+                  </label>
+                  <label class="radio-opt">
+                    <input type="radio" name="startup-mode" value="blank" id="startup-mode-blank" />
+                    <span>打开空白页</span>
+                  </label>
+                  <label class="radio-opt">
+                    <input type="radio" name="startup-mode" value="custom" id="startup-mode-custom" />
+                    <span>打开指定网页</span>
+                  </label>
+                </div>
+
+                <div class="field-row" id="startup-urls-row" hidden>
+                  <textarea
+                    id="home-startup-urls"
+                    class="text-area"
+                    rows="4"
+                    placeholder="每行一个地址，最多 20 条"
+                    spellcheck="false"
+                  ></textarea>
+                </div>
+
+                <div class="sec-actions">
+                  <button type="button" class="btn btn-primary" id="btn-home-apply">应用</button>
+                  <button type="button" class="btn" id="btn-home-reset">恢复默认</button>
+                </div>
+                <p class="hint" id="home-hint">改动会立即写入本地配置；启动方式在下次启动 Nyx 时生效。</p>
+              </div>
+            </section>
+
+            <section class="info-card">
+              <div class="info-head">
+                <h3>当前生效</h3>
+                <span class="badge" id="startup-badge">—</span>
+              </div>
+              <div class="info-body">
+                <div class="kv-grid" id="startup-grid"></div>
+                <p class="hint">
+                  这里显示主进程实际使用的地址（按地址栏规则规范化）。环境变量 NYX_HOME_URL 仅在新标签页地址留空时作为兜底。
+                </p>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ============ 隐私与安全 ============ -->
+        <section class="sec-panel" data-sec="privacy">
+          <header class="sec-head">
+            <h2>隐私与安全</h2>
+            <p>隐私模式加固现状、站点授权决策轨迹，以及本机密码与表单记忆。这里只读展示与清理，不改动任何站点数据。</p>
+          </header>
+
+          <div class="sec-scroll">
+            <section class="info-card">
+              <div class="info-head">
+                <h3>加固状态</h3>
+                <span class="badge" id="privacy-badge">—</span>
+                <div class="info-head-actions">
+                  <button type="button" class="btn btn-mini" id="btn-privacy-refresh">刷新</button>
+                </div>
+              </div>
+              <div class="info-body">
+                <div class="kv-grid" id="privacy-grid"></div>
+              </div>
+            </section>
+
+            <section class="info-card">
+              <div class="info-head">
+                <h3>站点授权决策轨迹</h3>
+                <span class="badge" id="perm-badge">—</span>
+                <div class="info-head-actions">
+                  <button type="button" class="btn btn-mini" id="btn-perm-clear">清空已记住的授权</button>
+                </div>
+              </div>
+              <div class="info-body">
+                <p class="hint" id="perm-hint">
+                  仅清空本会话内「按站点记住的授权」，不会删除任何站点数据、Cookie 或缓存。
+                </p>
+                <div id="perm-table-wrap"></div>
+              </div>
+            </section>
+
+            <section class="info-card">
+              <div class="info-head">
+                <h3>密码与表单记忆</h3>
+                <span class="badge" id="vault-badge">—</span>
+                <div class="info-head-actions">
+                  <button type="button" class="btn btn-mini" id="btn-vault-refresh">刷新</button>
+                  <button type="button" class="btn btn-mini btn-danger" id="btn-vault-clear">清空全部记忆</button>
+                </div>
+              </div>
+              <div class="info-body">
+                <p class="hint" id="vault-hint">
+                  密码与表单内容经系统加密（Windows DPAPI）后落盘，界面只展示来源与用户名掩码，不回显明文。
+                </p>
+                <div id="vault-table-wrap"></div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ============ 网络与代理（原代理中心整页并入） ============ -->
+        <section class="sec-panel" data-sec="network">
+          <div class="layout">
+            <!-- 左栏：订阅管理 -->
+            <aside class="panel panel-side">
+              <div class="panel-head">
+                <h2>订阅</h2>
+                <span class="badge" id="sub-count">— 条</span>
+              </div>
+              <p class="hint">启用的订阅决定节点来源，切换订阅会自动重启内核。</p>
+
+              <ul class="sub-list" id="sub-list"></ul>
+
+              <form class="sub-form" id="sub-form" autocomplete="off">
+                <input type="text" id="sub-name" placeholder="备注名（可留空）" autocomplete="off" />
+                <input
+                  type="text"
+                  id="sub-url"
+                  placeholder="订阅地址，以 https:// 开头"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <button type="submit" class="btn btn-primary" id="btn-add-sub">添加订阅</button>
+              </form>
+            </aside>
+
+            <!-- 右栏：内核总控 + 概览 + 分页内容 -->
+            <section class="panel panel-main">
+              <div class="kernel-bar">
+                <div class="brand">
+                  <span class="status-dot" id="kernel-dot" aria-hidden="true"></span>
+                  <h2>内置代理内核</h2>
+                  <span class="badge" id="kernel-badge">内核未启动</span>
+                </div>
+
+                <div class="topbar-meta">
+                  <span class="meta">
+                    <span class="meta-k">当前订阅</span>
+                    <span class="meta-v" id="active-sub">未配置</span>
+                  </span>
+                  <span class="meta">
+                    <span class="meta-k">混合端口</span>
+                    <span class="meta-v num" id="mixed-port">—</span>
+                  </span>
+                  <span class="meta">
+                    <span class="meta-k">出口 IP</span>
+                    <span class="meta-v" id="exit-ip">未检测</span>
+                  </span>
+                </div>
+
+                <div class="topbar-actions">
+                  <button type="button" class="btn btn-primary" id="btn-start">启动内置代理</button>
+                  <button type="button" class="btn" id="btn-stop">停止</button>
+                  <button type="button" class="btn" id="btn-restart">重新拉取配置</button>
+                </div>
+              </div>
+
+              <!-- 上网网卡：自动跟随系统默认出口，或手动绑定指定网卡（写入内核 interface-name） -->
+              <section class="iface-card" id="iface-card">
+                <div class="info-head">
+                  <h3>上网网卡</h3>
+                  <div class="info-head-actions">
+                    <span class="badge" id="iface-badge">自动选择</span>
+                    <button type="button" class="btn btn-mini" id="btn-iface-refresh">刷新网卡</button>
+                    <button type="button" class="btn btn-mini btn-primary" id="btn-iface-apply">应用</button>
+                  </div>
+                </div>
+
+                <div class="iface-body">
+                  <div class="iface-modes">
+                    <label class="iface-mode">
+                      <input type="radio" name="iface-mode" value="auto" id="iface-mode-auto" />
+                      <span>自动选择</span>
+                    </label>
+                    <label class="iface-mode">
+                      <input type="radio" name="iface-mode" value="manual" id="iface-mode-manual" />
+                      <span>手动指定网卡</span>
+                    </label>
+                  </div>
+
+                  <select id="iface-select" title="选择出站网卡"></select>
+
+                  <p class="hint" id="iface-hint">
+                    自动模式跟随系统默认路由；手动模式把所选网卡写入内核配置，内核的出站连接与
+                    DNS 解析都从该网卡发出。切换后需重建内核才会生效。
+                  </p>
+                </div>
+              </section>
+
+              <!-- 智能遨游调度：每 15 秒巡检当前站点，国内直连 / 被墙走代理 -->
+              <section class="info-card smart-card" id="smart-card">
+                <div class="info-head">
+                  <h3>智能遨游调度</h3>
+                  <div class="info-head-actions">
+                    <span class="badge" id="smart-badge">待启动</span>
+                    <label class="switch" title="遨游模式开启后自动分流：国内站点直连、被墙站点走代理，每 15 秒巡检并自动优选节点">
+                      <input type="checkbox" id="pref-smart-patrol" />
+                      <span>智能分流</span>
+                    </label>
+                    <button type="button" class="btn btn-mini" id="btn-smart-clear">清空规则</button>
+                  </div>
+                </div>
+                <div class="smart-body" id="smart-body"></div>
+              </section>
+
+              <div class="stat-grid" id="stat-grid"></div>
+
+              <nav class="tabs" id="tabs" role="tablist">
+                <button type="button" class="tab active" data-tab="nodes" role="tab">
+                  节点<span class="tab-count" id="tab-count-nodes">—</span>
+                </button>
+                <button type="button" class="tab" data-tab="line" role="tab">线路自检</button>
+                <button type="button" class="tab" data-tab="filter" role="tab">
+                  过滤明细<span class="tab-count" id="tab-count-filter"></span>
+                </button>
+                <button type="button" class="tab" data-tab="logs" role="tab">内核日志</button>
+              </nav>
+
+              <div class="tab-panels">
+                <!-- 节点：策略组 + 筛选 + 节点状态表 -->
+                <section class="tab-panel active" data-panel="nodes">
+                  <div class="group-bar" id="group-bar"></div>
+
+                  <div class="node-toolbar">
+                    <input type="text" id="filter" placeholder="搜索节点名称" autocomplete="off" />
+                    <label class="switch" title="只显示测速可用、以及状态未知的节点">
+                      <input type="checkbox" id="only-available" />
+                      <span>只看可用</span>
+                    </label>
+                    <select id="sort-mode" title="节点排序方式">
+                      <option value="group">按策略组顺序</option>
+                      <option value="delay-asc">按延迟升序</option>
+                      <option value="delay-desc">按延迟降序</option>
+                      <option value="name">按名称</option>
+                    </select>
+                    <span class="toolbar-spacer"></span>
+                    <button type="button" class="btn" id="btn-test">测速全部节点</button>
+                    <button type="button" class="btn" id="btn-egress">出口自查</button>
+                  </div>
+
+                  <div class="summary-row">
+                    <p class="test-summary" id="test-summary"></p>
+                    <span class="switch-hint" id="switch-hint"></span>
+                    <div class="legend" aria-label="状态图例">
+                      <span class="state current">当前使用</span>
+                      <span class="state picked">已选用</span>
+                      <span class="state ok">可用</span>
+                      <span class="state warn">偏慢 / 超时</span>
+                      <span class="state bad">不可用</span>
+                      <span class="state">待测</span>
+                    </div>
+                  </div>
+
+                  <div class="node-wrap">
+                    <table class="node-table">
+                      <thead>
+                        <tr>
+                          <th class="col-state">状态</th>
+                          <th class="col-name sortable" id="th-name" title="点击按名称排序">节点</th>
+                          <th class="col-type">协议</th>
+                          <th class="col-delay sortable" id="th-delay" title="点击按延迟排序（升序 / 降序切换）">延迟</th>
+                          <th class="col-act">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody id="node-body"></tbody>
+                    </table>
+                    <p class="empty" id="node-empty">暂无节点，请先启动内置代理。</p>
+                  </div>
+                </section>
+
+                <!-- 线路自检：出口信息 + 直连对照 -->
+                <section class="tab-panel" data-panel="line">
+                  <section class="info-card">
+                    <div class="info-head">
+                      <h3>出口信息</h3>
+                      <div class="info-head-actions">
+                        <label class="switch" title="出口自查是真实外联请求，默认不随内核启动自动执行">
+                          <input type="checkbox" id="pref-auto-egress" />
+                          <span>启动后自动刷新</span>
+                        </label>
+                        <button type="button" class="btn btn-mini" id="btn-egress-again">立即自查</button>
+                      </div>
+                    </div>
+                    <div class="info-body tall" id="egress-body"></div>
+                  </section>
+                </section>
+
+                <!-- 过滤明细：广告 / 失效节点剔除报告 -->
+                <section class="tab-panel" data-panel="filter">
+                  <section class="info-card">
+                    <div class="info-head">
+                      <h3>广告 / 失效节点过滤</h3>
+                      <span class="badge" id="filter-count">已过滤 — 个</span>
+                    </div>
+                    <div class="info-body tall" id="filter-body"></div>
+                  </section>
+                </section>
+
+                <!-- 内核日志：仅内存，不落盘 -->
+                <section class="tab-panel" data-panel="logs">
+                  <pre class="log-box" id="log-box"></pre>
+                </section>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ============ 下载 ============ -->
+        <section class="sec-panel" data-sec="downloads">
+          <header class="sec-head">
+            <h2>下载</h2>
+            <p>下载内容保存位置与下载行为设置。隐私模式下的下载始终被拦截，不在此列。</p>
+          </header>
+
+          <div class="sec-scroll">
+            <section class="info-card">
+              <div class="info-head">
+                <h3>下载管理</h3>
+                <span class="badge" id="download-badge">已启用</span>
+              </div>
+              <div class="info-body">
+                <div class="set-row">
+                  <div class="set-row-main">
+                    <div class="set-row-title">保存位置</div>
+                    <div class="set-row-desc">
+                      普通模式页面触发的下载默认保存到这里；留空时跟随系统下载目录。
+                    </div>
+                  </div>
+                  <div class="set-row-ctl download-dir-ctl">
+                    <input
+                      type="text"
+                      id="download-dir"
+                      class="text-input download-dir-input"
+                      placeholder="留空 = 系统下载目录"
+                      spellcheck="false"
+                      readonly
+                    />
+                    <button type="button" class="btn btn-mini" id="btn-download-pick">选择文件夹</button>
+                    <button type="button" class="btn btn-mini" id="btn-download-open">打开目录</button>
+                  </div>
+                </div>
+
+                <div class="set-row">
+                  <div class="set-row-main">
+                    <div class="set-row-title">下载前询问保存位置</div>
+                    <div class="set-row-desc">
+                      开启后每次下载弹系统对话框确认落点；关闭后按上面设置的目录静默保存（重名自动追加序号）。
+                    </div>
+                  </div>
+                  <div class="set-row-ctl">
+                    <label class="set-switch">
+                      <input type="checkbox" id="pref-download-ask" />
+                      <span>询问</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="sec-actions">
+                  <button type="button" class="btn btn-primary" id="btn-download-apply">应用</button>
+                  <button type="button" class="btn" id="btn-download-reset">恢复默认</button>
+                </div>
+                <p class="hint" id="download-hint">改动即时保存：后续下载按新设置执行。</p>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ============ 扩展插件 ============ -->
+        <section class="sec-panel" data-sec="extensions">
+          <header class="sec-head">
+            <h2>扩展插件</h2>
+            <p>
+              兼容 Edge / Chrome 扩展（同一套扩展格式，可直接导入已解压目录或 .crx 安装包）。
+              扩展只装在普通模式分区：隐私模式下的页面不会被任何扩展读取或改写。
+            </p>
+          </header>
+
+          <div class="sec-scroll">
+            <section class="info-card">
+              <div class="info-head">
+                <h3>导入扩展</h3>
+                <span class="badge" id="ext-count">— 个</span>
+              </div>
+              <div class="info-body">
+                <div class="update-actions">
+                  <button type="button" class="btn" id="btn-ext-add-dir">导入已解压目录</button>
+                  <button type="button" class="btn" id="btn-ext-add-crx">导入 .crx / .zip 包</button>
+                  <button type="button" class="btn" id="btn-ext-reload">重新装载全部</button>
+                  <button type="button" class="btn" id="btn-ext-open-store">打开扩展仓库</button>
+                </div>
+                <p class="hint" id="ext-import-hint">
+                  导入时会把扩展复制进 Nyx 自己的扩展仓库，源目录之后可以随意删除。
+                  新装的扩展需要刷新页面后才会注入到已打开的网页。
+                </p>
+                <p class="hint">
+                  <button type="button" class="btn btn-mini" id="btn-ext-reload-tabs">
+                    刷新全部标签
+                  </button>
+                </p>
+                <p class="hint" id="ext-store-path"></p>
+              </div>
+            </section>
+
+            <section class="info-card">
+              <div class="info-head">
+                <h3>扩展更新</h3>
+                <div class="info-head-actions">
+                  <button type="button" class="btn btn-mini" id="btn-ext-update-all">全部更新</button>
+                </div>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  按更新源的 extensions.json 检查已安装扩展的新版本，一键更新到最新版；
+                  下方的「扩展版本历史」里还能回滚到旧版本。更新源未配置扩展清单时这里不会有可更新的项。
+                </p>
+              </div>
+            </section>
+
+            <!-- 扩展版本历史（v1.16.0）：更新源里保留的发布记录，可一键回滚 -->
+            <section class="info-card">
+              <div class="info-head">
+                <h3>扩展版本历史</h3>
+                <div class="info-head-actions">
+                  <span class="badge" id="ext-history-count">— 个版本</span>
+                  <button type="button" class="btn btn-mini" id="btn-ext-history-refresh">刷新</button>
+                </div>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  来自更新源的扩展发布记录（每个扩展默认保留最近 3 个版本）。
+                  新版出问题时可回滚到旧版：只替换扩展文件，扩展自己的配置与存储保留，回滚后刷新页面生效。
+                </p>
+                <div class="ext-list" id="ext-history-list">
+                  <p class="hint">正在读取版本历史…</p>
+                </div>
+              </div>
+            </section>
+
+            <section class="info-card">
+              <div class="info-head">
+                <h3>已安装扩展</h3>
+                <div class="info-head-actions">
+                  <button type="button" class="btn btn-mini" id="btn-ext-refresh">刷新列表</button>
+                </div>
+              </div>
+              <div class="info-body">
+                <div class="ext-list" id="ext-list">
+                  <p class="hint">正在读取扩展清单…</p>
+                </div>
+                <p class="hint">
+                  支持度口径（Electron 内核与 Chrome 的差异，界面按扩展实际声明的能力给出评级）：
+                  内容脚本注入、扩展存储、扩展页面可用；MV3 后台 Service Worker 支持有限；
+                  网络拦截（declarativeNetRequest / webRequest）与本地程序通信（nativeMessaging）
+                  不提供，广告拦截、代理转发类扩展装上也不会有实际作用。
+                </p>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ============ 关于与更新 ============ -->
+        <section class="sec-panel" data-sec="about">
+          <header class="sec-head">
+            <h2>关于与更新</h2>
+            <p>版本信息与升级包安装。升级为覆盖安装：订阅、偏好、密码库都会保留。</p>
+          </header>
+
+          <div class="sec-scroll">
+            <section class="info-card">
+              <div class="info-head">
+                <h3>软件更新</h3>
+                <span class="badge" id="update-badge">当前版本 —</span>
+              </div>
+              <div class="info-body">
+                <p class="hint" id="update-hint">
+                  点「检查更新」查看是否有新版本。升级为覆盖安装：订阅、偏好与密码库都会保留。
+                </p>
+                <div class="update-actions">
+                  <button type="button" class="btn" id="btn-check-update">检查更新</button>
+                  <button type="button" class="btn btn-primary" id="btn-install-update" hidden>
+                    立即重启安装
+                  </button>
+                  <button type="button" class="btn" id="btn-update-folder">打开升级包文件夹</button>
+                </div>
+                <div class="progress" id="update-progress" hidden>
+                  <div class="progress-bar" id="update-progress-bar"></div>
+                </div>
+              </div>
+            </section>
+
+            <!-- 更新源占用（v1.16.0）：升级包与历史留档占用的磁盘空间 -->
+            <section class="info-card">
+              <div class="info-head">
+                <h3>更新源占用</h3>
+                <span class="badge" id="footprint-badge">—</span>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  更新源存放升级包与扩展发布文件；留档目录保存历史版本安装包，用于差分更新与回滚。
+                  留档会随发版持续累积，占盘明显变大时可以清理较早的版本。
+                </p>
+                <div class="kv-grid" id="update-footprint-grid"></div>
+                <p class="hint footprint-paths" id="footprint-paths"></p>
+                <div class="sec-actions">
+                  <button type="button" class="btn" id="btn-footprint-open">打开更新源文件夹</button>
+                  <button type="button" class="btn btn-mini" id="btn-footprint-copy">复制清理命令</button>
+                </div>
+                <p class="hint footprint-cmd" id="footprint-hint">点「复制清理命令」把发版机上的清理命令复制到剪贴板。</p>
+              </div>
+            </section>
+
+            <section class="info-card">
+              <div class="info-head">
+                <h3>关于 Nyx</h3>
+                <div class="info-head-actions">
+                  <button type="button" class="btn btn-mini" id="btn-about">查看详细信息</button>
+                </div>
+              </div>
+              <div class="info-body">
+                <div class="kv-grid" id="about-grid"></div>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <footer class="statusbar" id="statusbar">就绪</footer>
+
+    <script src="proxy-center.js"></script>
+    <script src="settings.js"></script>
+    <script src="fx.js"></script>
+  </body>
+</html>

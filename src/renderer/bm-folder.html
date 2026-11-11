@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;"
+    />
+    <title>收藏到文件夹</title>
+    <!-- 复用主窗口样式表拿主题令牌；专属样式在 bm-folder.css（窗口透明、圆角面板由 CSS 画） -->
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="theme-nyx.css" />
+    <link rel="stylesheet" href="bm-folder.css" />
+  </head>
+  <body>
+    <div class="bf-panel">
+      <!-- 头部：说明这是把当前页收进哪个文件夹 -->
+      <div class="bf-head">收藏到…</div>
+      <!-- 搜索框（v1.6.0）：文件夹多了以后，直接打字过滤比翻列表快 -->
+      <input class="bf-search" id="bf-search" type="text" placeholder="搜索文件夹…" spellcheck="false" autocomplete="off" />
+      <!-- 文件夹列表：主进程推送数据后由 bm-folder.js 填充 -->
+      <div class="bf-list" id="bf-list"></div>
+      <!-- 新建文件夹命名（v1.7.0）：留空则用「新文件夹 <日期>」自动命名 -->
+      <div class="bf-new-row">
+        <input
+          class="bf-new-input"
+          id="bf-new-input"
+          type="text"
+          placeholder="新建文件夹名称（留空自动命名）"
+          spellcheck="false"
+          autocomplete="off"
+        />
+      </div>
+    </div>
+    <script src="bm-folder.js"></script>
+  </body>
+</html>

@@ -1,0 +1,229 @@
+/* 书签管理窗口（独立 BrowserWindow）专属样式。
+   树形列表 + 复选框多选 + 同级上移 / 下移。
+   主题变量沿用 style.css + theme-nyx.css。 */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-shell, #0c0a09);
+  color: var(--text-main, #ece7df);
+  font-family: "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  user-select: none;
+}
+
+/* ---------------- 顶部工具栏 ---------------- */
+.bm-head {
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border, #2c313c);
+  background: var(--bg-shell, #0c0a09);
+}
+
+.bm-head-left {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bm-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.bm-count {
+  color: var(--text-dim, #8b93a5);
+  font-size: 12px;
+}
+
+.bm-head-right {
+  display: flex;
+  gap: 8px;
+}
+
+.bm-btn {
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid var(--border, #2c313c);
+  border-radius: 6px;
+  background: var(--bg-tab, #171413);
+  color: var(--text-main, #ece7df);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.bm-btn:hover {
+  background: var(--bg-tab-active, #241f1c);
+  border-color: var(--border-strong, #4a4f5a);
+}
+
+.bm-btn-danger {
+  border-color: rgba(239, 68, 68, 0.45);
+  color: #f87171;
+}
+
+.bm-btn-danger:hover {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.7);
+}
+
+/* ---------------- 树形列表 ---------------- */
+.bm-tree {
+  position: absolute;
+  top: 47px;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  overflow-y: auto;
+  padding: 8px 6px 80px;
+}
+
+.bm-tree::-webkit-scrollbar {
+  width: 8px;
+}
+
+.bm-tree::-webkit-scrollbar-thumb {
+  background: var(--border, #2c313c);
+  border-radius: 4px;
+}
+
+.bm-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding-right: 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bm-row:hover {
+  background: var(--bg-row-hover, #1e1a18);
+}
+
+.bm-cb {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent, #8b5cf6);
+  cursor: pointer;
+}
+
+.bm-arrow {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim, #8b93a5);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.bm-arrow:hover {
+  background: var(--bg-tab-active, #241f1c);
+  color: var(--text-main, #ece7df);
+}
+
+.bm-arrow-spacer {
+  flex: 0 0 auto;
+  width: 18px;
+}
+
+.bm-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bm-label-folder {
+  font-weight: 600;
+}
+
+.bm-label-url {
+  color: var(--text-dim, #8b93a5);
+}
+
+.bm-ops {
+  flex: 0 0 auto;
+  display: none;
+  gap: 2px;
+}
+
+.bm-row:hover .bm-ops {
+  display: flex;
+}
+
+.bm-op {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim, #8b93a5);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.bm-op:hover {
+  background: var(--bg-tab-active, #241f1c);
+  color: var(--text-main, #ece7df);
+  border-color: var(--border, #2c313c);
+}
+
+.bm-empty {
+  padding: 40px 0;
+  color: var(--text-dim, #8b93a5);
+  text-align: center;
+}
+
+/* ---------------- 确认条 / 状态条 ---------------- */
+.bm-confirm {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-top: 1px solid rgba(239, 68, 68, 0.35);
+  background: var(--bg-panel, #121010);
+}
+
+.bm-confirm-msg {
+  flex: 1 1 auto;
+  color: #fca5a5;
+  font-size: 12px;
+}
+
+.bm-status {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: var(--bg-tab-active, #241f1c);
+  border: 1px solid var(--border, #2c313c);
+  color: var(--text-main, #ece7df);
+  font-size: 12px;
+  white-space: nowrap;
+}

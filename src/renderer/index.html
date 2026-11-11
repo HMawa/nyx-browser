@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;"
+    />
+    <title>Nyx</title>
+    <link rel="stylesheet" href="style.css" />
+    <!-- 主题包必须最后加载：靠同权重后置接管原样式里的硬编码颜色 -->
+    <link rel="stylesheet" href="theme-nyx.css" />
+    <!-- 玻璃霓虹层：毛玻璃质感 + 赛博动效，全部颜色从主题令牌派生，主题包之后加载 -->
+    <link rel="stylesheet" href="theme-glass.css" />
+  </head>
+  <body>
+    <!-- UI 外壳：仅占窗口顶部 124px（含 1.2.4 新增书签栏），其余区域由标签 WebContentsView 叠加显示 -->
+    <header class="shell" id="shell">
+      <!-- 标签列表 -->
+      <div class="tabbar">
+        <div class="tabs" id="tabs"></div>
+        <button class="icon-btn new-tab" id="new-tab" title="新建标签">＋</button>
+      </div>
+
+      <!-- 工具栏 -->
+      <div class="toolbar">
+        <div class="nav-group">
+          <button class="icon-btn" id="btn-back" title="后退">←</button>
+          <button class="icon-btn" id="btn-forward" title="前进">→</button>
+          <button class="icon-btn" id="btn-reload" title="刷新">⟳</button>
+        </div>
+
+        <input
+          id="address"
+          class="address"
+          type="text"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder="输入网址或搜索内容"
+        />
+
+        <!-- 书签星标（v1.4.0）：收藏 / 取消收藏当前页；状态由 renderer.js 按当前标签刷新 -->
+        <button class="icon-btn bm-star" id="btn-bookmark" title="收藏当前页">☆</button>
+
+        <button
+          class="icon-btn"
+          id="btn-toolbox"
+          title="工具箱：资源嗅探、网络抓包、开发者模式、页面环境"
+        >
+          ⛭
+        </button>
+
+        <button
+          class="icon-btn proxy-entry"
+          id="btn-proxy"
+          title="打开设置：外观、启动与主页、隐私与安全、网络与代理、下载、关于与更新"
+        >
+          ⚙
+        </button>
+
+        <!-- 出站链路指示：直连 / 代理（普通模式下代理不可用时会自动显示直连） -->
+        <span class="link-badge" id="link-badge" title="当前出站链路">直连</span>
+
+        <div class="mode-group" id="mode-group">
+          <span class="mode-label" id="mode-label">普通模式</span>
+          <button class="mode-switch" id="mode-toggle" role="switch" aria-checked="false" title="切换隐私模式">
+            <span class="knob"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 书签栏：地址栏下方常驻一行（1.2.4 新增，仿 Edge 书签栏）。
+           书签平铺在滚动区内，文件夹点击弹独立浮层窗口；
+           最右侧「管理」按钮固定显示，打开书签管理窗口。 -->
+      <div class="bookmark-bar">
+        <div class="bookmark-bar-items" id="bookmark-bar"></div>
+        <button
+          class="bm-item bm-manage"
+          id="bm-manage-btn"
+          type="button"
+          title="打开书签管理窗口：树形展示、批量删除、调整顺序"
+        >
+          管理
+        </button>
+      </div>
+    </header>
+
+    <!--
+      工具箱抽屉。
+      它是外壳的一部分（浮在标签之上），展开时主进程会把标签视图宽度收窄，
+      两者宽度必须一致，否则页面会被面板盖住——宽度只在 renderer.js 里定义一次。
+    -->
+    <aside class="toolbox" id="toolbox" hidden>
+      <div class="tb-head">
+        <span class="tb-title">工具箱</span>
+        <div class="tb-nav" id="tb-nav">
+          <button class="tb-nav-btn is-on" data-pane="sniff" title="资源嗅探：把页面加载的视频、音频、图片、字幕、文档全抓出来">资源</button>
+          <button class="tb-nav-btn" data-pane="net" title="网络抓包：完整请求清单、头、载荷与响应体预览">抓包</button>
+          <button class="tb-nav-btn" data-pane="page" title="开发者模式、元素拾取、UA / 视口 / 限速、清理与截图">页面</button>
+          <button class="tb-nav-btn" data-pane="debug" title="修改页面 HTML、执行 JS 并查看 console 输出">调试</button>
+          <button class="tb-nav-btn" data-pane="video" title="倍速解锁、进度解锁、视频窗口鼠标保活">视频</button>
+          <button class="tb-nav-btn" data-pane="bookmarks" title="书签管理：树形浏览、收藏当前页、批量删除、排序、导入">书签</button>
+          <button class="tb-nav-btn" data-pane="history" title="历史记录：自动记录访问过的页面，可搜索与清理">历史</button>
+          <button class="tb-nav-btn" data-pane="cookie" title="Cookie 管理：查看与编辑当前站点 Cookie，从 Edge 一键导入">Cookie</button>
+        </div>
+        <button class="icon-btn tb-head-btn" id="tb-width" title="切换面板宽度">⇔</button>
+        <button class="icon-btn tb-head-btn" id="tb-close" title="收起工具箱">✕</button>
+      </div>
+
+      <!-- ==================== 资源嗅探 ==================== -->
+      <section class="tb-pane" id="pane-sniff">
+        <div class="tb-chips" id="sniff-kinds"></div>
+        <input class="tb-input" id="sniff-search" placeholder="过滤：关键词 / 域名 / 后缀" spellcheck="false" />
+        <div class="tb-meta" id="sniff-meta">等待页面加载…</div>
+        <div class="tb-list" id="sniff-list"></div>
+      </section>
+
+      <!-- ==================== 网络抓包 ==================== -->
+      <section class="tb-pane" id="pane-net" hidden>
+        <div class="tb-bar">
+          <button class="tb-btn" id="net-pause" title="暂停后不再记录新请求，已有记录保留">暂停</button>
+          <button class="tb-btn" id="net-clear" title="清空当前标签的全部记录">清空</button>
+          <label class="tb-check" title="切换标签时自动跟随当前标签的记录">
+            <input type="checkbox" id="net-follow" checked />跟随标签
+          </label>
+        </div>
+        <div class="tb-chips" id="net-types"></div>
+        <input class="tb-input" id="net-search" placeholder="过滤：URL / 域名 / 状态码 / 类型" spellcheck="false" />
+        <div class="tb-meta" id="net-meta">等待请求…</div>
+        <div class="tb-list tb-scroll" id="net-list"></div>
+      </section>
+
+      <!-- ==================== 页面环境 ==================== -->
+      <section class="tb-pane tb-scroll" id="pane-page" hidden>
+        <div class="tb-group">
+          <div class="tb-group-title">开发者模式</div>
+          <div class="tb-bar">
+            <select class="tb-select" id="dt-mode" title="开发者工具停靠位置">
+              <option value="bottom">底部停靠</option>
+              <option value="right">右侧停靠</option>
+              <option value="undocked">独立窗口</option>
+              <option value="detach">分离窗口</option>
+            </select>
+            <button class="tb-btn tb-btn-primary" id="dt-open">打开</button>
+            <button class="tb-btn" id="dt-close">关闭</button>
+          </div>
+          <div class="tb-note" id="dt-note">检查元素、看控制台、改样式、打断点都在这里。</div>
+        </div>
+
+        <div class="tb-group">
+          <div class="tb-group-title">元素拾取</div>
+          <div class="tb-bar">
+            <button class="tb-btn tb-btn-primary" id="pick-start">开始拾取</button>
+            <button class="tb-btn" id="pick-cancel" hidden>取消拾取</button>
+          </div>
+          <div class="tb-note" id="pick-note">点页面上的元素即可抓取它的选择器、XPath、盒子与文本；Esc 取消。</div>
+          <div class="tb-card" id="pick-result" hidden></div>
+        </div>
+
+        <div class="tb-group">
+          <div class="tb-group-title">页面环境</div>
+          <label class="tb-field">
+            <span class="tb-field-label">UA</span>
+            <select class="tb-select" id="ua-select"></select>
+          </label>
+          <label class="tb-field" id="ua-custom-row" hidden>
+            <span class="tb-field-label">自定义</span>
+            <input class="tb-input" id="ua-custom" placeholder="Mozilla/5.0 …" spellcheck="false" />
+          </label>
+          <label class="tb-field">
+            <span class="tb-field-label">视口</span>
+            <select class="tb-select" id="device-select"></select>
+          </label>
+          <label class="tb-field">
+            <span class="tb-field-label">网络</span>
+            <select class="tb-select" id="throttle-select"></select>
+          </label>
+          <div class="tb-bar">
+            <label class="tb-check"><input type="checkbox" id="env-keep" />不重载</label>
+            <button class="tb-btn tb-btn-primary" id="env-apply">应用</button>
+            <button class="tb-btn" id="env-reset">还原</button>
+          </div>
+          <div class="tb-note" id="env-note">改 UA + 视口即切换桌面网页与手机版网站；设置对新标签同样生效。</div>
+        </div>
+
+        <div class="tb-group">
+          <div class="tb-group-title">页面状态</div>
+          <div class="tb-kv" id="page-info"></div>
+          <div class="tb-bar">
+            <label class="tb-check"><input type="checkbox" id="js-toggle" checked />启用 JavaScript</label>
+            <button class="tb-btn" id="info-refresh">刷新数据</button>
+          </div>
+        </div>
+
+        <div class="tb-group">
+          <div class="tb-group-title">清理与取证</div>
+          <div class="tb-bar">
+            <button class="tb-btn" id="site-clear">清理本站数据</button>
+            <button class="tb-btn" id="shot-view">截可视区</button>
+            <button class="tb-btn" id="shot-full">截整页</button>
+          </div>
+          <div class="tb-note">清理会移除本站 Cookie 与存储并刷新页面，不影响其他站点。</div>
+        </div>
+      </section>
+
+      <section class="tb-pane tb-scroll" id="pane-video" hidden>
+        <div class="tb-group">
+          <div class="tb-group-title">视频识别</div>
+          <div class="tb-bar">
+            <button class="tb-btn tb-btn-primary" id="video-scan">扫描视频</button>
+            <label class="tb-check" title="每 2 秒自动刷新一次进度与倍速"><input type="checkbox" id="video-watch" />自动刷新</label>
+          </div>
+          <div class="tb-kv" id="video-info"></div>
+          <div class="tb-note" id="video-note">只作用于当前标签页里能拿到脚本权限的视频（含同源 iframe）；跨域嵌套的播放器碰不到。</div>
+        </div>
+
+        <div class="tb-group">
+          <div class="tb-group-title">倍速解锁</div>
+          <div class="tb-chips" id="video-rates"></div>
+          <div class="tb-bar">
+            <input class="tb-input tb-input-sm" id="video-rate-custom" placeholder="自定义，如 3.5" spellcheck="false" />
+            <button class="tb-btn tb-btn-primary" id="video-rate-apply">应用</button>
+            <button class="tb-btn" id="video-rate-reset">还原 1x</button>
+          </div>
+          <label class="tb-check" title="站点把倍速改回去时自动拽回设定值（含播放器重建）">
+            <input type="checkbox" id="video-rate-lock" />锁定倍速
+          </label>
+          <div class="tb-note">站点自带的上限（常见 2x / 3x）由浏览器内核直接绕过，上限是内核实测的 16x。高倍速下声音会变调，属正常。</div>
+        </div>
+
+        <div class="tb-group">
+          <div class="tb-group-title">进度解锁</div>
+          <div class="tb-chips" id="video-seeks"></div>
+          <div class="tb-bar">
+            <input class="tb-input tb-input-sm" id="video-seek-custom" placeholder="12:30 / 750 / 50%" spellcheck="false" />
+            <button class="tb-btn tb-btn-primary" id="video-seek-go">跳转</button>
+            <button class="tb-btn" id="video-seek-unlock">解除锁定</button>
+          </div>
+          <label class="tb-check" title="站点把进度拽回去时自动纠正（部分平台会这么干）">
+            <input type="checkbox" id="video-seek-lock" />锁定进度
+          </label>
+          <div class="tb-note">支持 秒数、mm:ss、hh:mm:ss、百分比三种写法。部分站点进度由服务端 token 管控，跳转后会被纠正，此时开锁定即可。</div>
+        </div>
+
+        <div class="tb-group">
+          <div class="tb-group-title">鼠标保活</div>
+          <label class="tb-field">
+            <span class="tb-field-label">范围</span>
+            <select class="tb-select" id="mouse-mode">
+              <option value="video">视频窗口内</option>
+              <option value="viewport">整个页面</option>
+            </select>
+          </label>
+          <label class="tb-field">
+            <span class="tb-field-label">节奏</span>
+            <select class="tb-select" id="mouse-gap"></select>
+          </label>
+          <div class="tb-bar">
+            <button class="tb-btn tb-btn-primary" id="mouse-start">开始</button>
+            <button class="tb-btn" id="mouse-stop">停止</button>
+          </div>
+          <div class="tb-meta" id="mouse-info">未运行</div>
+          <div class="tb-note">鼠标在范围内随机游走，移动间隔随机，不落直线；这样长时间停留在页面上时不会被"长时间无操作"判定成挂机。通道被开发者工具占用时会自动切到页面脚本通道。</div>
+        </div>
+
+        <div class="tb-note tb-note-warn">收起工具箱会停掉保活并还原页面上的倍速与进度改写，不在页面上留无界面可撤销的改动。</div>
+      </section>
+
+      <!-- ==================== 书签管理 ==================== -->
+      <section class="tb-pane tb-scroll" id="pane-bookmarks" hidden>
+        <div class="tb-bar">
+          <button class="tb-btn tb-btn-primary" id="bm-add" title="把当前标签页的标题与网址收藏到书签">收藏当前页</button>
+          <button class="tb-btn" id="bm-new-folder" title="在根目录新建一个书签文件夹">新建文件夹</button>
+          <button class="tb-btn tb-btn-danger" id="bm-delete" title="删除选中的书签 / 文件夹（文件夹连同子项一起删）">删除选中</button>
+        </div>
+        <div class="tb-bar">
+          <button class="tb-btn" id="bm-import-edge" title="从 Microsoft Edge 导入全部书签（已存在的网址自动跳过）">从 Edge 导入</button>
+          <button class="tb-btn" id="bm-import-chrome" title="从 Google Chrome 导入全部书签（已存在的网址自动跳过）">从 Chrome 导入</button>
+        </div>
+        <input class="tb-input" id="bm-search" placeholder="过滤：标题 / 网址" spellcheck="false" />
+        <div class="tb-meta" id="bm-meta">加载中…</div>
+        <div class="tb-list tb-scroll" id="bm-list"></div>
+      </section>
+
+      <!-- ==================== 调试 ==================== -->
+      <section class="tb-pane tb-scroll" id="pane-debug" hidden>
+        <div class="tb-group">
+          <div class="tb-group-title">修改页面 HTML</div>
+          <textarea class="tb-textarea" id="dbg-html" placeholder="点「读取页面」把当前标签页的 HTML 拉进来编辑，再「应用到页面」写回…" spellcheck="false"></textarea>
+          <div class="tb-bar">
+            <button class="tb-btn tb-btn-primary" id="dbg-html-read">读取页面</button>
+            <button class="tb-btn" id="dbg-html-apply" disabled>应用到页面</button>
+            <button class="tb-btn" id="dbg-html-revert" disabled>还原原始</button>
+          </div>
+          <div class="tb-note" id="dbg-html-note">首次读取会自动留档本次会话的原始 HTML；「还原原始」恢复该版本。</div>
+        </div>
+        <div class="tb-group">
+          <div class="tb-group-title">控制台</div>
+          <textarea class="tb-textarea" id="dbg-js" placeholder="输入要执行的 JS，如：document.title、document.querySelector('h1').innerText" spellcheck="false"></textarea>
+          <div class="tb-bar">
+            <button class="tb-btn tb-btn-primary" id="dbg-js-run">执行</button>
+            <button class="tb-btn" id="dbg-js-clear">清空输出</button>
+          </div>
+          <div class="tb-meta" id="dbg-js-meta"></div>
+          <pre class="tb-console" id="dbg-js-out"></pre>
+        </div>
+      </section>
+
+      <!-- ==================== Cookie ==================== -->
+      <section class="tb-pane tb-scroll" id="pane-cookie" hidden>
+        <div class="tb-bar">
+          <button class="tb-btn tb-btn-primary" id="ck-refresh" title="刷新当前站点的 Cookie 列表">刷新</button>
+          <button class="tb-btn" id="ck-add" title="按当前站点域名新增一条 Cookie">新增</button>
+          <button class="tb-btn tb-btn-danger" id="ck-clear" title="清空当前站点的全部 Cookie">清空站点</button>
+        </div>
+        <div class="tb-bar">
+          <button class="tb-btn" id="ck-edge-site" title="从 Edge 导入当前站点的 Cookie（Edge 无需关闭）">从 Edge 导入当前站点</button>
+          <button class="tb-btn" id="ck-edge-all" title="从 Edge 导入全部 Cookie（上限 500 条）">从 Edge 导入全部</button>
+        </div>
+        <div class="tb-meta" id="ck-meta">加载中…</div>
+        <div class="tb-list tb-scroll" id="ck-list"></div>
+      </section>
+
+      <!-- ==================== 历史记录 ==================== -->
+      <section class="tb-pane" id="pane-history" hidden>
+        <div class="tb-bar">
+          <button class="tb-btn" id="history-clear" title="清空全部历史记录（不可撤销）">清空历史</button>
+        </div>
+        <input class="tb-input" id="history-search" placeholder="过滤：标题 / 网址" spellcheck="false" />
+        <div class="tb-meta" id="history-meta">加载中…</div>
+        <div class="tb-list tb-scroll" id="history-list"></div>
+      </section>
+
+      <div class="tb-toast" id="tb-toast" hidden></div>
+    </aside>
+
+    <!-- 请求详情：独立浮层，避免和列表挤在同一列里 -->
+    <div class="tb-drawer" id="net-detail" hidden>
+      <div class="tb-drawer-head">
+        <span class="tb-drawer-title" id="detail-title">请求详情</span>
+        <button class="icon-btn tb-head-btn" id="detail-close" title="关闭详情">✕</button>
+      </div>
+      <div class="tb-nav tb-drawer-nav" id="detail-nav">
+        <button class="tb-nav-btn is-on" data-sec="headers">概览与头</button>
+        <button class="tb-nav-btn" data-sec="payload">载荷</button>
+        <button class="tb-nav-btn" data-sec="body">正文</button>
+      </div>
+      <div class="tb-drawer-body tb-scroll" id="detail-body"></div>
+    </div>
+
+    <script src="renderer.js"></script>
+    <script src="bookmark-bar.js"></script>
+    <script src="toolbox-ui.js"></script>
+    <script src="fx.js"></script>
+  </body>
+</html>

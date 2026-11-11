@@ -1,0 +1,100 @@
+{
+  "name": "nyx",
+  "productName": "Nyx",
+  "version": "1.16.0",
+  "description": "Nyx — 双模式隐私浏览器（普通模式 / 全隐私模式），内置本机代理强制转发",
+  "main": "src/main.js",
+  "author": "Nyx contributors",
+  "license": "MIT",
+  "scripts": {
+    "setup-vendor": "node scripts/fetch-vendor.js",
+    "start": "electron .",
+    "mcp": "node src/mcp/server.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win nsis",
+    "dist:dir": "electron-builder --win nsis --dir",
+    "release": "node scripts/make-release.js",
+    "verify": "node scripts/verify-all.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "electron": "43.7.4",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.nyx.browser",
+    "productName": "Nyx",
+    "asar": true,
+    "compression": "maximum",
+    "electronLanguages": [
+      "zh-CN",
+      "en-US"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!**/*.map",
+      "!**/node_modules/**/{test,__tests__,tests,example,examples,docs}/**"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor",
+        "to": "vendor"
+      },
+      {
+        "from": "THIRD-PARTY-NOTICES.md",
+        "to": "THIRD-PARTY-NOTICES.md"
+      },
+      {
+        "from": "licenses",
+        "to": "licenses"
+      },
+      {
+        "from": "LICENSE",
+        "to": "LICENSE"
+      }
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Nyx 隐私浏览器",
+      "uninstallDisplayName": "Nyx 隐私浏览器",
+      "menuCategory": false,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "include": "build/installer.nsh",
+      "artifactName": "Nyx-Setup-${version}.exe",
+      "language": "2052",
+      "installerLanguages": [
+        "zh_CN"
+      ],
+      "unicode": true
+    },
+    "publish": null
+  },
+  "allowScripts": {
+    "protobufjs@7.6.6": true
+  }
+}

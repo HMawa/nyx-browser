@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self';"
+    />
+    <title>书签浮层</title>
+    <!-- 复用主窗口样式表：主题变量与深浅色包一次到位；专属样式在 bm-menu.css；玻璃层必须最后加载 -->
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="theme-nyx.css" />
+    <link rel="stylesheet" href="bm-menu.css" />
+    <link rel="stylesheet" href="theme-glass.css" />
+  </head>
+  <body>
+    <!-- 浮层列表：主进程推送数据后由 bm-menu.js 填充 -->
+    <div class="bm-menu-list" id="bm-menu-list"></div>
+    <script src="bm-menu.js"></script>
+    <script src="fx.js"></script>
+  </body>
+</html>

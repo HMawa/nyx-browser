@@ -1,0 +1,713 @@
+/* ==================================================================
+   Nyx · 玻璃霓虹层（Glassmorphism + 赛博动效）
+   ------------------------------------------------------------------
+   用法：在 style.css / settings.css / theme-nyx.css 之后加载本文件，
+   必须是最后一个样式表（靠同权重后置覆盖实现质感升级）。
+
+   设计约束（务必遵守）：
+     1. 不引入任何新色值 —— 所有霓虹/玻璃色一律从主题令牌派生
+        （color-mix(in srgb, var(--accent) N%, transparent)），
+        墨夜/极光/素纸/静谧四套主题换肤时本层自动跟随。
+     2. 不改布局、不改 DOM 结构 —— 只叠加背景、描边、光影、动效。
+     3. 动效遵循 Apple 式克制：缓出曲线、小位移、低幅度，
+        prefers-reduced-motion 下由 theme-nyx.css 全局归零。
+
+   分层模型：极光底幕(body::before) → 玻璃面板(blur+半透明) → 前景内容。
+   ================================================================== */
+
+/* ==================================================================
+   一、动效令牌与全局基调
+   ================================================================== */
+
+:root {
+  /* Apple 式缓动：快出缓收，带一点物理感 */
+  --fx-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --fx-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --fx-dur: 0.24s;
+
+  /* 玻璃面板：底色透明度（深色主题下玻璃更透，浅色主题稍实保可读） */
+  --glass-alpha: 72%;
+  --glass-alpha-strong: 82%;
+  --glass-blur: 16px;
+
+  /* 玻璃双描边：外圈发丝边 + 顶部 1px 高光 / 底部 1px 落影 */
+  --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.28);
+
+  /* 霓虹辉光：hover 时的边缘泛光 */
+  --neon-glow: 0 0 18px color-mix(in srgb, var(--accent) 26%, transparent),
+    0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+  --neon-glow-soft: 0 0 12px color-mix(in srgb, var(--accent) 16%, transparent);
+
+  /* 扫描线纹理：2px 间隔水平细线，叠在玻璃面板上 */
+  --scanlines: repeating-linear-gradient(
+    0deg,
+    transparent 0,
+    transparent 2px,
+    color-mix(in srgb, var(--accent) 2.6%, transparent) 2px,
+    color-mix(in srgb, var(--accent) 2.6%, transparent) 3px
+  );
+}
+
+/* 素纸（浅色）主题：玻璃减淡、高光换向、辉光收敛，避免发灰发脏 */
+[data-theme="paper"] {
+  --glass-alpha: 86%;
+  --glass-alpha-strong: 94%;
+  --glass-blur: 10px;
+  --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -1px 0 rgba(58, 48, 34, 0.06);
+  --neon-glow: 0 0 14px color-mix(in srgb, var(--accent) 18%, transparent);
+  --neon-glow-soft: 0 0 8px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* ==================================================================
+   二、极光底幕：页面最底层的霓虹渐变光效（低透明，不抢内容）
+   ================================================================== */
+
+body {
+  position: relative;
+  animation: fx-page-in 0.5s var(--fx-ease) both;
+}
+
+@keyframes fx-page-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 深色主题：底部一团强调色光晕 + 对角青色微光，缓慢漂移 */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -20%;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(
+      42% 34% at 18% 8%,
+      color-mix(in srgb, var(--accent) 9%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      36% 30% at 88% 96%,
+      color-mix(in srgb, var(--ok) 7%, transparent),
+      transparent 72%
+    );
+  animation: fx-aurora 26s ease-in-out infinite alternate;
+}
+
+@keyframes fx-aurora {
+  from {
+    transform: translate3d(-1.5%, -1%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(1.5%, 1.5%, 0) scale(1.06);
+  }
+}
+
+/* 素纸主题：光晕几乎不可见，只留一点暖色晕染 */
+[data-theme="paper"] body::before {
+  background: radial-gradient(
+    42% 34% at 18% 8%,
+    color-mix(in srgb, var(--accent) 4%, transparent),
+    transparent 70%
+  );
+  animation: none;
+}
+
+/* ==================================================================
+   三、玻璃面板：外壳 / 工具箱 / 抽屉 / 浮层
+   ================================================================== */
+
+/* 主窗口外壳：半透明玻璃 + 背景模糊 + 玻璃双描边 */
+.shell {
+  background-color: color-mix(in srgb, var(--bg-shell) var(--glass-alpha-strong), transparent);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.5);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.5);
+  box-shadow: var(--glass-edge), 0 8px 28px rgba(0, 0, 0, 0.3);
+}
+
+/* 签名"墨线"升级为霓虹光条：中线亮、两端渐隐、带辉光 */
+.shell::after {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--accent-55) 18%,
+    var(--accent) 38%,
+    var(--accent-40) 58%,
+    var(--border-soft) 82%,
+    transparent 100%
+  );
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 40%, transparent);
+  height: 1.5px;
+}
+
+/* 隐私模式：顶栏扫描线亮起，配合金色洗色表达"已上锁" */
+body.private-mode .shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--scanlines);
+  opacity: 0.5;
+}
+
+body.private-mode .shell::after {
+  box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 62%, transparent);
+}
+
+/* 工具箱抽屉：玻璃 + 扫描线纹理 + 内侧霓虹描边 */
+.toolbox {
+  background-color: color-mix(in srgb, var(--tb-bg) var(--glass-alpha), transparent);
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px)) saturate(1.6);
+  backdrop-filter: blur(calc(var(--glass-blur) + 4px)) saturate(1.6);
+  box-shadow: var(--glass-edge), -1px 0 0 color-mix(in srgb, var(--accent) 22%, transparent),
+    -24px 0 48px rgba(0, 0, 0, 0.4);
+  animation: fx-slide-in-right 0.32s var(--fx-ease) both;
+}
+
+/* 扫描线纹理层：极淡，只在面板上半部隐约可见 */
+.toolbox::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 38%;
+  pointer-events: none;
+  background: var(--scanlines);
+  opacity: 0.4;
+  z-index: 0;
+}
+
+/* 详情抽屉同语言 */
+.tb-drawer {
+  background-color: color-mix(in srgb, var(--tb-bg) var(--glass-alpha-strong), transparent);
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px)) saturate(1.6);
+  backdrop-filter: blur(calc(var(--glass-blur) + 4px)) saturate(1.6);
+  box-shadow: var(--glass-edge), -1px 0 0 color-mix(in srgb, var(--accent) 22%, transparent),
+    -24px 0 48px rgba(0, 0, 0, 0.42);
+  animation: fx-slide-in-right 0.28s var(--fx-ease) both;
+}
+
+@keyframes fx-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(22px);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+    filter: blur(0);
+  }
+}
+
+/* 提示浮层：玻璃 + 顶部霓虹描边 + 入场坠落动效 */
+.notice,
+.tb-toast {
+  background-color: color-mix(in srgb, var(--bg-float) 80%, transparent);
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 2px)) saturate(1.5);
+  backdrop-filter: blur(calc(var(--glass-blur) + 2px)) saturate(1.5);
+  box-shadow: var(--glass-edge), var(--shadow-2), var(--neon-glow-soft);
+  animation: fx-toast-in 0.34s var(--fx-ease-spring) both;
+}
+
+@keyframes fx-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.97);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+/* 设置中心：左导航玻璃化 */
+.settings-nav {
+  background-color: color-mix(in srgb, var(--bg-panel) var(--glass-alpha-strong), transparent);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  box-shadow: 1px 0 0 color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* 设置中心品牌标题：霓虹辉光字 */
+.settings-brand h1 {
+  text-shadow: 0 0 14px color-mix(in srgb, var(--accent) 45%, transparent),
+    0 0 2px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+/* ==================================================================
+   四、玻璃卡片与分组（工具箱 tb-group / 设置 info-card / 列表行）
+   ================================================================== */
+
+.tb-group,
+.info-card {
+  position: relative;
+  background-color: color-mix(in srgb, var(--tb-card) var(--glass-alpha), transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--glass-edge);
+  transition: transform var(--fx-dur) var(--fx-ease), box-shadow var(--fx-dur) var(--fx-ease),
+    border-color var(--fx-dur) var(--fx-ease);
+  overflow: hidden;
+}
+
+/* hover：轻微上浮 + 霓虹泛光 + 顶部高光位移 */
+.tb-group:hover,
+.info-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent-40);
+  box-shadow: var(--glass-edge), var(--neon-glow-soft),
+    inset 0 1px 0 color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* 指针跟随高光：fx.js 写入 --fx-mx / --fx-my，径向光斑跟随鼠标 */
+.tb-group::after,
+.info-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s var(--fx-ease);
+  background: radial-gradient(
+    180px circle at var(--fx-mx, 50%) var(--fx-my, 0%),
+    color-mix(in srgb, var(--accent) 7%, transparent),
+    transparent 70%
+  );
+}
+
+.tb-group:hover::after,
+.info-card:hover::after {
+  opacity: 1;
+}
+
+/* 卡片标题：左侧霓虹短杠，替代纯文字强调 */
+.tb-group-title::before,
+.info-head h3::before {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 10px;
+  margin-right: 7px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(180deg, var(--accent), var(--accent-40));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 55%, transparent);
+  vertical-align: -1px;
+}
+
+/* 列表项：玻璃行 + hover 上浮微缩放 */
+.tb-item,
+.tb-net,
+.set-row {
+  transition: transform var(--fx-dur) var(--fx-ease), border-color var(--fx-dur) var(--fx-ease),
+    background-color var(--fx-dur) var(--fx-ease), box-shadow var(--fx-dur) var(--fx-ease);
+}
+
+.tb-item:hover,
+.set-row:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent-24);
+  box-shadow: var(--glass-edge), 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+.tb-net:hover {
+  border-color: var(--accent-24);
+  background-color: color-mix(in srgb, var(--accent) 4%, var(--tb-card));
+}
+
+.tb-item.is-hit,
+.tb-net.is-open {
+  box-shadow: inset 2px 0 0 var(--accent), 0 0 14px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+/* 信息卡头部分区线换成霓虹渐隐线 */
+.info-head,
+.tb-head {
+  position: relative;
+}
+
+.info-head::after,
+.tb-head::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, var(--accent-40), var(--border-soft) 55%, transparent);
+}
+
+/* ==================================================================
+   五、按钮与交互控件：霓虹辉光 + 缩放反馈
+   ================================================================== */
+
+.icon-btn,
+.tb-btn,
+.btn,
+.tb-chip,
+.bm-item,
+.tb-mini,
+.bm-op {
+  transition: transform var(--fx-dur) var(--fx-ease), background-color 0.16s ease,
+    border-color 0.16s ease, color 0.16s ease, box-shadow var(--fx-dur) var(--fx-ease);
+}
+
+.icon-btn:hover:not(:disabled),
+.tb-btn:hover:not(:disabled),
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--neon-glow-soft);
+}
+
+.icon-btn:active:not(:disabled),
+.tb-btn:active:not(:disabled),
+.btn:active:not(:disabled),
+.tb-chip:active,
+.bm-item:active {
+  transform: translateY(0) scale(0.95);
+  transition-duration: 0.08s;
+}
+
+/* 主按钮：常态就带一点辉光，hover 泛光增强 + 弹性回弹 */
+.tb-btn-primary,
+.btn-primary {
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.tb-btn-primary:hover:not(:disabled),
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--neon-glow);
+}
+
+.tb-btn-primary:active:not(:disabled),
+.btn-primary:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+/* 危险按钮 hover：红光晕 */
+.tb-btn-danger:hover:not(:disabled),
+.btn-danger:hover:not(:disabled) {
+  box-shadow: 0 0 14px color-mix(in srgb, var(--danger) 26%, transparent);
+}
+
+/* 图标按钮开启态：霓虹描边 + 辉光 */
+.icon-btn.is-on,
+.tb-btn.is-on {
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* 页签按钮 / 筛选胶囊：激活态霓虹 */
+.tb-nav-btn.is-on {
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 30%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.tb-chip.is-on {
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* 设置导航激活项：竖杠加辉光 */
+.nav-item.active::before {
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+/* 地址栏：聚焦时霓虹内辉 */
+.address:focus {
+  box-shadow: var(--ring), inset 0 1px 2px rgba(0, 0, 0, 0.18),
+    0 0 18px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* 输入类聚焦：轻微泛光 */
+.tb-input:focus,
+.tb-select:focus,
+.tb-textarea:focus,
+.text-input:focus,
+select:focus,
+textarea:focus {
+  box-shadow: 0 0 0 2px var(--accent-glow), 0 0 12px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* 模式开关开启：弹性切换 */
+.mode-switch {
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mode-switch .knob {
+  transition: transform 0.28s var(--fx-ease-spring), background 0.2s ease;
+}
+
+.mode-switch[aria-checked="true"] {
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* 链路徽标（代理在线）：呼吸辉光 */
+.link-badge.link-proxy {
+  animation: fx-breathe 2.8s ease-in-out infinite;
+}
+
+@keyframes fx-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+}
+
+/* ==================================================================
+   六、标签页（tab）：霓虹顶线辉光 + 加载扫描
+   ================================================================== */
+
+.tab {
+  transition: background 0.18s var(--fx-ease), border-color 0.18s ease, color 0.18s ease,
+    transform 0.18s var(--fx-ease);
+}
+
+.tab:not(.active):hover {
+  transform: translateY(-1px);
+}
+
+.tab.active {
+  background-color: color-mix(in srgb, var(--bg-tab-active) 86%, transparent);
+  border-color: var(--accent-24);
+  box-shadow: var(--glass-edge), 0 0 14px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* 激活标签顶线加辉光 */
+.tab.active::before {
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent);
+  width: 30px;
+}
+
+/* 加载指示：金色细环 + 霓虹拖影 */
+.tab-spinner {
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 45%, transparent);
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 60%, transparent));
+}
+
+/* 页面加载中：外壳顶部一条霓虹扫描光条（fx.js 切 body.fx-loading） */
+body.fx-loading .shell::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 3;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--accent) 40%,
+    var(--accent-soft) 50%,
+    var(--accent) 60%,
+    transparent 100%
+  );
+  background-size: 45% 100%;
+  background-repeat: no-repeat;
+  animation: fx-scan-sweep 1.1s linear infinite;
+  opacity: 0.9;
+}
+
+@keyframes fx-scan-sweep {
+  from {
+    background-position: -50% 0;
+  }
+  to {
+    background-position: 150% 0;
+  }
+}
+
+/* ==================================================================
+   七、页面切换过渡：页签 / 设置分区 淡入 + 位移 + 模糊聚焦
+   ================================================================== */
+
+/* 工具箱页签：hidden 切回显示时动画自动重放 */
+.tb-pane {
+  animation: fx-pane-in 0.3s var(--fx-ease) both;
+}
+
+/* 设置分区：.active 显示时动画自动重放 */
+.sec-panel.active {
+  animation: fx-pane-in 0.32s var(--fx-ease) both;
+}
+
+@keyframes fx-pane-in {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+    filter: blur(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+/* 书签浮层列表项入场（bm-menu 弹窗） */
+.bm-menu-list > * {
+  animation: fx-pane-in 0.24s var(--fx-ease) both;
+}
+
+/* ==================================================================
+   八、滚动体验：渐显 + 进度指示
+   ================================================================== */
+
+/* 滚动渐显：fx.js 的 IntersectionObserver 加 .fx-in 触发 */
+.fx-reveal {
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.5s var(--fx-ease), transform 0.5s var(--fx-ease);
+  transition-delay: var(--fx-delay, 0s);
+}
+
+.fx-reveal.fx-in {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* 滚动进度条：容器顶部 2px 霓虹流光（fx.js 按滚动比例写入 --fx-progress） */
+.tb-pane,
+.sec-scroll {
+  position: relative;
+}
+
+.fx-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 2px;
+  width: calc(var(--fx-progress, 0) * 100%);
+  max-width: 100%;
+  z-index: 4;
+  pointer-events: none;
+  border-radius: var(--r-pill);
+  background: linear-gradient(90deg, var(--accent-55), var(--accent), var(--accent-soft));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 50%, transparent);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.fx-progress.fx-active {
+  opacity: 1;
+}
+
+/* 滚动条：hover 时霓虹化 */
+::-webkit-scrollbar-thumb:hover,
+.tb-pane::-webkit-scrollbar-thumb:hover,
+.tb-list::-webkit-scrollbar-thumb:hover,
+.tb-drawer-body::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-55);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* ==================================================================
+   九、加载与故障风点缀
+   ================================================================== */
+
+/* 工具箱标题：默认霓虹辉光字，hover 时短促故障闪烁（RGB 分离取自语义色） */
+.tb-title {
+  text-shadow: 0 0 10px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.tb-title:hover {
+  animation: fx-glitch 0.42s steps(2, end) 1;
+}
+
+@keyframes fx-glitch {
+  0% {
+    text-shadow: 1px 0 var(--danger-soft), -1px 0 var(--ok-soft),
+      0 0 10px color-mix(in srgb, var(--accent) 40%, transparent);
+    transform: translateX(0);
+  }
+  30% {
+    text-shadow: -1.5px 0 var(--danger-soft), 1.5px 0 var(--ok-soft);
+    transform: translateX(1px);
+  }
+  60% {
+    text-shadow: 1.5px 0 var(--ok-soft), -1.5px 0 var(--danger-soft);
+    transform: translateX(-1px);
+  }
+  100% {
+    text-shadow: 0 0 10px color-mix(in srgb, var(--accent) 40%, transparent);
+    transform: translateX(0);
+  }
+}
+
+/* 控制台 / 代码视图：顶部扫描线缓慢下行，暗示"终端"质感 */
+.tb-console,
+.tb-pre {
+  position: relative;
+  overflow: hidden;
+}
+
+.tb-console::after,
+.tb-pre::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -30%;
+  height: 30%;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    color-mix(in srgb, var(--accent) 4%, transparent),
+    transparent
+  );
+  animation: fx-console-scan 5s linear infinite;
+}
+
+@keyframes fx-console-scan {
+  from {
+    top: -30%;
+  }
+  to {
+    top: 130%;
+  }
+}
+
+/* 空状态：淡入即可，不额外加特效 */
+.tb-empty {
+  animation: fx-pane-in 0.4s var(--fx-ease) both;
+}
+
+/* ==================================================================
+   十、可访问性与浅色主题兜底
+   ================================================================== */
+
+/* 键盘焦点：霓虹外环 */
+:focus-visible {
+  outline: 2px solid var(--accent-55);
+  outline-offset: 1px;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+/* 素纸主题：辉光全部收敛，玻璃描边换向 */
+[data-theme="paper"] .tb-title,
+[data-theme="paper"] .settings-brand h1 {
+  text-shadow: none;
+}
+
+[data-theme="paper"] .link-badge.link-proxy {
+  animation: none;
+}
+
+[data-theme="paper"] .tb-console::after,
+[data-theme="paper"] .tb-pre::after {
+  display: none;
+}
+
+[data-theme="paper"] .shell::after {
+  box-shadow: none;
+}

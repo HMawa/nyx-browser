@@ -1,0 +1,239 @@
+/* 「收藏到文件夹」浮层（v1.5.0 新增，独立无边框透明 BrowserWindow）。
+   ------------------------------------------------------------------
+   与 addr-suggest.css 同思路：窗口本身完全透明，圆角、描边、落影全部
+   画在 .bf-panel 上；颜色一律取 theme-nyx.css 的主题令牌，四套主题自动跟随。
+
+   高度契约（主进程按它算窗口尺寸，改这里必须同步改主进程）：
+     .bf-item      恒 30px（border-box，纵向不加 margin / padding / border）
+     .bf-head      6 + 16 + 6 = 28px（line-height 固定 16px）
+     .bf-divider   1 + 4 + 4 = 9px
+     .bf-panel     上下内边距 4px ×2 + 左右描边 1px ×2 = 10px
+   于是窗口高度 = 条目数 × 30 + 28（头部）+ 10（面板内边距/描边）
+                + 分隔线数 × 9。 */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  /* 透明窗口：底色由 .bf-panel 自己画，body 必须完全透明 */
+  background: transparent !important;
+  color: var(--text-main, #ece7df);
+  font-family: "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+  font-size: 12px;
+  user-select: none;
+}
+
+/* style.css / theme-glass.css 会给主窗口 body 铺底幕与噪点层，浮层不需要 */
+body::before,
+body::after {
+  display: none !important;
+}
+
+/* 面板：圆角 10px + 发丝描边 + 落影，全部画在透明窗口上 */
+.bf-panel {
+  box-sizing: border-box;
+  height: 100%;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  background: var(--bg-float, #141111);
+  border: 1px solid var(--border-strong, rgba(214, 196, 168, 0.22));
+  box-shadow: var(--shadow-2, 0 14px 34px rgba(0, 0, 0, 0.55));
+  overflow: hidden;
+}
+
+/* 头部：固定行高，保证总高恰好 28px（6 + 16 + 6） */
+.bf-head {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-faint, #6e6862);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 列表：纵向滚动，条目多时在内部滚 */
+.bf-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* 6px 细滚动条（与 bm-menu.css 同一手法） */
+.bf-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.bf-list::-webkit-scrollbar-thumb {
+  background: var(--border, rgba(214, 196, 168, 0.13));
+  border-radius: 3px;
+}
+
+.bf-list::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong, rgba(214, 196, 168, 0.22));
+}
+
+.bf-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 条目：高度恒为 30px —— 主进程按「条目数 × 30」算窗口高度，
+   纵向只用 height，不加 margin，也不要给条目加 border。 */
+.bf-item {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--text-dim, #9d968c);
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* 鼠标悬停：强调色低透明叠加 */
+.bf-item:hover {
+  background: var(--accent-10, rgba(200, 164, 92, 0.1));
+  color: var(--text-main, #ece7df);
+}
+
+/* 当前选中项（键盘导航 / 高亮）：比 hover 再深一档 */
+.bf-item.is-on {
+  background: var(--accent-14, rgba(200, 164, 92, 0.14));
+  color: var(--text-main, #ece7df);
+}
+
+/* 子文件夹缩进：只动左内边距，绝不动高度 */
+.bf-depth-1 {
+  padding-left: 14px;
+}
+
+.bf-depth-2 {
+  padding-left: 28px;
+}
+
+.bf-depth-3 {
+  padding-left: 42px;
+}
+
+/* 文件夹名：占主位，超长省略 */
+.bf-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 条目数：右侧次要信息，不抢名称 */
+.bf-count {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-faint, #6e6862);
+  white-space: nowrap;
+}
+
+/* 分隔线：1px 线 + 上下各 4px 外边距（合计 9px，已计入窗口高度公式） */
+.bf-divider {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--border-soft, rgba(214, 196, 168, 0.07));
+}
+
+/* 「新建文件夹并收藏…」：用强调色与普通文件夹拉开层次；
+   放在 .bf-item:hover / .is-on 之后，保证悬停与高亮时仍是强调色。 */
+.bf-item.bf-item-new {
+  color: var(--accent, #c8a45c);
+}
+
+/* 空状态：没有任何文件夹时给一句引导（正常情况主进程会退回书签栏） */
+.bf-empty {
+  padding: 10px;
+  color: var(--text-faint, #6e6862);
+  line-height: 1.5;
+}
+
+/* 搜索框（v1.6.0）：文件夹多了以后直接打字过滤。
+   高度契约：28px + 下间距 6px = 34px，必须与 main.js 的 BF_SEARCH_H 一致。 */
+.bf-search {
+  box-sizing: border-box;
+  height: 28px;
+  margin: 0 8px 6px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border, rgba(214, 196, 168, 0.13));
+  background: var(--bg-input, #141110);
+  color: var(--text-main, #ece7df);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+
+.bf-search::placeholder {
+  color: var(--text-faint, #6e6862);
+}
+
+.bf-search:focus {
+  border-color: var(--accent-40, rgba(200, 164, 92, 0.4));
+  box-shadow: var(--ring, 0 0 0 3px rgba(200, 164, 92, 0.2));
+}
+
+/* 新建文件夹命名行（v1.7.0）：30px 输入框 + 下间距 4px = 34px，
+   必须与 main.js 的 BF_NEW_ROW_H 一致。 */
+.bf-new-row {
+  flex: 0 0 auto;
+  padding: 0 8px 4px;
+}
+
+.bf-new-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px dashed var(--border-strong, rgba(214, 196, 168, 0.22));
+  background: transparent;
+  color: var(--text-main, #ece7df);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+
+.bf-new-input::placeholder {
+  color: var(--text-faint, #6e6862);
+}
+
+.bf-new-input:focus {
+  border-style: solid;
+  border-color: var(--accent-40, rgba(200, 164, 92, 0.4));
+  box-shadow: var(--ring, 0 0 0 3px rgba(200, 164, 92, 0.2));
+}
+/* 「最近使用」分组头（v1.8.0）：比主列表的 .bf-head 更小更淡，只是分区提示 */
+.bf-head-recent {
+  padding: 2px 8px 4px;
+  font-size: 10px;
+  color: var(--text-faint, #6e6862);
+}
+
+/* 最近使用行：左侧一条强调虚线，和普通文件夹区分开（不改高度） */
+.bf-item-recent {
+  box-shadow: inset 2px 0 0 var(--accent-24, rgba(200, 164, 92, 0.24));
+}
+/* 置顶建议分组（v1.13.0）：标题与最近使用同款，行用左侧强调竖条区分 */
+.bf-head-pinned {
+  padding: 2px 8px 4px;
+  font-size: 10px;
+  color: var(--text-faint, #6e6862);
+}
+
+.bf-item-pinned {
+  box-shadow: inset 2px 0 0 var(--accent-40, rgba(200, 164, 92, 0.4));
+}

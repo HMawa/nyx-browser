@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;"
+    />
+    <title>地址建议</title>
+    <!-- 复用主窗口样式表拿主题令牌（四套主题自动跟随）；专属样式在 addr-suggest.css；
+         本窗口是"贴在地址栏下方的透明浮层"，不引玻璃层（它只作用于主窗口的结构类） -->
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="theme-nyx.css" />
+    <link rel="stylesheet" href="addr-suggest.css" />
+  </head>
+  <body>
+    <!-- 面板：圆角 + 描边 + 落影都画在透明窗口上，窗口本身无边框 -->
+    <div class="as-panel">
+      <!-- 建议列表：主进程推送数据后由 addr-suggest.js 填充 -->
+      <div class="as-list" id="as-list"></div>
+    </div>
+    <script src="addr-suggest.js"></script>
+  </body>
+</html>

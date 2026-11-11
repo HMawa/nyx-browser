@@ -1,0 +1,13 @@
+内核: mihomo (Clash Meta)
+版本: v1.19.31  (发布于 2026-09-14)
+平台: windows-amd64
+SHA256: 532ED88B3A37D72F6B5EE5D24A45CE5D8799F3BA34931D6A167D4345F7EBCA50
+来源: https://github.com/MetaCubeX/mihomo/releases/download/v1.19.31/mihomo-windows-amd64-v1.19.31.zip
+发布包 SHA256: 38b2420799d9e7cde77ec1a19c7150dd17ca77f7fb82d9f62cb8763a307eee67
+许可证: GPL-3.0 (GNU General Public License v3.0)
+许可全文: https://www.gnu.org/licenses/gpl-3.0.txt
+上游源码: https://github.com/MetaCubeX/mihomo/tree/v1.19.31
+说明: mihomo 为本项目以独立进程方式调用的第三方内核，许可证为 GPL-3.0；
+      本项目对其未作任何修改，仅按原样分发（详见仓库根目录 THIRD-PARTY-NOTICES.md）。
+      上面的 SHA256 是解压后 mihomo.exe 的哈希，发布包 SHA256 是上游 zip 的哈希。
+入库前卡巴扫描: Total detected = 0 (病毒库 2026-09-17 10:21, 本机 avp.com)

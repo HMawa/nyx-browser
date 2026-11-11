@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self';"
+    />
+    <title>Nyx 书签管理</title>
+    <!-- 复用主窗口样式表：主题变量与深浅色包一次到位；专属样式在 bm-manage.css -->
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="theme-nyx.css" />
+    <link rel="stylesheet" href="bm-manage.css" />
+  </head>
+  <body>
+    <!-- 顶部工具栏：标题、统计、删除按钮 -->
+    <header class="bm-head">
+      <div class="bm-head-left">
+        <span class="bm-title">书签管理</span>
+        <span class="bm-count" id="bm-count"></span>
+      </div>
+      <div class="bm-head-right">
+        <button class="bm-btn bm-btn-danger" id="bm-delete" type="button">删除选中</button>
+        <button class="bm-btn" id="bm-close" type="button">关闭</button>
+      </div>
+    </header>
+
+    <!-- 树形书签列表：文件夹可展开 / 折叠，行内复选框多选，↑↓ 同级调整顺序 -->
+    <main class="bm-tree" id="bm-tree"></main>
+
+    <!-- 页内二次确认条：删除前弹出，避免误删 -->
+    <div class="bm-confirm" id="bm-confirm" hidden>
+      <span class="bm-confirm-msg" id="bm-confirm-msg"></span>
+      <button class="bm-btn bm-btn-danger" id="bm-confirm-ok" type="button">确认删除</button>
+      <button class="bm-btn" id="bm-confirm-cancel" type="button">取消</button>
+    </div>
+
+    <!-- 操作结果提示条（移动失败 / 空选等），几秒后自动消失 -->
+    <div class="bm-status" id="bm-status" hidden></div>
+
+    <script src="bm-manage.js"></script>
+  </body>
+</html>
