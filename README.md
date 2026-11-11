@@ -81,10 +81,18 @@
 
 ## 快速开始
 
+### 直接下载安装包
+
+不编译、只想试用：[下载最新 Windows 安装包](https://github.com/HMawa/nyx-browser/releases/latest)（`Nyx-Setup-x.y.z.exe`，约 113 MB）。双击运行即可，安装向导会先做环境体检、装完写一份安装报告，卸载时可选择是否保留个人数据；静默参数与已知风险见 [docs/installer.md](docs/installer.md) 与 [docs/Nyx-1.17.0-安装须知.md](docs/Nyx-1.17.0-安装须知.md)。
+
+> 安装包未做代码签名，首次运行 Windows 可能提示「未知发布者」，选择「仍要运行」即可。
+
+### 从源码运行
+
 **环境要求**：Windows 10/11 x64、Node.js 18 以上、npm。
 
 ```powershell
-git clone <your-repo-url> Nyx
+git clone https://github.com/HMawa/nyx-browser.git Nyx
 cd Nyx
 
 npm install
