@@ -499,12 +499,21 @@ async function main() {
 
     const bfDom = await evalInTarget(
       'bm-folder.html',
-      `(() => ({
-        head: (document.querySelector('.bf-head') || {}).textContent,
-        picks: document.querySelectorAll('.bf-item-pick').length,
-        firstName: (document.querySelector('.bf-name') || {}).textContent,
-        hasNewRow: !!document.querySelector('.bf-item-new'),
-      }))()`,
+      `(async () => {
+        // 浮层列表由主进程 onData 推送后才渲染，bookmarksFolderMenu() 返回 ok 时
+        // DOM 可能还是空的（2026-11-11 复跑出现过 picks=0 的偶发失败）→ 轮询等渲染。
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        for (let i = 0; i < 40; i++) {
+          if (document.querySelectorAll('.bf-item-pick').length >= 2 && document.querySelector('.bf-item-new')) break;
+          await wait(50);
+        }
+        return {
+          head: (document.querySelector('.bf-head') || {}).textContent,
+          picks: document.querySelectorAll('.bf-item-pick').length,
+          firstName: (document.querySelector('.bf-name') || {}).textContent,
+          hasNewRow: !!document.querySelector('.bf-item-new'),
+        };
+      })()`,
     );
     check(
       '浮层列出「书签栏」/ 文件夹 / 新建项',
