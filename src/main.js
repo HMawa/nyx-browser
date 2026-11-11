@@ -229,10 +229,313 @@ const runtime = {
 const modeEventLog = createModeEventLog(MODE_EVENT_LIMIT);
 
 /* ------------------------------------------------------------------ */
+/* 完整性自检（--verify-integrity）                                     */
+/* ------------------------------------------------------------------ */
+/*
+ * 安装器在安装完成后会执行 `Nyx.exe --verify-integrity` 复核安装介质，
+ * 这里必须在单实例锁、窗口、渲染进程与代理内核启动之前处理：
+ *   1) 只读文件并计算 SHA-256，不创建任何窗口、不加载任何页面；
+ *   2) 校验对象是 <resources>/integrity.json（打包期由 build/after-pack.js 生成）；
+ *   3) `--report=<路径>` 时把明细写成 UTF-8 文本，同时 stdout 打印摘要；
+ *   4) 全部一致 app.exit(0)，有缺失 / 哈希不符 / 非法清单路径则 app.exit(1)；
+ *   5) 开发态（未打包）找不到清单时明确输出"跳过校验"并 exit 0，不静默崩溃。
+ * 开发态没有打包产物，基准回落到项目根目录，也可用 NYX_INTEGRITY_ROOT
+ * 指向一份解包产物（例如 dist\win-unpacked\resources）做联调。
+ */
+
+/** 完整性自检命令行开关 */
+const VERIFY_INTEGRITY_FLAG = '--verify-integrity';
+/** 清单文件名（与 build/after-pack.js 保持一致） */
+const INTEGRITY_MANIFEST_NAME = 'integrity.json';
+/** 摘要算法（与 build/after-pack.js 保持一致） */
+const INTEGRITY_ALGORITHM = 'sha256';
+
+/**
+ * 从命令行解析 `--report=<路径>`（也接受 `--report <路径>`）。
+ *
+ * 返回 null 表示没有该参数；返回空串表示参数存在但路径为空（视为用户错误，
+ * 只警告不阻断校验结果）。
+ *
+ * @param {string[]} argv 进程参数（含可执行文件路径，但不影响识别）
+ * @returns {string|null}
+ */
+function parseIntegrityReportPath(argv) {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = String(argv[index] || '');
+    if (arg === '--report' || arg === '--report-file') {
+      const next = String(argv[index + 1] || '');
+      if (!next || next.startsWith('--')) return '';
+      return path.resolve(next);
+    }
+    if (arg.startsWith('--report=')) {
+      const value = arg.slice('--report='.length).trim();
+      return value ? path.resolve(value) : '';
+    }
+  }
+  return null;
+}
+
+/**
+ * 计算单个文件的 SHA-256（小写 hex）。
+ * 分块读取，避免把内核等大文件整块读进内存。
+ *
+ * @param {string} absolutePath 文件绝对路径
+ * @returns {string}
+ */
+function hashFileSync(absolutePath) {
+  const hash = crypto.createHash(INTEGRITY_ALGORITHM);
+  const fd = fs.openSync(absolutePath, 'r');
+  try {
+    const chunk = Buffer.allocUnsafe(1024 * 1024);
+    let readBytes = 0;
+    while ((readBytes = fs.readSync(fd, chunk, 0, chunk.length, null)) > 0) {
+      hash.update(chunk.subarray(0, readBytes));
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return hash.digest('hex');
+}
+
+/**
+ * 判定清单里的相对路径是否安全：不允许绝对路径、盘符或 `..` 逃出基准目录。
+ * 清单被替换成恶意内容时，不能让校验动作去读包外的任意文件。
+ *
+ * @param {string} relativePath 清单键
+ * @returns {boolean}
+ */
+function isSafeIntegrityPath(relativePath) {
+  if (typeof relativePath !== 'string' || relativePath.length === 0) return false;
+  if (path.isAbsolute(relativePath)) return false;
+  if (/^[A-Za-z]:/.test(relativePath)) return false;
+  return !relativePath.split(/[\\/]/).some((segment) => segment === '..');
+}
+
+/**
+ * 解析完整性清单的基准目录。
+ *
+ * - 打包运行：process.resourcesPath（即安装目录\resources）；
+ * - 开发态：项目根目录（app.getAppPath()）；
+ * - 联调可用 NYX_INTEGRITY_ROOT 覆盖（指向解包产物的 resources 目录）。
+ *
+ * @returns {string}
+ */
+function resolveIntegrityBase() {
+  const override = String(process.env.NYX_INTEGRITY_ROOT || '').trim();
+  if (override) return path.resolve(override);
+  if (app.isPackaged) return process.resourcesPath;
+  return app.getAppPath();
+}
+
+/**
+ * 执行一次完整性校验，打印摘要、按需写报告，返回进程退出码。
+ *
+ * @returns {number} 0 全部一致 / 1 存在异常
+ */
+function runIntegrityVerify() {
+  /*
+   * 关闭 Electron 的 asar 虚拟文件系统：打包后 fs.statSync/读取
+   * `resources/app.asar` 会被当作"目录"处理（内容按归档虚拟化），
+   * 而完整性校验要算的是磁盘上那个归档文件本身的哈希，
+   * 不关掉就会把 app.asar 误判成"缺失"。进程随后立即退出，无需还原。
+   */
+  process.noAsar = true;
+  const baseDir = resolveIntegrityBase();
+  const manifestPath = path.join(baseDir, INTEGRITY_MANIFEST_NAME);
+  const reportPath = parseIntegrityReportPath(process.argv);
+
+  /*
+   * 开发态兜底：未打包（直接 `electron .`）时没有构建期清单。
+   * 这里明确输出"跳过"并 exit 0，而不是当成校验失败 —— 开发期想做真正的
+   * 完整性校验请用 `node scripts/verify-integrity.js <产物目录>`；
+   * 如果设置了 NYX_INTEGRITY_ROOT 指向解包产物，则会照常校验。
+   */
+  if (!app.isPackaged && !fs.existsSync(manifestPath)) {
+    console.log(`[Nyx] 开发态无完整性清单（${manifestPath}），跳过完整性校验，exit 0。`);
+    if (reportPath) {
+      try {
+        fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+        fs.writeFileSync(
+          reportPath,
+          [
+            'Nyx 完整性校验报告',
+            `生成时间：${new Date().toISOString()}`,
+            '结果：跳过（开发态无完整性清单）',
+            `校验基准：${baseDir}`,
+            `清单文件：${manifestPath}（不存在）`,
+            '说明：开发态未经 electron-builder 打包，没有构建期清单；',
+            '      请在解包产物上执行：node scripts/verify-integrity.js <产物目录>。',
+            '',
+          ].join('\n'),
+          'utf8',
+        );
+        console.log(`[Nyx] 校验报告已写入：${reportPath}`);
+      } catch (error) {
+        console.error(`[Nyx] 警告：校验报告写入失败：${error.message}`);
+      }
+    }
+    return 0;
+  }
+
+  /** @type {{ version: string, generated: string, files: Record<string, string> } | null} */
+  let manifest = null;
+  let fatalError = '';
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  } catch (error) {
+    fatalError = `完整性清单不可用：${error.message}`;
+  }
+
+  /** 统计与明细 */
+  const result = {
+    baseDir,
+    manifestPath,
+    version: '',
+    generated: '',
+    total: 0,
+    matched: 0,
+    /** 缺失文件（清单里有、磁盘上没有） */
+    missing: [],
+    /** 哈希不符明细 */
+    mismatched: [],
+    /** 清单里出现的非法路径（绝对路径 / ..） */
+    unsafe: [],
+    fatalError,
+  };
+
+  if (manifest && typeof manifest === 'object') {
+    result.version = String(manifest.version || '');
+    result.generated = String(manifest.generated || '');
+    if (manifest.algorithm !== INTEGRITY_ALGORITHM) {
+      fatalError = `清单摘要算法不受支持：${String(manifest.algorithm)}（本程序只支持 ${INTEGRITY_ALGORITHM}）`;
+    } else if (
+      !manifest.files ||
+      typeof manifest.files !== 'object' ||
+      Array.isArray(manifest.files)
+    ) {
+      fatalError = '清单缺少 files 字段或该字段不是对象';
+    } else {
+      const entries = Object.keys(manifest.files).sort((left, right) =>
+        left < right ? -1 : left > right ? 1 : 0,
+      );
+      result.total = entries.length;
+      if (entries.length === 0) fatalError = '清单为空：没有任何待校验文件';
+      for (const relativePath of entries) {
+        const expected = String(manifest.files[relativePath] || '').toLowerCase();
+        if (!isSafeIntegrityPath(relativePath)) {
+          result.unsafe.push(relativePath);
+          continue;
+        }
+        const absolutePath = path.join(baseDir, ...relativePath.split(/[\\/]/));
+        let stat = null;
+        try {
+          stat = fs.statSync(absolutePath);
+        } catch {
+          stat = null;
+        }
+        if (!stat || !stat.isFile()) {
+          result.missing.push(relativePath);
+          continue;
+        }
+        const actual = hashFileSync(absolutePath);
+        if (actual === expected) {
+          result.matched += 1;
+        } else {
+          result.mismatched.push({ relativePath, expected, actual });
+        }
+      }
+    }
+  }
+
+  const abnormal = result.missing.length + result.mismatched.length + result.unsafe.length;
+  const passed = !fatalError && result.total > 0 && abnormal === 0;
+
+  /* ---------- stdout 摘要 ---------- */
+  console.log(`[Nyx] 完整性校验基准：${baseDir}`);
+  if (result.version) console.log(`[Nyx] 清单版本：${result.version}（生成于 ${result.generated || '未知时间'}）`);
+  if (fatalError) console.error(`[Nyx] ✘ ${fatalError}`);
+  for (const item of result.mismatched) {
+    console.error(`[Nyx] ✘ 哈希不符：${item.relativePath}（期望 ${item.expected}，实际 ${item.actual}）`);
+  }
+  for (const relativePath of result.missing) {
+    console.error(`[Nyx] ✘ 文件缺失：${relativePath}`);
+  }
+  for (const relativePath of result.unsafe) {
+    console.error(`[Nyx] ✘ 清单路径非法（疑似被篡改）：${relativePath}`);
+  }
+  if (passed) {
+    console.log(`[Nyx] 完整性校验通过：${result.matched}/${result.total} 项与清单一致。`);
+  } else {
+    console.error(
+      `[Nyx] 完整性校验失败：${abnormal} 项异常（缺失 ${result.missing.length} / 不符 ${result.mismatched.length} / 非法路径 ${result.unsafe.length}），` +
+        `一致 ${result.matched} 项，共 ${result.total} 项。`,
+    );
+  }
+
+  /* ---------- 报告文件（可选） ---------- */
+  if (reportPath === '') {
+    console.error('[Nyx] 警告：--report 参数缺少路径，未写出校验报告。');
+  } else if (reportPath) {
+    const lines = [];
+    lines.push('Nyx 完整性校验报告');
+    lines.push(`生成时间：${new Date().toISOString()}`);
+    lines.push(`结果：${passed ? '通过' : '失败'}`);
+    lines.push(`校验基准：${baseDir}`);
+    lines.push(`清单文件：${manifestPath}`);
+    lines.push(`清单版本：${result.version || '未知'}（生成于 ${result.generated || '未知时间'}）`);
+    lines.push(`摘要算法：${INTEGRITY_ALGORITHM}`);
+    lines.push(
+      `统计：共 ${result.total} 项，一致 ${result.matched} 项，缺失 ${result.missing.length} 项，哈希不符 ${result.mismatched.length} 项，非法路径 ${result.unsafe.length} 项。`,
+    );
+    if (fatalError) lines.push(`错误：${fatalError}`);
+    lines.push('');
+    lines.push('明细：');
+    if (result.total === 0) lines.push('  （无可校验条目）');
+    // 明细按清单顺序输出，缺失与不符项带原因标注，便于人工排查
+    for (const item of result.mismatched) {
+      lines.push(`  [哈希不符] ${item.relativePath}`);
+      lines.push(`      期望：${item.expected}`);
+      lines.push(`      实际：${item.actual}`);
+    }
+    for (const relativePath of result.missing) {
+      lines.push(`  [缺失] ${relativePath}`);
+    }
+    for (const relativePath of result.unsafe) {
+      lines.push(`  [非法路径] ${relativePath}`);
+    }
+    if (abnormal === 0 && !fatalError) {
+      for (const relativePath of Object.keys(manifest && manifest.files ? manifest.files : {}).sort((left, right) =>
+        left < right ? -1 : left > right ? 1 : 0,
+      )) {
+        lines.push(`  [一致] ${relativePath}`);
+      }
+      if (result.total === 0) lines.push('  （无异常）');
+    }
+    try {
+      fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+      fs.writeFileSync(reportPath, `${lines.join('\n')}\n`, 'utf8');
+      console.log(`[Nyx] 校验报告已写入：${reportPath}`);
+    } catch (error) {
+      // 报告写不出来不改变校验结论，但要让调用方在日志里看得见
+      console.error(`[Nyx] 警告：校验报告写入失败：${error.message}`);
+    }
+  }
+
+  return passed ? 0 : 1;
+}
+
+/* ------------------------------------------------------------------ */
 /* 单实例运行                                                          */
 /* ------------------------------------------------------------------ */
 
-if (!app.requestSingleInstanceLock()) {
+if (process.argv.includes(VERIFY_INTEGRITY_FLAG)) {
+  /*
+   * 完整性自检模式：建窗前处理完即退出。
+   * 这里刻意不走单实例锁 —— 否则 Nyx 正在运行时校验进程会被当成
+   * "第二个实例"直接 exit(0)，无论文件有没有被改都返回 0，安装器就没法发现异常。
+   */
+  app.exit(runIntegrityVerify());
+} else if (!app.requestSingleInstanceLock()) {
   app.exit(0);
 } else {
   app.on('second-instance', () => {

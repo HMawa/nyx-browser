@@ -1,17 +1,18 @@
 # Nyx 版本变更总览（CHANGELOG）
 
-> 汇总 1.3.0 → 1.16.0 十六个版本的变更、验收数字与踩过的坑。
+> 汇总 1.3.0 → 1.17.0 十七个版本的变更、验收数字与踩过的坑。
 > 本文件是索引，**原始发版记录保留在 `docs/Nyx-<版本>-发版记录*.md`**，细节以原文为准。
 
 ## 怎么读
 
-- 版本顺序：**最新在最前**（1.16.0 → 1.3.0），每版一节 `## 版本号 · 日期`。
+- 版本顺序：**最新在最前**（1.17.0 → 1.3.0），每版一节 `## 版本号 · 日期`。
 - 每节结构固定四块：**主题**（一句话）→ **变更**（表格）→ **验收**（断言数 / 体积 / 校验值）→ **坑与决策**（当版沉淀的 1–3 条经验）。
 - 发版命令一行：`npm run dist` → `node scripts/make-release.js --release --prune`（卡执行策略时用 `& 'C:\Program Files\nodejs\npm.cmd' run dist`）。
 - 快速对照：
 
 | 版本 | 日期 | 一句话主题 | 安装包 | 验收断言 | sha256 前缀 |
 |---|---|---|---|---|---|
+| 1.17.0 | 2026-11-11 | 傻瓜式安装向导：环境检查页、安装报告、升级/修复判定、完整性校验、完全卸载 | 113.2 MB | 124（69+44+11） | `e2a4dab2` |
 | 1.16.0 | 2026-11-01 | 置顶分组、慢请求阈值进设置、更新源占用看板、扩展历史回滚 UI、端口假失败修复 | 113.3 MB | 122（69+44+9） | `66bd45a7` |
 | 1.15.0 | 2026-11-01 | 置顶导入导出、瀑布联动慢请求、扩展历史与回滚、dry-run JSON、git 接管 | 113.3 MB | 115（64+42+9） | `7b6ab517` |
 | 1.14.0 | 2026-10-21 | 安装包与回归验证维护（无对外功能变更） | 113.2 MB | 112（64+39+9） | `89224c28` |
@@ -30,6 +31,39 @@
 | 1.3.0 | 2026-10-21 | 地址栏建议、页签横滑、设置滚动记忆、发版留档 | 121.2 MB | 28（12+16） | `87ceffe1` |
 
 ---
+
+## 1.17.0 · 2026-11-11
+
+**主题**：把安装过程做成可解释的链路——环境检查页先体检、装完给可回看的安装报告、旧版本自动判定升级/修复、随包文件自动做完整性校验、卸载可连个人数据一起清干净。详见 `docs/Nyx-1.17.0-发版记录.md` 与 `docs/installer.md`。
+
+**变更**
+
+| # | 事项 | 类型 |
+|---|---|---|
+| 1 | 安装环境检查页（`customPageAfterChangeDir`）：系统版本 / 架构 / 盘剩余 / 目录写权限 / 旧版本 / 包完整性 / 内核文件，存在阻断项时「安装」按钮置灰 | 新功能 |
+| 2 | 依赖推荐下载：检查页给出内核与 geo 规则集发布页链接，`ExecShell` 打开，不静默下载 | 新功能 |
+| 3 | 安装报告 `%APPDATA%\Nyx\install-report.txt`（UTF-16LE+BOM），完成页可「查看安装报告」 | 新功能 |
+| 4 | 升级 / 修复 / 降级判定：读卸载键 `DisplayVersion` + `InstallLocation`，四种模式；任何模式都不删 `%APPDATA%\Nyx` | 新功能 |
+| 5 | 完整性清单：`build/after-pack.js` 为 app.asar / vendor / licenses / notices 生成 `resources/integrity.json`（sha256） | 新功能 |
+| 6 | `Nyx.exe --verify-integrity [--report=]`：不建窗、纯哈希比对，exit 0/1；安装期自动执行并把结论写进报告 | 新功能 |
+| 7 | 完全卸载：交互式询问是否删个人数据，静默支持 `/S /DELETEAPPDATA` | 新功能 |
+| 8 | 修复卸载后空目录残留（`customUnInit` 首行 `SetOutPath "$TEMP"`，绕开 Windows 不能删 cwd 的限制） | 修复 |
+| 9 | 端到端测试 `scripts/test-installer-e2e.js`（40 项断言，自带数据备份/还原）与安装文档 `docs/installer.md` | 工程治理 |
+| 10 | 打包冒烟 9 → 11 项（随包 `integrity.json`、`--verify-integrity` 退出 0） | 工程治理 |
+
+**验收**
+
+- 端到端 `scripts/test-installer-e2e.js`：**40/40 断言通过**，exit 0（静默全新安装 → 同包覆盖修复 → `/S` 卸载保数据 → `/S /DELETEAPPDATA` 完全卸载），报告实测「全新安装」「修复安装（同版本覆盖，个人数据保留）」「完整性检测：通过（退出码 0）」。
+- 完整性：正常产物 `node scripts/verify-integrity.js` 与 `Nyx.exe --verify-integrity` 均 exit 0（9/9 项）；篡改 1 字节后两者均 exit 1 并指出文件与期望/实际哈希。
+- 一键回归 **3/3 脚本、124 项断言**（地址栏 69、界面体验 44、打包冒烟 11）。
+- 安装包 `Nyx-Setup-1.17.0.exe` 118,754,042 字节（113.2 MB），sha256 `e2a4dab2…99cc52`；`win-unpacked\Nyx.exe` 238,909,440 字节。
+
+**坑与决策**
+
+- **卸载注册表键是 UUID 不是 appId**：`HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\ae30b98a-8a1a-5223-86c6-e808d0ff0ca1`（`UUID.v5("com.nyx.browser", EB_NS_UUID)`）；按 `com.nyx.browser` 找键会永远判成「全新安装」。`InstallLocation` 模板不写进该键，需在 `customInstall` 补写。
+- **`-WX` 让 makensis 警告变致命**：6001/6010 直接失败，且安装器与卸载器是两个编译 pass——自定义变量/函数必须分别用 `!ifndef BUILD_UNINSTALLER` / `!ifdef BUILD_UNINSTALLER` 包裹，改这个文件后必须先过一遍构建。
+- **`ELECTRON_RUN_AS_NODE=1` 会伪造「完整性检测未通过」**：该变量让 `Nyx.exe` 当纯 Node 跑，`--verify-integrity` 报 `bad option` 退出 9。安装器已在自身进程内临时清除；自动化脚本同样要先删这个环境变量。
+- **完整性清单不是信任根**：清单与被校验文件同目录，整体替换无法防，只能防传输/解包损坏与误改；要更强需签名，本版未做（边界写进文档）。
 
 ## 1.16.0 · 2026-11-01
 

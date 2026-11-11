@@ -1,7 +1,7 @@
 {
   "name": "nyx",
   "productName": "Nyx",
-  "version": "1.16.0",
+  "version": "1.17.0",
   "description": "Nyx — 双模式隐私浏览器（普通模式 / 全隐私模式），内置本机代理强制转发",
   "main": "src/main.js",
   "author": "Nyx contributors",
@@ -14,7 +14,8 @@
     "dist": "electron-builder --win nsis",
     "dist:dir": "electron-builder --win nsis --dir",
     "release": "node scripts/make-release.js",
-    "verify": "node scripts/verify-all.js"
+    "verify": "node scripts/verify-all.js",
+    "verify:integrity": "node scripts/verify-integrity.js dist\\win-unpacked"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
@@ -29,6 +30,7 @@
     "productName": "Nyx",
     "asar": true,
     "compression": "maximum",
+    "afterPack": "build/after-pack.js",
     "electronLanguages": [
       "zh-CN",
       "en-US"

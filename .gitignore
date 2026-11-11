@@ -3,6 +3,9 @@ node_modules/
 dist/
 dist-next/
 dist-fix/
+# 并行开发时各成员用的独立构建输出目录（安装器/完整性校验）
+dist-inst/
+dist-int/
 temp/
 prototype/
 ai-models/

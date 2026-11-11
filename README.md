@@ -18,6 +18,7 @@
 - [双模式隐私模型](#双模式隐私模型)
 - [本地 AI 操作接口](#本地-ai-操作接口)
 - [构建与打包](#构建与打包)
+- [安装与卸载](#安装与卸载)
 - [安全说明与已知限制](#安全说明与已知限制)
 - [许可证](#许可证)
 - [免责声明](#免责声明)
@@ -285,6 +286,19 @@ npm run dist
 - 打包规则：`src/**` 与 `package.json` 进 asar；`vendor/` 通过 `extraResources` 原样放进安装目录；图标取自 `build/icon.ico`。
 - 许可证随包：安装目录 `resources/` 下同时放置 `LICENSE`（本项目 MIT）、`THIRD-PARTY-NOTICES.md` 与 `licenses/GPL-3.0.txt`（mihomo 内核的 GPL-3.0 全文）。
 - `npm run pack` 只生成未打包目录，便于检查文件是否齐全。
+
+---
+
+## 安装与卸载
+
+发行包是 NSIS 安装器（`dist/Nyx-Setup-<version>.exe`），支持全新/升级/修复安装、自定义安装目录、完整性校验与静默安装。
+
+- 安装前会检查系统版本、架构、目标目录可写性与磁盘剩余空间；
+- 覆盖安装（升级/修复）保留 `%APPDATA%\Nyx` 里的个人数据；
+- 安装报告写在 `%APPDATA%\Nyx\install-report.txt`，安装时完整性自检结果另见 `%APPDATA%\Nyx\integrity-check.txt`；
+- 卸载默认保留个人数据，完全卸载需加 `/DELETEAPPDATA`。
+
+环境检查项、四种安装模式的判定、依赖与推荐下载、完整性校验、静默参数与故障排查，见 [docs/installer.md](docs/installer.md)。
 
 ---
 

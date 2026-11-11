@@ -11,7 +11,8 @@
  *   2) /json/list 里出现外壳页面（说明 asar 与 preload 正常加载）；
  *   3) 关键 DOM 与 API 在包里都还在（书签星标、工具箱 8 个页签、地址栏建议 API）；
  *   4) 页面没有未捕获脚本异常；
- *   5) 进程日志里没有 Cannot find module / ERR_FILE_NOT_FOUND / Failed to load locale。
+ *   5) 进程日志里没有 Cannot find module / ERR_FILE_NOT_FOUND / Failed to load locale；
+ *   6) 解包产物带 resources\integrity.json，且 Nyx.exe --verify-integrity 退出 0（dist\win-unpacked 不存在时跳过）。
  *
  * 用法：
  *   node scripts/verify-packaged-smoke.js
@@ -20,7 +21,7 @@
  * 退出码：0 = 全部通过；1 = 有失败项。
  */
 
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -104,6 +105,27 @@ async function evalIn(wsUrl, expression) {
 }
 
 async function main() {
+  // 完整性清单（随包分发）：先做无窗口自检，再拉起 GUI——避免窗口/单实例锁干扰。
+  // 解包目录不存在时按"跳过"处理（verify-all.js 对整步也是 requires 语义）。
+  const unpackedDir = path.dirname(EXE);
+  const resourcesDir = path.join(unpackedDir, 'resources');
+  const integrityJson = path.join(resourcesDir, 'integrity.json');
+  if (!fs.existsSync(unpackedDir)) {
+    check('resources\\integrity.json 随包分发（跳过：解包目录不存在）', true, unpackedDir);
+    check('Nyx.exe --verify-integrity 退出 0（跳过：解包目录不存在）', true, '');
+  } else {
+    check('resources\\integrity.json 随包分发', fs.existsSync(integrityJson), integrityJson);
+    if (fs.existsSync(integrityJson)) {
+      // 本机可能带 ELECTRON_RUN_AS_NODE=1：不清掉，Electron 会退化成纯 Node、自检参数不生效
+      const verifyEnv = { ...process.env };
+      delete verifyEnv.ELECTRON_RUN_AS_NODE;
+      const verify = spawnSync(EXE, ['--verify-integrity'], { env: verifyEnv, encoding: 'utf8', windowsHide: true, timeout: 180000 });
+      check('Nyx.exe --verify-integrity 退出 0', verify.status === 0, `exit=${verify.status}${verify.error ? `，${verify.error.message}` : ''}`);
+    } else {
+      check('Nyx.exe --verify-integrity 退出 0（跳过：清单缺失）', true, 'integrity.json 不存在');
+    }
+  }
+
   if (!fs.existsSync(EXE)) {
     console.error(`找不到解包版可执行文件：${EXE}（先跑 npm run dist:dir 或 npm run dist）`);
     process.exitCode = 1;

@@ -6,7 +6,7 @@
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，69 项）
  *  2. scripts/verify-ui-polish.js（界面体验，44 项）
- *  3. scripts/verify-packaged-smoke.js（打包产物冒烟，9 项；dist\win-unpacked 不存在时跳过）
+ *  3. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -53,8 +53,8 @@ const STEPS = [
   {
     label: '打包产物冒烟',
     script: 'verify-packaged-smoke.js',
-    items: '9 项',
-    timeoutMs: 150000,
+    items: '11 项',
+    timeoutMs: 240000,
     /** 依赖解包产物：不存在就跳过（跳过不算失败） */
     requires: path.join(ROOT, 'dist', 'win-unpacked', 'Nyx.exe'),
     skipHint: '请先 npm run dist:dir',
