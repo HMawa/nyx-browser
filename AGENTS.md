@@ -32,7 +32,7 @@
 - 版本：`package.json` = **1.17.0**；产物 `dist/Nyx-Setup-1.17.0.exe`（118,754,042 字节，sha256 `e2a4dab25ba4a278cb65b55ceef67997cf5b48989719c32201b44fadc299cc52`），`dist/win-unpacked` = 1.17.0。
 - 运行时：Electron 43.7.4 / Chromium 150 / Node 24；Windows。
 - 运行时依赖只有两个：`@modelcontextprotocol/sdk`、`zod`（MCP server 用）。
-- 回归基线（本轮实测，全绿）：`npm run verify` = 地址栏建议 **68 项** + 界面体验 **84 项** + 出站链路守卫 **12 项** + 下载链路 **14 项** + 打包冒烟 **11 项** = **189 项 / 5 个脚本 / 130 秒**。
+- 回归基线（本轮实测，全绿）：`npm run verify` = 地址栏建议 **68 项** + 界面体验 **85 项** + 出站链路守卫 **12 项** + 下载链路 **16 项** + 打包冒烟 **11 项** = **192 项 / 5 个脚本 / 129 秒**。
 - 更新源：`%APPDATA%\Nyx\updates`（`latest.json` + 安装包 + `.blocks.json` + `extensions.json`）；留档 `%APPDATA%\Nyx\updates-archive\<版本>`。
 - 安装器：NSIS，`perMachine:false`（装到用户目录），自定义脚本 `build/installer.nsh`、打包后钩子 `build/after-pack.js`。
 - npm 命令必须用 `& 'C:\Program Files\nodejs\npm.cmd' run <script>`（`npm.ps1` 被执行策略拦）。
@@ -80,7 +80,7 @@
 
 ## 6. 验证脚本约定
 
-- 五个脚本：`verify-address-suggest.js`（地址栏 68）、`verify-ui-polish.js`（界面 84）、`verify-link-guard.js`（出站链路守卫 12，纯 Node 不启动 Electron）、`verify-downloads.js`（下载链路 14，纯 Node 不启动 Electron）、`verify-packaged-smoke.js`（包内 11，缺 `dist/win-unpacked` 时跳过）。
+- 五个脚本：`verify-address-suggest.js`（地址栏 68）、`verify-ui-polish.js`（界面 85）、`verify-link-guard.js`（出站链路守卫 12，纯 Node 不启动 Electron）、`verify-downloads.js`（下载链路 16，纯 Node 不启动 Electron）、`verify-packaged-smoke.js`（包内 11，缺 `dist/win-unpacked` 时跳过）。另有 `bench-transfer.js`（吞吐基线，**不进回归**，测大文件快慢用）。
 - 新增断言写在对应脚本里，标签复用中文「（vX.Y.Z）」后缀；项数必须同步到 `scripts/verify-all.js` 的 `items` 与注释。
 - CDP 端到端：Node 24 全局 `WebSocket`，`--remote-debugging-port` 用 `pickFreePort()`。
 - `contextBridge` 暴露的 `window.nyx` 是**冻结代理**：测试里 `window.nyx.foo = stub` 会静默失效。要测状态机就把判定抽成**纯函数**（如 `trackCoursePause(state, now, prev)`）直接调。
@@ -120,4 +120,4 @@
 
 - 正在执行的清单：`docs/实测修复台账.md`（来源：`Nyx浏览器v1实测修复清单.md`，12 项）。
 - 顺序：**C1 → A4 → A2 → A1 → B4+B5 → B1/B2/B3 → A3/A5 → C2/C3 → C4**，一项一提交。
-- 进度：C1（`b848b6b`）、A4（`d33be32` + `018780b` + `2c9f248`）、A2（`4919583`）、A1（`e214f9d`）、B4+B5（`533ea57`）、B1（`e7c5288`）、B2（`6bb61f0`）、B3（`1a6e6e1`）已完成；**下一项 A3（大文件上下行耗时基线，先测后优化）**。
+- 进度：C1（`b848b6b`）、A4（`d33be32` + `018780b` + `2c9f248`）、A2（`4919583`）、A1（`e214f9d`）、B4+B5（`533ea57`）、B1（`e7c5288`）、B2（`6bb61f0`）、B3（`1a6e6e1`）、A3（`8942dab`，已测基线 + 已可量化）已完成；**下一项 A5（核显优先 + 启动显示 GPU + 可切独显）**。
