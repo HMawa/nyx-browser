@@ -127,8 +127,11 @@ contextBridge.exposeInMainWorld('nyx', {
 
   /* ---------------- 网络与代理 ---------------- */
 
-  /** 打开设置窗口（已在则聚焦） */
-  openSettings: () => ipcRenderer.invoke('nyx:proxy:open'),
+  /** 打开设置标签页（已在则切回）；传 { section } 可直接跳到某个分区 */
+  openSettings: (payload) => ipcRenderer.invoke('nyx:proxy:open', payload || {}),
+
+  /** 起始页（清单 B1）：输入关键词或网址后交给主进程开普通标签 */
+  startOpen: (input) => ipcRenderer.invoke('nyx:start:open', { input: String(input || '') }),
 
   /** 代理状态快照：内核、订阅、出口自查结果 */
   getProxyStatus: () => ipcRenderer.invoke('nyx:proxy:status'),

@@ -118,6 +118,7 @@ class TabManager {
    * @param {number} options.uiHeight UI 外壳高度（px），标签视图从其下方开始
    * @param {number} options.maxTabs 标签数上限
    * @param {string} options.defaultUrl 新标签默认地址
+   * @param {string} [options.homeUrl] 起始页地址（命中它时按应用页打开）
    * @param {() => Electron.Session} options.resolveSession 按当前模式返回 Session
    * @param {() => 'normal'|'private'} options.getMode 读取当前模式
    * @param {() => string[]} [options.getPreloadArgs] 读取当前模式的预加载参数
@@ -131,6 +132,7 @@ class TabManager {
     this.uiHeight = options.uiHeight;
     this.maxTabs = options.maxTabs;
     this.defaultUrl = options.defaultUrl;
+    this.homeUrl = options.homeUrl || '';
     this.resolveSession = options.resolveSession;
     this.getMode = options.getMode;
     this.getPreloadArgs = options.getPreloadArgs || (() => [`--nyx-mode=${this.getMode()}`]);
@@ -176,6 +178,18 @@ class TabManager {
     }
 
     const target = input ? normalizeInput(input) : this.defaultUrl;
+
+    // 新标签页是本地起始页（清单 B1）：它要用外壳 preload 才能拿到 window.nyx，
+    // 所以走应用页通道；但起始页不像设置那样单实例——开三个新标签就该有三个起始页。
+    if (this.homeUrl && target === this.homeUrl) {
+      return this.createAppPage({
+        url: this.homeUrl,
+        title: '新标签页',
+        kind: 'start',
+        singleInstance: false,
+      });
+    }
+
     const mode = this.getMode();
 
     const view = new WebContentsView({
@@ -254,11 +268,15 @@ class TabManager {
     if (!url) return { ok: false, error: '应用页地址为空' };
     const kind = (options && options.kind) || 'settings';
 
-    // 已经开着就只切过去：设置是单实例页面，不允许叠标签
-    const existing = this.tabs.find((tab) => tab.kind === kind);
-    if (existing) {
-      this.activate(existing.id);
-      return { ok: true, id: existing.id, reused: true };
+    // 已经开着就只切过去：设置这类页面是单实例，不允许叠标签。
+    // 起始页（singleInstance:false）例外——每个新标签都该有自己的一份。
+    const singleInstance = !options || options.singleInstance !== false;
+    if (singleInstance) {
+      const existing = this.tabs.find((tab) => tab.kind === kind);
+      if (existing) {
+        this.activate(existing.id);
+        return { ok: true, id: existing.id, reused: true };
+      }
     }
 
     if (this.tabs.length >= this.maxTabs) {
@@ -572,6 +590,14 @@ class TabManager {
     const tab = this.active;
     if (!tab) return { ok: false, error: '当前没有活动标签' };
     const target = normalizeInput(input);
+    // 起始页/设置页是本地应用页，它们的 will-navigate 只放行 file://：
+    // 在它们身上直接 loadURL 会被拦下，表现为"点了没反应"的静默失败。
+    // 所以在应用页上开网址一律另开一个普通标签，应用页自己留着。
+    if (tab.kind) {
+      const opened = this.create(target);
+      if (!opened || opened.ok === false) return opened || { ok: false, error: '新建标签失败' };
+      return { ok: true, url: target, tabId: opened.id, fromAppPage: true };
+    }
     // 换地址就当作重新来过：先清失败态，否则错误页会盖住新页面。
     tab.requestedUrl = target;
     this.clearLoadError(tab);

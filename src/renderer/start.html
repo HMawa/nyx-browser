@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'" />
+    <title>新标签页</title>
+    <link rel="stylesheet" href="theme-nyx.css" />
+    <link rel="stylesheet" href="start.css" />
+  </head>
+  <!--
+    新标签页（清单 B1）。
+
+    为什么不继续用 about:blank：空白页等于"首屏大黑屏"，用户既不知道这是什么浏览器，
+    也没有落手的地方。这一页只做三件事——说清楚自己是谁、给一个能立刻用的输入框、
+    列出最常去的站点；不做广告导航页，也不联网取任何内容。
+  -->
+  <body class="start-body">
+    <main class="start-main">
+      <header class="start-brand">
+        <span class="start-mark" aria-hidden="true">N</span>
+        <div class="start-brand-text">
+          <h1 class="start-title">Nyx</h1>
+          <p class="start-tagline">隐私优先的桌面浏览器 · 全隐私模式下不落盘、强制走代理</p>
+        </div>
+      </header>
+
+      <form class="start-search" id="start-form" role="search" autocomplete="off">
+        <label class="start-sr-only" for="start-input">搜索或输入网址</label>
+        <span class="start-search-icon" aria-hidden="true">⌕</span>
+        <input
+          class="start-input"
+          id="start-input"
+          type="text"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder="搜索或输入网址，回车打开"
+        />
+        <button class="start-go" id="start-go" type="submit">打开</button>
+      </form>
+      <p class="start-hint" id="start-hint" role="status" aria-live="polite"></p>
+
+      <section class="start-section" aria-labelledby="start-freq-title">
+        <div class="start-section-head">
+          <h2 class="start-section-title" id="start-freq-title">常用入口</h2>
+          <span class="start-section-meta" id="start-freq-meta"></span>
+        </div>
+        <div class="start-grid" id="start-grid"></div>
+        <p class="start-empty" id="start-empty" hidden>
+          还没有常用站点。先在上面输入一个网址打开几次，这里会自动出现你常去的地方。
+        </p>
+      </section>
+
+      <section class="start-section" aria-labelledby="start-act-title">
+        <h2 class="start-section-title" id="start-act-title">常用操作</h2>
+        <div class="start-actions">
+          <button class="start-action" type="button" data-action="downloads">下载中心</button>
+          <button class="start-action" type="button" data-action="settings">设置</button>
+          <button class="start-action" type="button" data-action="diagnostics">诊断</button>
+          <button class="start-action" type="button" data-action="privacy">隐私状态</button>
+        </div>
+      </section>
+
+      <footer class="start-foot">
+        <span>Ctrl+L 输入网址</span>
+        <span>Ctrl+T 新标签</span>
+        <span>Ctrl+J 下载</span>
+        <span>Ctrl+W 关闭标签</span>
+      </footer>
+    </main>
+    <script src="start.js"></script>
+  </body>
+</html>

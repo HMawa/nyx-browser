@@ -123,8 +123,15 @@ const THEME_BG = { ink: '#0c0a09', aurora: '#080b16', paper: '#f5f1e8', quiet: '
 const MAX_TABS = Math.max(1, Number(process.env.NYX_MAX_TABS || 12));
 /** 恐慌清场快捷键 */
 const PANIC_SHORTCUT = process.env.NYX_PANIC_SHORTCUT || 'CommandOrControl+Shift+X';
-/** 新标签初始地址 */
-const HOME_URL = process.env.NYX_HOME_URL || 'about:blank';
+/**
+ * 新标签初始地址（清单 B1）。
+ *
+ * 默认指向本地起始页而不是 about:blank：空白页是"首屏大黑屏"，
+ * 用户既看不出这是什么浏览器，也没有落手的地方。起始页是本地文件、
+ * 不联网、不请求第三方，隐私模式下同样可用。
+ */
+const START_PAGE_PATH = path.join(__dirname, 'renderer', 'start.html');
+const HOME_URL = process.env.NYX_HOME_URL || pathToFileURL(START_PAGE_PATH).href;
 /** 托盘图标 */
 const TRAY_ICON = path.join(__dirname, 'assets', 'tray.png');
 /** 代理可达性探测超时（ms），可用环境变量 NYX_PROXY_PROBE_TIMEOUT 覆盖 */
@@ -1862,6 +1869,8 @@ function createMainWindow() {
     maxTabs: MAX_TABS,
     // 新标签默认地址每次新建时动态解析：设置中心改完即时生效，无需重建标签管理器
     defaultUrl: resolveNewTabUrl(),
+    // 起始页地址：命中它时按应用页打开（需要外壳 preload 才有 window.nyx）
+    homeUrl: HOME_URL,
     resolveSession: () => sessions.getSession(),
     getMode: () => sessions.getMode(),
     // 当前模式的预加载参数（隐私模式由 PrivacyHardening 依据出口画像生成）
@@ -2297,6 +2306,13 @@ function registerIpc() {
   ipcMain.handle('nyx:tab:activate', (_event, id) => {
     if (!runtime.tabManager) return { ok: false, error: '窗口尚未就绪' };
     return runtime.tabManager.activate(id);
+  });
+
+  // 起始页（清单 B1）里输入/点格子：开普通标签，并把那个起始页标签收掉，
+  // 不让它留在标签栏里当"空白尾巴"。
+  ipcMain.handle('nyx:start:open', (_event, payload) => {
+    const input = payload && payload.input;
+    return openFromStartPage(input);
   });
 
   ipcMain.handle('nyx:navigate', (_event, input) => {
@@ -4585,6 +4601,31 @@ function resolveNewTabUrl() {
   return normalizeInput(raw);
 }
 
+/** 起始页里发起打开：新建普通标签，成功后再收掉刚才那个起始页标签 */
+function openFromStartPage(input) {
+  const manager = runtime.tabManager;
+  if (!manager) return { ok: false, error: '窗口尚未就绪' };
+  const raw = String(input || '').trim();
+  if (!raw) return { ok: false, error: '先输入一个网址或关键词' };
+
+  const activeId = manager.activeId;
+  const current = manager.tabs.find((tab) => tab.id === activeId);
+  const fromStart = !!current && current.kind === 'start';
+
+  const opened = manager.create(raw);
+  if (!opened || opened.ok !== true) return opened || { ok: false, error: '打不开这个地址' };
+  if (fromStart) {
+    // 新标签已经激活，再关掉旧的起始页；关失败不影响这次打开
+    try {
+      manager.close(current.id);
+    } catch (err) {
+      diagnostics.warn('START_PAGE_CLOSE_FAILED', { message: err && err.message });
+    }
+  }
+  diagnostics.info('START_PAGE_OPEN', { url: redactUrlForLog(normalizeInput(raw)) });
+  return opened;
+}
+
 /** 启动时要打开的地址列表（存储未就绪时回落为单个新标签页） */
 function startupTargets() {
   return runtime.startupStore ? runtime.startupStore.startupTargets(HOME_URL) : [HOME_URL];
@@ -5233,7 +5274,7 @@ function registerErrorPageIpc() {
 function registerProxyIpc() {
   const missing = { ok: false, error: '代理服务尚未初始化' };
 
-  ipcMain.handle('nyx:proxy:open', () => openSettings());
+  ipcMain.handle('nyx:proxy:open', (_event, payload) => openSettings(payload && payload.section));
 
   ipcMain.handle('nyx:proxy:status', () => (runtime.proxyService ? runtime.proxyService.status() : null));
 

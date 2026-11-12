@@ -235,6 +235,134 @@ async function main() {
     check('preload 接口就绪', ready);
     if (!ready) throw new Error('preload 未就绪，无法继续验证');
 
+    /* ---------- B1. 首屏可识别（起始页） ---------- */
+    // 空白页 = 首屏大黑屏。这里断言首屏必须是本地起始页，且有品牌、搜索框、常用入口。
+    const startTarget = await waitTarget((t) => t.url.endsWith('/start.html'), 20000);
+    const firstState = await shell.eval(`(async () => {
+      const snap = await window.nyx.getState();
+      const tab = (snap.tabs || [])[0] || {};
+      return { url: tab.url || '', title: tab.title || '', count: (snap.tabs || []).length };
+    })()`);
+    check(
+      '首屏是本地起始页而不是空白页（B1）',
+      !!startTarget && String(firstState && firstState.url).endsWith('/start.html'),
+      JSON.stringify({ target: !!startTarget, state: firstState }),
+    );
+
+    if (startTarget) {
+      const startPage = await new Cdp(startTarget.webSocketDebuggerUrl).connect();
+      await startPage.send('Runtime.enable', {});
+      let startDom = null;
+      for (let i = 0; i < 40; i += 1) {
+        startDom = await startPage
+          .eval(`(() => {
+            const title = document.querySelector('.start-title');
+            const input = document.getElementById('start-input');
+            const tiles = document.querySelectorAll('.start-tile').length;
+            if (!title || !input || tiles < 1) return null;
+            return {
+              title: title.textContent.trim(),
+              placeholder: input.placeholder || '',
+              tiles,
+              meta: (document.getElementById('start-freq-meta') || {}).textContent || '',
+              emptyHidden: (document.getElementById('start-empty') || {}).hidden === true,
+              actions: Array.from(document.querySelectorAll('.start-action')).map((b) => b.textContent.trim()),
+              focusId: (document.activeElement && document.activeElement.id) || '',
+            };
+          })()`)
+          .catch(() => null);
+        if (startDom && startDom.tiles >= 3) break;
+        await sleep(250);
+      }
+      check(
+        '起始页有品牌名、搜索框与常用入口（B1）',
+        !!startDom &&
+          startDom.title === 'Nyx' &&
+          startDom.placeholder.includes('搜索或输入网址') &&
+          startDom.tiles >= 3 &&
+          startDom.emptyHidden === true &&
+          /默认推荐|基于书签与最近浏览/.test(String(startDom.meta || '')) &&
+          startDom.actions.includes('下载中心'),
+        JSON.stringify(startDom),
+      );
+
+      // 在起始页提交一个网址：应当开出普通标签，并把起始页那个标签收掉
+      await startPage.eval(`(() => {
+        const input = document.getElementById('start-input');
+        input.value = 'example.com';
+        document.getElementById('start-form').dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+        return true;
+      })()`);
+      let afterOpen = null;
+      for (let i = 0; i < 20; i += 1) {
+        await sleep(300);
+        afterOpen = await shell.eval(`(async () => {
+          const snap = await window.nyx.getState();
+          const tabs = snap.tabs || [];
+          return {
+            urls: tabs.map((t) => t.url),
+            active: (tabs.find((t) => t.active) || {}).url || '',
+            startLeft: tabs.filter((t) => String(t.url || '').endsWith('/start.html')).length,
+          };
+        })()`);
+        if (String(afterOpen && afterOpen.active).includes('example.com')) break;
+      }
+      check(
+        '起始页输入网址后开出普通标签并收掉起始页（B1）',
+        !!afterOpen && String(afterOpen.active).includes('example.com') && afterOpen.startLeft === 0,
+        JSON.stringify(afterOpen),
+      );
+      startPage.close();
+
+      // 起始页是本地应用页（will-navigate 只放行 file://），在它身上直接 loadURL
+      // 会被静默拦掉。跳转必须另开一个普通标签，应用页自己留着。
+      await shell.eval(`window.nyx.createTab('')`);
+      await sleep(900);
+      const fromStart = await shell.eval(`(async () => {
+        const res = await window.nyx.navigate('example.org');
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const snap = await window.nyx.getState();
+        const tabs = snap.tabs || [];
+        return {
+          ok: !!(res && res.ok !== false),
+          active: (tabs.find((item) => item.active) || {}).url || '',
+          startLeft: tabs.filter((item) => String(item.url || '').endsWith('/start.html')).length,
+        };
+      })()`);
+      check(
+        '起始页里跳转网址会另开标签，不会被本地页拦成静默失败（B1）',
+        !!fromStart && fromStart.ok && String(fromStart.active).includes('example.org') && fromStart.startLeft >= 1,
+        JSON.stringify(fromStart),
+      );
+
+      // 这次导航会写进历史，后面「按站点聚合 / 明细行数」断言依赖种子数据，先把它清掉
+      await shell.eval(`(async () => {
+        const list = await window.nyx.historyList();
+        const items = (list && list.items) || [];
+        for (const item of items) {
+          if (/example\\.(com|org)/.test(String(item.url || '')) && Date.now() - Number(item.visitedAt) < 120000) {
+            await window.nyx.historyRemove({ id: item.id });
+          }
+        }
+        // 顺手把刚才为验证拦截至造出来的起始页标签关掉，避免影响后面的标签数断言
+        const snap = await window.nyx.getState();
+        for (const item of snap.tabs || []) {
+          if (String(item.url || '').endsWith('/start.html')) await window.nyx.closeTab(item.id);
+        }
+        return true;
+      })()`);
+    }
+
+    // 后面几条用例假设当前是一个「不可收藏」的空白页标签（历史行为），这里显式造出来
+    await shell.eval(`(async () => {
+      const snap = await window.nyx.getState();
+      if (!(snap.tabs || []).length) await window.nyx.createTab('about:blank');
+      else await window.nyx.navigate('about:blank');
+      return true;
+    })()`);
+    await sleep(600);
+
+
     /* ---------- A. 工具箱页签栏 ---------- */
     // 打开工具箱并切到最后一个页签（Cookie），此时页签栏一定需要横滚
     await shell.eval("window.nyx.openToolboxPane({ pane: 'cookie' })");

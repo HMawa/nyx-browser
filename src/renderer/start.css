@@ -1,0 +1,330 @@
+/*
+ * 新标签页样式（清单 B1）。
+ *
+ * 设计口头：Minimalism & Swiss Style —— 大留白、清晰层级、几何对齐、只用一种强调色。
+ * 颜色一律来自 theme-nyx.css 的令牌（零新增硬编码色值），圆角/间距收敛到 --r-* 一档，
+ * 所有可交互元素都有 :focus-visible 焦点环，尊重 prefers-reduced-motion。
+ */
+
+.start-body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(120% 70% at 50% -10%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 62%),
+    var(--bg-shell);
+  color: var(--text-main);
+  font-family: var(--font-ui, system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif);
+  -webkit-font-smoothing: antialiased;
+}
+
+.start-main {
+  width: min(760px, 100% - 64px);
+  margin: 0 auto;
+  padding: clamp(48px, 12vh, 132px) 0 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+}
+
+/* ---------- 品牌 ---------- */
+
+.start-brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.start-mark {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
+  color: var(--accent-soft);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.start-brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.start-title {
+  margin: 0;
+  font-size: 27px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.start-tagline {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+/* ---------- 搜索框 ---------- */
+
+.start-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px 0 14px;
+  height: 52px;
+  border-radius: var(--r-lg);
+  background: var(--bg-tab);
+  border: 1px solid var(--border);
+  box-shadow: 0 14px 34px -26px rgba(0, 0, 0, 0.85);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.start-search:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 52%, transparent);
+  box-shadow: var(--ring);
+}
+
+.start-search-icon {
+  color: var(--text-faint);
+  font-size: 17px;
+  line-height: 1;
+  transform: translateY(-1px);
+}
+
+.start-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text-main);
+  font-size: 14.5px;
+  font-family: inherit;
+}
+
+.start-input::placeholder {
+  color: var(--text-faint);
+}
+
+.start-go {
+  height: 36px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.16s ease;
+}
+
+.start-go:hover {
+  background: var(--accent-soft);
+}
+
+.start-go:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+  box-shadow: var(--ring);
+}
+
+.start-hint {
+  margin: -22px 0 0;
+  min-height: 18px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.start-hint.is-error {
+  color: var(--danger-soft);
+}
+
+/* ---------- 分区 ---------- */
+
+.start-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.start-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.start-section-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.start-section-meta {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.start-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(184px, 1fr));
+  gap: 10px;
+}
+
+.start-tile {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 13px;
+  min-height: 48px;
+  border-radius: var(--r-md);
+  background: var(--bg-tab);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+
+.start-tile:hover {
+  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-tab));
+}
+
+.start-tile:active {
+  transform: translateY(1px);
+}
+
+.start-tile:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+  box-shadow: var(--ring);
+}
+
+.start-tile-mark {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent-soft);
+  font-size: 12.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.start-tile-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.start-tile-name {
+  font-size: 13px;
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.start-tile-host {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.start-empty {
+  margin: 0;
+  padding: 14px 15px;
+  border-radius: var(--r-md);
+  border: 1px dashed var(--border);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+/* ---------- 常用操作 ---------- */
+
+.start-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.start-action {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--r-md);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.16s ease, color 0.16s ease;
+}
+
+.start-action:hover {
+  border-color: color-mix(in srgb, var(--accent) 46%, transparent);
+  color: var(--accent-soft);
+}
+
+.start-action:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+  box-shadow: var(--ring);
+}
+
+/* ---------- 页脚 ---------- */
+
+.start-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.start-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .start-search,
+  .start-tile,
+  .start-action,
+  .start-go {
+    transition: none;
+  }
+  .start-tile:active {
+    transform: none;
+  }
+}
