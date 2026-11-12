@@ -54,6 +54,7 @@ const { createActionRunner } = require('./core/actions');
 const { getRiskLog } = require('./core/risk-guard');
 const { startHttpApi } = require('./api/http-api');
 const { createModeEventLog } = require('./core/mode-events');
+const { ACTIONS: LINK_GUARD_ACTIONS, isProxyFailureCode, decideProxyFailureAction } = require('./core/link-guard');
 const { Updater } = require('./core/updater');
 const { UiStore } = require('./core/ui-store');
 const { StartupStore } = require('./core/startup-store');
@@ -139,12 +140,9 @@ const LAST_MODE_FILE = 'last-mode.txt';
  */
 const LINK_RECHECK_MS = Math.max(5_000, Number(process.env.NYX_LINK_RECHECK_MS || 60_000));
 /**
- * 视为"链路可能失效"的加载错误码（Chromium net error）。
- *   -130 ERR_PROXY_CONNECTION_FAILED / -102 ERR_CONNECTION_REFUSED /
- *   -101 ERR_CONNECTION_RESET / -104 ERR_CONNECTION_FAILED /
- *   -118 ERR_CONNECTION_TIMED_OUT / -105 ERR_NAME_NOT_RESOLVED
+ * 视为"链路可能失效"的加载错误码（Chromium net error）及其处置判定，统一收在
+ * `core/link-guard.js`：主进程只引用那一份，避免"两处各有一张表"漂移。
  */
-const PROXY_FAILURE_CODES = new Set([-130, -102, -101, -104, -118, -105]);
 /** 模式变更事件缓冲容量（内存环形缓冲，仅保留最近 50 条，供本地接口查询） */
 const MODE_EVENT_LIMIT = 50;
 /** 代理状态与内核运行目录名（位于 userData 下） */
@@ -218,6 +216,16 @@ const runtime = {
   quitting: false,
   /** 渲染层尚未就绪时暂存的提示，待页面加载完成后推送 */
   pendingNotice: null,
+  /**
+   * 外壳页面是否已经加载完成。
+   *
+   * 窗口已创建但 did-finish-load 还没触发时，webContents.send('nyx:notice') 会
+   * 直接消失在空气里（页面还没有监听器）——启动阶段的「代理不可达已回落普通模式」
+   * 就是这么丢的。所以提示一律先入队，就绪后按顺序补发。
+   */
+  shellReady: false,
+  /** 就绪前累积的多条提示（FIFO） */
+  pendingNotices: [],
   /** 自动升级服务（检查 / 获取升级包 / 静默覆盖安装） */
   updater: null,
   /** 升级弹窗是否正在展示，避免重复弹窗 */
@@ -687,7 +695,8 @@ async function bootstrap() {
     }
   }
 
-  runtime.pendingNotice = startupNotice;
+  // 启动阶段的提示同样入队：此时主窗口还没创建，notifyNotice 会按就绪状态暂存
+  if (startupNotice) notifyNotice(startupNotice);
 
   // 应用菜单统一为中文（主窗口默认隐藏菜单栏，按 Alt 可唤出）
   installChineseMenu();
@@ -1297,23 +1306,63 @@ function startLinkWatchdog() {
  * 页面加载失败时的链路兜底。
  *
  * 典型场景：普通模式正走代理，用户把 Clash 关掉 → 页面首报 ERR_PROXY_CONNECTION_FAILED。
- * 这里的处理原则是"先探测、再决定"：
+ * 处理原则是"先探测、再决定"，具体判定抽在 `core/link-guard.js` 的纯函数里：
  *   - 探测到代理仍可达 → 属于站点 / 网络问题，不动链路（避免把正常代理误判掉）；
- *   - 探测到代理确实不可达 → 普通模式切直连、提示用户并重载出错的标签；
- *   - 隐私模式 → 一律不动（隐私模式宁可报错也不直连）。
+ *   - 普通模式 + 代理确不可达 → 切直连、提示用户并重载出错的标签；
+ *   - 隐私模式 + 代理确不可达 → **不降级**，但必须明确告知"为什么打不开"。
+ *
+ * 隐私模式这条分支以前是 `if (mode !== 'normal') return;`，也就是页面只会报一个
+ * 光秃秃的 ERR_PROXY_CONNECTION_FAILED，用户看不到"代理挂了"这件事——实测清单
+ * A2「全隐私模式静默变直连」的观感有一半来自这里：不知道发生了什么，只能推断。
  */
 async function handleProxyLoadFailure(info) {
-  if (sessions.getMode() !== 'normal') return;
-  const link = sessions.getLink('normal');
-  if (link !== 'proxy' && link !== 'smart') return;
-  if (!PROXY_FAILURE_CODES.has(Number(info.errorCode))) return;
+  const mode = sessions.getMode();
+  const link = sessions.getLink(mode);
+  if (!isProxyFailureCode(info && info.errorCode)) return;
+  if (link === 'direct') return;
   if (runtime.linkGuardBusy) return;
 
   runtime.linkGuardBusy = true;
   try {
     const probe = recordProbe(await isProxyReachable());
+    const decision = decideProxyFailureAction({
+      mode,
+      link,
+      reachable: probe.reachable,
+      errorCode: info.errorCode,
+      host: probe.host,
+      port: probe.port,
+      error: probe.error,
+      url: info.url,
+    });
 
-    if (probe.reachable) {
+    if (decision.action === LINK_GUARD_ACTIONS.notifyPrivate) {
+      console.warn(
+        `[Nyx] 隐私模式下代理 ${probe.host}:${probe.port} 不可达（${probe.error}），` +
+          '保持代理链路，不降级为直连',
+      );
+      diagnostics.error('PRIVACY_PROXY_DOWN', {
+        host: probe.host,
+        port: probe.port,
+        error: probe.error,
+        errorCode: info.errorCode,
+        url: info.url || '',
+      });
+      modeEventLog.record({
+        type: 'switch',
+        from: 'private',
+        to: 'private',
+        changed: false,
+        ok: false,
+        code: 'PRIVACY_PROXY_DOWN',
+        message: decision.notice.message,
+      });
+      notifyNotice(decision.notice);
+      pushState(currentSnapshot());
+      return;
+    }
+
+    if (decision.action !== LINK_GUARD_ACTIONS.fallbackDirect) {
       // 代理还活着：不降级，只把最新的探测结论推给界面
       pushState(currentSnapshot());
       return;
@@ -1330,14 +1379,24 @@ async function handleProxyLoadFailure(info) {
 
     syncSmartPatrol();
 
-    notifyNotice({
-      level: 'warn',
-      code: 'PROXY_FALLBACK_DIRECT',
-      title: '代理已断开，普通模式已自动直连',
-      message:
-        `检测到本机代理 ${probe.host}:${probe.port} 不可达（${probe.error}），` +
-        '普通模式已切换为直连并重新加载页面。隐私模式要求代理可达，不会降级为直连。',
+    diagnostics.warn('PROXY_FALLBACK_DIRECT', {
+      host: probe.host,
+      port: probe.port,
+      error: probe.error,
+      errorCode: info.errorCode,
+      url: info.url || '',
     });
+    modeEventLog.record({
+      type: 'switch',
+      from: 'normal',
+      to: 'normal',
+      changed: false,
+      ok: true,
+      code: 'PROXY_FALLBACK_DIRECT',
+      message: decision.notice.message,
+    });
+
+    notifyNotice(decision.notice);
 
     pushState(currentSnapshot());
 
@@ -1612,12 +1671,10 @@ function createMainWindow() {
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.once('ready-to-show', () => win.show());
 
-  // 启动阶段产生的提示（如"代理不可达已回落普通模式"）在页面就绪后推送
+  // 外壳页面就绪：从此提示可以直接推送，同时把加载期间攒下的提示一次补发
   win.webContents.on('did-finish-load', () => {
-    const notice = runtime.pendingNotice;
-    if (!notice) return;
-    runtime.pendingNotice = null;
-    win.webContents.send('nyx:notice', notice);
+    runtime.shellReady = true;
+    flushPendingNotices(win);
   });
 
   // UI 外壳自身也套用防泄漏策略
@@ -1861,14 +1918,31 @@ function buildProxyBlockedNotice(probe) {
   };
 }
 
-/** 向渲染层推送用户可见提示；页面未就绪时暂存，待加载完成后补发 */
+/**
+ * 向渲染层推送用户可见提示；页面未就绪时入队，等 did-finish-load 后按顺序补发。
+ *
+ * 只判 isDestroyed 是不够的：主窗口对象早就存在，但外壳页面（renderer.js）
+ * 还没执行到注册 nyx:notice 监听那一刻，此时 send 出去的提示谁都不会收到。
+ */
 function notifyNotice(notice) {
+  if (!notice) return;
   const win = runtime.mainWindow;
-  if (!win || win.isDestroyed()) {
-    runtime.pendingNotice = notice;
+  if (!win || win.isDestroyed() || !runtime.shellReady) {
+    runtime.pendingNotices.push(notice);
     return;
   }
   win.webContents.send('nyx:notice', notice);
+}
+
+/** 外壳页面就绪后补发所有排队的提示（FIFO，避免"最后一条覆盖前面几条"） */
+function flushPendingNotices(win) {
+  const queue = runtime.pendingNotices.slice();
+  runtime.pendingNotices = [];
+  runtime.pendingNotice = null;
+  for (const notice of queue) {
+    if (!win || win.isDestroyed()) return;
+    win.webContents.send('nyx:notice', notice);
+  }
 }
 
 /** 当前标签状态快照（窗口未就绪时给出兜底结构） */

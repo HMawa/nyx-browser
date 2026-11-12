@@ -5,8 +5,9 @@
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，69 项）
- *  2. scripts/verify-ui-polish.js（界面体验，60 项）
- *  3. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
+ *  2. scripts/verify-ui-polish.js（界面体验，61 项）
+ *  3. scripts/verify-link-guard.js（出站链路守卫，12 项；纯 Node，不启动 Electron）
+ *  4. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -47,8 +48,14 @@ const STEPS = [
   {
     label: '界面体验回归',
     script: 'verify-ui-polish.js',
-    items: '60 项',
+    items: '61 项',
     timeoutMs: 240000,
+  },
+  {
+    label: '出站链路守卫',
+    script: 'verify-link-guard.js',
+    items: '12 项',
+    timeoutMs: 60000,
   },
   {
     label: '打包产物冒烟',

@@ -1363,7 +1363,41 @@ async function main() {
       JSON.stringify(jumped),
     );
 
+    /* ---------- I. 清单 A2：隐私模式的链路告警必须真的能被用户看见 ----------
+       A2 的观感是"全隐私模式自己变直连了"。代码里其实没有隐私→直连的路径
+       （sessions.setLink 硬拒绝），真正的问题是：隐私模式下代理挂掉时，主进程
+       只在控制台打一行日志，界面上什么都不会出现——用户只能靠"页面打不开"
+       去猜。所以这一条断言盯的是"告警能不能渲染出来"：主进程产出的通知
+       （level=error / PRIVACY_PROXY_DOWN）必须落成可见的 toast，并且文案里
+       要明说不降级，而不是一句"代理不可用"。 */
+    const privacyNotice = await shell.eval(`(() => {
+      window.showNotice({
+        level: 'error',
+        code: 'PRIVACY_PROXY_DOWN',
+        title: '代理已断开，隐私模式未降级',
+        message: '检测到代理 127.0.0.1:7897 不可达（连接被拒绝）。隐私模式不会降级为直连，所以页面暂时打不开。',
+      });
+      const box = document.querySelector('.notice.notice-error');
+      return {
+        visible: !!box,
+        cls: box ? box.className : '',
+        role: box ? box.getAttribute('role') : '',
+        title: (document.querySelector('.notice-error .notice-title') || {}).textContent || '',
+        body: (document.querySelector('.notice-error .notice-body') || {}).textContent || '',
+      };
+    })()`);
+    check(
+      '隐私模式代理断开的告警能在界面上显示，并明说不会降级为直连（A2）',
+      !!privacyNotice &&
+        privacyNotice.visible === true &&
+        privacyNotice.cls.includes('notice-error') &&
+        privacyNotice.title.includes('未降级') &&
+        privacyNotice.body.includes('不会降级为直连'),
+      JSON.stringify(privacyNotice),
+    );
+
     /* ---------- 失败页的视觉与无障碍（v1.17.0 界面重做） ----------
+
        这一轮把失败页按「简洁、克制、只留一条主路径」重做：语义属性、主次按钮的
        层次差别、键盘焦点环都改成靠样式实现，所以直接读计算样式来断言，
        而不是截图比对（截图比对在 CI 上没有稳定基线）。 */
