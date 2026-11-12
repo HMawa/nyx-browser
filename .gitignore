@@ -9,6 +9,8 @@ dist-int/
 temp/
 prototype/
 ai-models/
+# 归档区：历史实验产物 / 旧构建 / 旧报告，一律不入库（可随时整目录删除）
+_attic/
 # 注意：build/ 需要入库（build/icon.ico 被 electron-builder 引用，build/installer.nsh 是 NSIS 自定义脚本）
 
 # ---- 运行期产生的本地状态（Token、端口、日志）----
