@@ -30,6 +30,14 @@ const UI_PREF_DEFAULTS = {
    *            才会写进这里，任何代码路径都不许自己把它改成 'direct'。
    */
   privacyLink: 'proxy',
+  /**
+   * 图形性能策略（清单 A5）：
+   *   'low-power'        默认，核显优先（不请求高性能适配器）；
+   *   'high-performance' 独显优先（用户显式选择）；
+   *   'auto'             跟随系统，不加任何 GPU 偏好开关。
+   * 只在下次启动生效（Chromium 的 GPU 选择发生在 ready 之前）。
+   */
+  gpuPolicy: 'low-power',
 };
 
 /** 枚举型偏好的合法取值（键 → 允许值）。
@@ -37,6 +45,7 @@ const UI_PREF_DEFAULTS = {
 const UI_PREF_ENUMS = {
   theme: ['ink', 'aurora', 'paper', 'quiet'],
   privacyLink: ['proxy', 'direct'],
+  gpuPolicy: ['low-power', 'high-performance', 'auto'],
 };
 
 class UiStore {

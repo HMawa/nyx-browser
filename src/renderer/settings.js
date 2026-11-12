@@ -295,6 +295,8 @@
       wirePinnedIo();
       // 抓包慢请求阈值（v1.16.0）：与工具箱共用主进程偏好，进入分区就回读
       loadSlowMs();
+      // 图形性能策略（A5）：进分区就回读，适配器信息也一并刷新
+      loadGpuPolicy();
     }
 
     // 更新状态每次进入都刷一次：版本与升级包状态随时可能被后台改变
@@ -889,9 +891,134 @@
     });
   }
 
+  /* ---------------- 图形性能（清单 A5） ---------------- */
+
+  let gpuPolicyWired = false;
+
+  /** 把主进程返回的策略、本次启动策略与适配器信息渲染到卡片上 */
+  function renderGpuPolicy(payload) {
+    const data = payload && payload.ok !== false ? payload : { policy: 'low-power', options: [] };
+    const policy = ['low-power', 'high-performance', 'auto'].includes(data.policy) ? data.policy : 'low-power';
+    const bootPolicy = ['low-power', 'high-performance', 'auto'].includes(data.bootPolicy)
+      ? data.bootPolicy
+      : policy;
+    const options = Array.isArray(data.options) ? data.options : [];
+
+    for (const value of ['low-power', 'high-performance', 'auto']) {
+      const radio = byId(`gpu-policy-${value}`);
+      if (radio) radio.checked = value === policy;
+    }
+
+    const option = options.find((item) => item && item.value === policy) || null;
+    const bootOption = options.find((item) => item && item.value === bootPolicy) || null;
+
+    const badge = byId('gpu-policy-badge');
+    if (badge) {
+      badge.textContent = (option && option.label) || policy;
+      badge.classList.toggle('warn', policy !== bootPolicy);
+      badge.classList.toggle('ok', policy === bootPolicy);
+    }
+
+    // 适配器这一行只报事实：Chromium 说它用的是哪张卡、我们取不到就说取不到
+    const adapterLine = byId('gpu-adapter-line');
+    if (adapterLine) {
+      const gpu = data.gpu;
+      if (gpu && gpu.ok) {
+        adapterLine.textContent = `当前适配器：${gpu.activeName}${gpu.deviceCount > 1 ? `（共 ${gpu.deviceCount} 张）` : ''}`;
+      } else if (gpu && gpu.note) {
+        adapterLine.textContent = `当前适配器：未知（${gpu.note}）`;
+      } else {
+        adapterLine.textContent = '当前适配器：未知（还没有取到显卡信息）';
+      }
+    }
+
+    const hint = byId('gpu-policy-hint');
+    if (hint) {
+      const restart = policy !== bootPolicy;
+      hint.textContent = restart
+        ? `已选「${(option && option.label) || policy}」，但本次启动仍按「${(bootOption && bootOption.label) || bootPolicy}」运行——显卡选择发生在启动之前，需要重启才生效。`
+        : `本次启动正在按「${(bootOption && bootOption.label) || bootPolicy}」运行。${(option && option.hint) || ''}`;
+      hint.classList.toggle('is-warn', restart);
+      hint.classList.toggle('is-ok', !restart);
+    }
+
+    const restartBtn = byId('btn-gpu-restart');
+    if (restartBtn) restartBtn.hidden = policy === bootPolicy;
+    const restartHint = byId('gpu-restart-hint');
+    if (restartHint) restartHint.textContent = policy === bootPolicy ? '' : '重启会重新打开当前标签。';
+  }
+
+  /** 读取并渲染图形性能策略；失败要说原因，不能停在「读取中…」 */
+  async function loadGpuPolicy() {
+    if (!window.nyx.gpuPolicy) return;
+
+    try {
+      renderGpuPolicy(await window.nyx.gpuPolicy());
+    } catch (err) {
+      const hint = byId('gpu-policy-hint');
+      if (hint) {
+        hint.textContent = `读取图形性能策略失败：${err.message}`;
+        hint.classList.add('is-warn');
+      }
+    }
+
+    if (!gpuPolicyWired) wireGpuPolicy();
+  }
+
+  function wireGpuPolicy() {
+    const row = byId('gpu-policy-row');
+    const restartBtn = byId('btn-gpu-restart');
+    if (!row) return;
+
+    gpuPolicyWired = true;
+
+    const apply = async (policy) => {
+      const hint = byId('gpu-policy-hint');
+      if (hint) {
+        hint.textContent = '正在保存…';
+        hint.classList.remove('is-warn', 'is-ok');
+      }
+
+      let res = null;
+      try {
+        res = await window.nyx.gpuPolicySet({ policy });
+      } catch (err) {
+        res = { ok: false, error: err.message };
+      }
+
+      if (!res || res.ok === false) {
+        if (hint) {
+          hint.textContent = `没有保存：${(res && res.error) || '未知原因'}`;
+          hint.classList.add('is-warn');
+        }
+        await loadGpuPolicy();
+        return;
+      }
+
+      setStatus(res.restartRequired ? '图形性能已保存，重启后生效' : '图形性能已保存');
+      await loadGpuPolicy();
+    };
+
+    row.addEventListener('change', (event) => {
+      const input = event.target;
+      if (!input || input.name !== 'gpu-policy' || !input.checked) return;
+      apply(input.value);
+    });
+
+    if (restartBtn) {
+      restartBtn.addEventListener('click', async () => {
+        setStatus('正在重启…');
+        try {
+          await window.nyx.restartApp();
+        } catch (err) {
+          setStatus(`重启失败：${err.message}`);
+        }
+      });
+    }
+  }
+
   async function loadPrivacy() {
     setStatus('正在读取隐私状态…');
-
     try {
       const [status, decisions, entries] = await Promise.all([
         window.nyx.getPrivacyStatus(),

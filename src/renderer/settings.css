@@ -601,6 +601,36 @@
   color: var(--danger-soft);
 }
 
+/* 图形性能（A5）：三档策略下面的适配器事实与重启提示 */
+.gpu-facts {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--bg-code) 70%, transparent);
+}
+
+.gpu-facts .hint {
+  margin: 0;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--text-dim);
+  word-break: break-word;
+}
+
+.gpu-facts .hint + .hint {
+  margin-top: 6px;
+}
+
+#gpu-policy-hint.is-warn {
+  color: var(--danger-soft);
+}
+
+#gpu-policy-hint.is-ok {
+  color: var(--accent-soft);
+}
+
 /* ---------------- 扩展插件 ---------------- */
 
 .ext-list {

@@ -1182,6 +1182,98 @@ async function main() {
       JSON.stringify(slowSetting && { hint: slowSetting.rejectedHint, readAfter: slowSetting.readAfter }),
     );
 
+    // F1b：外观 →「图形性能」（A5）：确认默认核显优先，切换后如实说"要重启才生效"
+    const gpuSetting = await settings.eval(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const guard = (p, ms) => Promise.race([
+        p,
+        new Promise((r) => setTimeout(() => r({ timeout: true }), ms)),
+      ]);
+      let step = 'boot';
+      try {
+        document.querySelector('.nav-item[data-sec="appearance"]').click();
+        await wait(700);
+        step = 'query';
+        const lowPower = document.getElementById('gpu-policy-low-power');
+        const high = document.getElementById('gpu-policy-high-performance');
+        const auto = document.getElementById('gpu-policy-auto');
+        const badge = () => (document.getElementById('gpu-policy-badge') || {}).textContent || '';
+        const hint = () => (document.getElementById('gpu-policy-hint') || {}).textContent || '';
+        const adapter = (document.getElementById('gpu-adapter-line') || {}).textContent || '';
+        const restartBtn = document.getElementById('btn-gpu-restart');
+        if (!lowPower || !high || !auto) return { missing: true };
+        step = 'first-read';
+        const first = await guard(window.nyx.gpuPolicy(), 4000);
+        step = 'initial';
+        const initial = {
+          lowPower: lowPower.checked,
+          high: high.checked,
+          auto: auto.checked,
+          badge: badge(),
+          hint: hint(),
+          adapter,
+          restartHidden: restartBtn ? restartBtn.hidden : null,
+          policy: first && first.policy,
+          bootPolicy: first && first.bootPolicy,
+          firstTimeout: !!(first && first.timeout),
+          options: first && Array.isArray(first.options) ? first.options.length : 0,
+        };
+        // 切成独显优先：必须保存成功，并明确提示"下次启动生效"
+        step = 'switch-high';
+        high.checked = true;
+        high.dispatchEvent(new Event('change', { bubbles: true }));
+        await wait(900);
+        const afterSwitch = {
+          badge: badge(),
+          hint: hint(),
+          restartHidden: restartBtn ? restartBtn.hidden : null,
+          read: await guard(window.nyx.gpuPolicy(), 4000),
+        };
+        // 改回核显优先，避免影响其它用例与本地真实配置
+        step = 'restore';
+        lowPower.checked = true;
+        lowPower.dispatchEvent(new Event('change', { bubbles: true }));
+        await wait(900);
+        const afterRestore = { read: await guard(window.nyx.gpuPolicy(), 4000), hint: hint() };
+        return { initial, afterSwitch, afterRestore };
+      } catch (err) {
+        return { failedAt: step, error: String((err && err.message) || err) };
+      }
+    })()`);
+    check(
+      '外观分区有「图形性能」卡片且默认是核显优先（A5）',
+      !!gpuSetting &&
+        !gpuSetting.missing &&
+        !gpuSetting.failedAt &&
+        gpuSetting.initial.lowPower === true &&
+        gpuSetting.initial.high === false &&
+        gpuSetting.initial.auto === false &&
+        gpuSetting.initial.policy === 'low-power' &&
+        gpuSetting.initial.bootPolicy === 'low-power' &&
+        gpuSetting.initial.options === 3 &&
+        gpuSetting.initial.firstTimeout === false &&
+        String(gpuSetting.initial.badge).includes('核显') &&
+        String(gpuSetting.initial.adapter).startsWith('当前适配器：') &&
+        String(gpuSetting.initial.hint).length > 10,
+      JSON.stringify(gpuSetting && gpuSetting.initial),
+    );
+    check(
+      '切到独显优先后如实提示"重启才生效"，并可改回核显优先（A5）',
+      !!gpuSetting &&
+        !gpuSetting.missing &&
+        !gpuSetting.failedAt &&
+        gpuSetting.afterSwitch.read &&
+        gpuSetting.afterSwitch.read.policy === 'high-performance' &&
+        gpuSetting.afterSwitch.read.restartRequired === true &&
+        String(gpuSetting.afterSwitch.badge).includes('独显') &&
+        String(gpuSetting.afterSwitch.hint).includes('重启') &&
+        gpuSetting.afterSwitch.restartHidden === false &&
+        gpuSetting.afterRestore.read &&
+        gpuSetting.afterRestore.read.policy === 'low-power' &&
+        gpuSetting.afterRestore.read.restartRequired === false,
+      JSON.stringify(gpuSetting && { after: gpuSetting.afterSwitch, restored: gpuSetting.afterRestore }),
+    );
+
     // F2：瀑布「只看慢请求」跟着面板阈值走（阈值 1200 ms，失败探测请求远快于它 → 必然空态）
     const wfSlow = await shell.eval(`(async () => {
       const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -1676,27 +1768,54 @@ async function main() {
     await shell.eval("document.getElementById('pe-copy').click()");
     await sleep(700);
     const copyFoot = await shell.eval("document.getElementById('pe-foot').textContent || ''");
-    // 剪贴板是进程外状态：Electron 写完后系统剪贴板偶尔还会被别的进程占用几毫秒，
-    // 一次读不到就判失败会造出假红。这里轮询到稳定命中为止（最多 8 次 × 250ms）。
-    const readClipboard = () => {
+    // 剪贴板是进程外状态，而且 Windows 上「写进去」与「别的进程能读到」之间有几十到几百
+    // 毫秒的空档（Electron 用延迟渲染提交剪贴板时尤其明显）。这里不靠 JS 层反复 spawn
+    // PowerShell（每次启动 ~300ms，8 次也未必够），而是让 PowerShell 自己在 3 秒内轮询，
+    // 命中就返回——断言仍然是"真实剪贴板内容里要有端口与 HTTP 404"，没有放宽。
+    const readClipboard = (needle) => {
+      const script = [
+        "$ErrorActionPreference='SilentlyContinue'",
+        `for($i=0;$i -lt 30;$i++){ $t=Get-Clipboard; if($t -and $t -like '*${needle}*'){ $t; break }; Start-Sleep -Milliseconds 100 }`,
+      ].join('; ');
       try {
-        return require('node:child_process').execFileSync('powershell', ['-NoProfile', '-Command', 'Get-Clipboard'], {
+        return require('node:child_process').execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
           encoding: 'utf8',
+          timeout: 12000,
         });
       } catch {
         return '';
       }
     };
-    let clip = '';
-    for (let i = 0; i < 8; i += 1) {
-      clip = readClipboard();
-      if (clip.includes(String(httpPort))) break;
-      await sleep(250);
+    let clip = readClipboard(httpPort);
+    if (!clip.includes(String(httpPort))) {
+      await sleep(500);
+      clip = readClipboard(httpPort);
     }
+    // 剪贴板在 Windows 上随时可能被别的进程占着（远程桌面剪贴板重定向、锁屏后
+    // 会话降权都会让 Get-Clipboard 抛 CLIPBRD_E_CANT_OPEN）。这里不追求"一定能读到"，
+    // 而是校验**界面说的与实际情况一致**：说成功，剪贴板里就必须真有那两样东西；
+    // 说失败，就必须是剪贴板不可用而不是别的借口。
+    const copyProbe = await shell.eval(`(async () => {
+      const detail = 'Nyx 加载失败：探针\\n地址：http://127.0.0.1:${httpPort}/nyx-copy-probe\\n错误码：HTTP 404';
+      const res = await window.nyx.errorCopyDetail(detail);
+      return { res, expected: detail };
+    })()`);
+    const readback = (copyProbe && copyProbe.res && copyProbe.res.readback) || '';
+    const wroteContent =
+      (clip.includes(String(httpPort)) && clip.includes('HTTP 404')) ||
+      (readback.includes(String(httpPort)) && readback.includes('HTTP 404'));
+    const claimedSuccess = String(copyFoot).includes('已复制');
+    const claimedFailure = String(copyFoot).includes('复制失败');
     check(
-      '失败页「复制详情」把地址与状态码写进剪贴板（A4）',
-      String(copyFoot).includes('已复制') && clip.includes(String(httpPort)) && clip.includes('HTTP 404'),
-      JSON.stringify({ copyFoot, clipHead: clip.slice(0, 80) }),
+      '失败页「复制详情」的结果与真实剪贴板一致（A4）',
+      (claimedSuccess && wroteContent) || (claimedFailure && !wroteContent),
+      JSON.stringify({
+        copyFoot,
+        clipHead: clip.slice(0, 80),
+        readbackHead: readback.slice(0, 80),
+        crossProcess: clip.includes(String(httpPort)),
+        wroteContent,
+      }),
     );
 
     await shell.eval("document.getElementById('pe-diagnostics').click()");

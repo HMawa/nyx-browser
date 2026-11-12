@@ -162,6 +162,51 @@
               </div>
             </section>
 
+            <!-- 图形性能（清单 A5）：默认核显优先，可显式切独显/跟随系统 -->
+            <section class="info-card">
+              <div class="info-head">
+                <h3>图形性能</h3>
+                <span class="badge" id="gpu-policy-badge">读取中…</span>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  双显卡机器上，Chromium 默认可能一直抓着独立显卡跑，代价是发热、耗电和风扇噪音。
+                  这里默认选「核显优先」：浏览网页不需要独显，需要时再切「独显优先」。
+                </p>
+                <div class="radio-row" id="gpu-policy-row" role="radiogroup" aria-label="图形性能策略">
+                  <label class="radio-item">
+                    <input type="radio" name="gpu-policy" id="gpu-policy-low-power" value="low-power" />
+                    <span class="radio-text">
+                      <strong>节能（核显优先）</strong>
+                      <em>默认。不请求高性能显卡，更省电、更凉、不抢独显。</em>
+                    </span>
+                  </label>
+                  <label class="radio-item">
+                    <input type="radio" name="gpu-policy" id="gpu-policy-high-performance" value="high-performance" />
+                    <span class="radio-text">
+                      <strong>高性能（独显优先）</strong>
+                      <em>向系统请求独立显卡。画面更顺，但耗电、发热与噪音都会上去。</em>
+                    </span>
+                  </label>
+                  <label class="radio-item">
+                    <input type="radio" name="gpu-policy" id="gpu-policy-auto" value="auto" />
+                    <span class="radio-text">
+                      <strong>跟随系统</strong>
+                      <em>不加任何显卡偏好开关，交给 Windows 的图形设置决定。</em>
+                    </span>
+                  </label>
+                </div>
+                <div class="gpu-facts">
+                  <p class="hint" id="gpu-adapter-line">当前适配器：读取中…</p>
+                  <p class="hint" id="gpu-policy-hint" role="status" aria-live="polite">正在读取…</p>
+                </div>
+                <div class="sec-actions">
+                  <button type="button" class="btn" id="btn-gpu-restart" hidden>立即重启让设置生效</button>
+                  <span class="hint" id="gpu-restart-hint"></span>
+                </div>
+              </div>
+            </section>
+
             <!-- 硬件加速：GPU 只读探测 -->
             <section class="info-card">
               <div class="info-head">

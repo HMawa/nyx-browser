@@ -172,6 +172,8 @@ async function waitTarget(match, timeoutMs) {
 /* ---------------- 断言记录 ---------------- */
 
 const checks = [];
+// 环境不满足、无法验证的项：既不算通过也不算失败，但必须在汇总里可见（AGENTS.md 红线 7）
+const skipped = [];
 function check(name, pass, detail) {
   checks.push({ name, pass: !!pass, detail: detail == null ? '' : String(detail) });
   console.log(`  ${pass ? '✔' : '✘'} ${name}${detail ? `｜${detail}` : ''}`);
@@ -829,36 +831,48 @@ async function main() {
     );
 
     // v1.10.0：剪贴板里是网址时，建议里多一行「剪贴板」
-    try {
-      spawnSync(
-        'powershell',
-        ['-NoProfile', '-Command', "Set-Clipboard -Value 'https://clip.example/page'"],
-        { stdio: 'ignore', timeout: 8000 },
+    // 剪贴板是进程外的系统状态：Windows 会话被锁、剪贴板被别的程序独占（远程桌面
+    // 剪贴板重定向）时，连 Set-Clipboard 都会抛 CLIPBRD_E_CANT_OPEN。这时这条根本
+    // 无法被验证——显式记为「跳过（环境不可用）」并打印原因，既不假装通过，也不删断言。
+    const clipWrite = spawnSync(
+      'powershell',
+      [
+        '-NoProfile',
+        '-Command',
+        "Set-Clipboard -Value 'https://clip.example/page'; if ((Get-Clipboard -Raw) -match 'clip\\.example') { exit 0 } else { exit 3 }",
+      ],
+      { stdio: 'ignore', timeout: 8000 },
+    );
+    const clipboardUsable = !clipWrite.error && clipWrite.status === 0;
+    if (!clipboardUsable) {
+      skipped.push({
+        name: '剪贴板里的网址会成为一条建议',
+        reason: `系统剪贴板不可用（Set-Clipboard 退出码 ${clipWrite.status}${clipWrite.error ? `，${clipWrite.error.message}` : ''}），本条无法验证`,
+      });
+      console.log('  ⋯ 跳过（环境不可用）：剪贴板里的网址会成为一条建议｜系统剪贴板被占用，无法写入测试数据');
+    } else {
+      await sleep(400);
+      const clipFlow = await shell.eval(
+        `window.nyx.addressSuggestQuery({ text: 'zzz-no-history-match', x: 160, y: 320, width: 460 })`,
       );
-    } catch {
-      /* 设剪贴板失败就跳过（不影响其它断言） */
+      await sleep(400);
+      const clipDom = await readSuggest(`(() => {
+        const badge = document.querySelector('.as-src-clip');
+        const row = badge && badge.closest('.as-item');
+        return {
+          badge: badge ? badge.textContent : '',
+          url: row ? row.title : '',
+          rows: document.querySelectorAll('.as-item').length,
+        };
+      })()`);
+      check(
+        '剪贴板里的网址会成为一条建议',
+        !!clipDom && clipDom.badge === '剪贴板' && clipDom.url === 'https://clip.example/page' && clipDom.rows === 2,
+        JSON.stringify(clipDom),
+      );
+      await shell.eval('window.nyx.addressSuggestClose()');
+      await sleep(200);
     }
-    await sleep(400);
-    const clipFlow = await shell.eval(
-      `window.nyx.addressSuggestQuery({ text: 'zzz-no-history-match', x: 160, y: 320, width: 460 })`,
-    );
-    await sleep(400);
-    const clipDom = await readSuggest(`(() => {
-      const badge = document.querySelector('.as-src-clip');
-      const row = badge && badge.closest('.as-item');
-      return {
-        badge: badge ? badge.textContent : '',
-        url: row ? row.title : '',
-        rows: document.querySelectorAll('.as-item').length,
-      };
-    })()`);
-    check(
-      '剪贴板里的网址会成为一条建议',
-      !!clipDom && clipDom.badge === '剪贴板' && clipDom.url === 'https://clip.example/page' && clipDom.rows === 2,
-      JSON.stringify(clipDom),
-    );
-    await shell.eval('window.nyx.addressSuggestClose()');
-    await sleep(200);
     // 测完立刻清空剪贴板，避免污染后面的条目数断言
     try {
       spawnSync('powershell', ['-NoProfile', '-Command', 'Set-Clipboard -Value ""'], {
@@ -1162,6 +1176,10 @@ async function main() {
     const failed = checks.filter((c) => !c.pass);
     console.log('');
     console.log(`[验证] 共 ${checks.length} 项，通过 ${checks.length - failed.length} 项，失败 ${failed.length} 项`);
+    if (skipped.length) {
+      console.log(`[验证] 跳过 ${skipped.length} 项（环境不满足，未验证）：`);
+      for (const s of skipped) console.log(`  · 跳过：${s.name}｜${s.reason}`);
+    }
     if (failed.length) {
       for (const f of failed) console.log(`  · 失败项：${f.name}｜${f.detail}`);
       process.exitCode = 1;

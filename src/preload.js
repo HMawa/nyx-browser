@@ -90,6 +90,18 @@ contextBridge.exposeInMainWorld('nyx', {
    */
   privacyLinkSet: (payload) => ipcRenderer.invoke('nyx:privacy:link-set', payload || {}),
 
+  /**
+   * 图形性能策略（清单 A5）：读当前策略、本次启动实际生效的策略、显卡适配器信息。
+   * `restartRequired` 为 true 说明用户改过但还没重启，改动尚未生效。
+   */
+  gpuPolicy: () => ipcRenderer.invoke('nyx:gpu:policy'),
+
+  /** 修改图形性能策略（low-power / high-performance / auto），一律下次启动生效 */
+  gpuPolicySet: (payload) => ipcRenderer.invoke('nyx:gpu:policy-set', payload || {}),
+
+  /** 立即重启应用（用于让显卡策略生效）；不返回值也会退出进程 */
+  restartApp: () => ipcRenderer.invoke('nyx:app:restart'),
+
   /** 权限决策轨迹（默认最近 50 条） */
   listPermissionDecisions: (limit) => ipcRenderer.invoke('nyx:permissions:list', limit),
 

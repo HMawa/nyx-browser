@@ -70,6 +70,15 @@ const { SiteIcons } = require('./core/site-icons');
 const { BookmarkStore } = require('./core/bookmark-store');
 const { Diagnostics } = require('./core/diagnostics');
 const { DownloadManager, DOWNLOAD_STATES, formatBytes, sanitizeFilename, uniquePath } = require('./core/downloads');
+const {
+  DEFAULT_GPU_POLICY: BOOT_DEFAULT_GPU_POLICY,
+  GPU_POLICIES,
+  describeGpuPolicy,
+  gpuSwitches,
+  normalizeGpuPolicy,
+  readGpuPolicyFromPrefs,
+  summarizeGpuInfo,
+} = require('./core/gpu-policy');
 
 /**
  * 验收 / 调试用的隔离用户数据目录（环境变量 NYX_USER_DATA）。
@@ -194,6 +203,32 @@ app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('enable-zero-copy');
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
 
+/**
+ * 显卡偏好（清单 A5）。
+ *
+ * 「默认吃独显」的直接原因是上面三个开关全开、又没有下发任何"优先用低功耗适配器"的请求，
+ * 双显卡机器上 Chromium 就会抓住独显。策略必须在这里读——userData 路径已经确定，
+ * 但 app 还没 ready，所以只能直接同步读 ui-preferences.json（UiStore 那条路要等 ready）。
+ * 读失败/文件损坏一律按默认（核显优先）处理，不阻断启动。
+ */
+function readBootGpuPolicy() {
+  try {
+    const prefsPath = path.join(app.getPath('userData'), 'ui-preferences.json');
+    if (!fs.existsSync(prefsPath)) return BOOT_DEFAULT_GPU_POLICY;
+    return readGpuPolicyFromPrefs(JSON.parse(fs.readFileSync(prefsPath, 'utf8')));
+  } catch (err) {
+    console.warn('[Nyx] 显卡偏好读取失败，按默认策略启动：', err && err.message ? err.message : err);
+    return BOOT_DEFAULT_GPU_POLICY;
+  }
+}
+
+/** 本次启动实际生效的显卡策略（设置里改完要重启才换，所以单独留一份"启动值"） */
+const BOOT_GPU_POLICY = readBootGpuPolicy();
+for (const name of gpuSwitches(BOOT_GPU_POLICY)) {
+  app.commandLine.appendSwitch(name);
+}
+console.log(`[Nyx] 显卡策略：${describeGpuPolicy(BOOT_GPU_POLICY).label}（开关 ${gpuSwitches(BOOT_GPU_POLICY).join(',') || '无'}）`);
+
 // 启用 WebNN（Chromium 131+ 可用，需 secure context；file:// 由 unsafely 开关补齐）
 app.commandLine.appendSwitch('enable-features', 'WebMachineLearningNeuralNetwork');
 app.commandLine.appendSwitch('unsafely-treat-insecure-origin-as-secure', 'file://');
@@ -226,6 +261,11 @@ const runtime = {
   downloads: null,
   /** 下载中心窗口（独立 BrowserWindow） */
   downloadsWindow: null,
+  /**
+   * 显卡适配器信息（清单 A5）：启动后由 app.getGPUInfo('basic') 填一次，
+   * 只用于诊断页展示与"到底用的哪张卡"的如实汇报，取不到时保持 null。
+   */
+  gpuInfo: null,
   panicking: false,
   quitting: false,
   /** 渲染层尚未就绪时暂存的提示，待页面加载完成后推送 */
@@ -678,7 +718,10 @@ async function bootstrap() {
       const feature = typeof app.getGPUFeatureStatus === 'function' ? app.getGPUFeatureStatus() : null;
       const compositing = (feature && feature.gpu_compositing) || '';
       const enabled = compositing.startsWith('enabled');
-      context.gpu = `硬件加速${enabled ? '已启用' : '未启用'}／GPU 合成 ${compositing || '未知'}`;
+      const adapter = runtime.gpuInfo && runtime.gpuInfo.ok ? runtime.gpuInfo.activeName : '未知';
+      context.gpu =
+        `硬件加速${enabled ? '已启用' : '未启用'}／GPU 合成 ${compositing || '未知'}` +
+        `／适配器 ${adapter}／策略 ${describeGpuPolicy(BOOT_GPU_POLICY).label}`;
     } catch (err) {
       context.gpu = `读取失败：${err && err.message ? err.message : err}`;
     }
@@ -686,6 +729,28 @@ async function bootstrap() {
     return context;
   });
   diagnostics.info('APP_READY', '诊断服务已就绪', { userData: app.getPath('userData') });
+
+  // 显卡适配器（清单 A5）：启动后问一次 Chromium 到底用的哪张卡，写进诊断日志；
+  // 取不到就写"未知"，绝不用"已启用独显/已启用核显"这种猜的结论糊过去。
+  if (typeof app.getGPUInfo === 'function') {
+    app
+      .getGPUInfo('basic')
+      .then((info) => {
+        runtime.gpuInfo = summarizeGpuInfo(info);
+        diagnostics.info('GPU_ADAPTER', runtime.gpuInfo.activeName, {
+          bootPolicy: BOOT_GPU_POLICY,
+          deviceCount: runtime.gpuInfo.deviceCount,
+          activeKnown: !!runtime.gpuInfo.activeKnown,
+        });
+        console.log(`[Nyx] 显卡适配器：${runtime.gpuInfo.activeName}`);
+      })
+      .catch((err) => {
+        runtime.gpuInfo = summarizeGpuInfo(null);
+        diagnostics.warn('GPU_ADAPTER_FAILED', '读不到显卡适配器', {
+          error: err && err.message ? err.message : String(err),
+        });
+      });
+  }
 
   // 扩展管理器：必须在普通分区建立之后初始化（扩展装到分区上，不装到进程上）
   initExtensions();
@@ -4846,6 +4911,59 @@ function registerSettingsIpc() {
     return { ok: true, link: want, ui: saved.ui || currentUiPrefs() };
   });
 
+  /* 图形性能（清单 A5）：默认核显优先，用户可以显式选独显或跟随系统。
+   * Chromium 的显卡选择发生在 app ready 之前，所以改动一律"下次启动生效"，
+   * 这里如实告诉界面本次启动用的是哪一档（bootPolicy），不假装已经切换。
+   * 注意：这里刻意不带硬件能力探测结果——getHardwareStatus() 会跑一次
+   * PowerShell（最长 15 秒），把它塞进这个快照里会让设置页开一次卡一次；
+   * 硬件加速那张卡片本来就有自己的只读通道（nyx:hardware:status）。 */
+  ipcMain.handle('nyx:gpu:policy', () => {
+    const prefs = runtime.uiStore ? runtime.uiStore.get() : null;
+    const policy = normalizeGpuPolicy(prefs && prefs.gpuPolicy ? prefs.gpuPolicy : BOOT_GPU_POLICY);
+    return {
+      ok: true,
+      policy,
+      bootPolicy: BOOT_GPU_POLICY,
+      restartRequired: policy !== BOOT_GPU_POLICY,
+      options: GPU_POLICIES,
+      gpu: runtime.gpuInfo || null,
+    };
+  });
+
+  ipcMain.handle('nyx:gpu:policy-set', (_event, payload) => {
+    if (!runtime.uiStore) return { ok: false, error: '界面偏好存储未就绪' };
+
+    const want = normalizeGpuPolicy(payload && payload.policy);
+    const saved = runtime.uiStore.set('gpuPolicy', want);
+    if (!saved.ok) return saved;
+
+    diagnostics.info('GPU_POLICY_SET', {
+      policy: want,
+      bootPolicy: BOOT_GPU_POLICY,
+      restartRequired: want !== BOOT_GPU_POLICY,
+    });
+    return {
+      ok: true,
+      policy: want,
+      bootPolicy: BOOT_GPU_POLICY,
+      restartRequired: want !== BOOT_GPU_POLICY,
+      ui: saved.ui || currentUiPrefs(),
+    };
+  });
+
+  // 「立即重启」只做重启，不顺手改别的：先把请求写进诊断，重启后能对上账
+  ipcMain.handle('nyx:app:restart', () => {
+    diagnostics.info('APP_RESTART_REQUESTED', { bootGpuPolicy: BOOT_GPU_POLICY });
+    try {
+      app.relaunch();
+      app.exit(0);
+      return { ok: true };
+    } catch (err) {
+      diagnostics.error('APP_RESTART_FAILED', { error: err && err.message });
+      return { ok: false, error: err && err.message ? err.message : String(err) };
+    }
+  });
+
   // 设置中心「启动与主页 / 下载 / 关于与更新」只读信息
   ipcMain.handle('nyx:app:info', () => {
     const prefs = runtime.startupStore ? runtime.startupStore.get() : null;
@@ -5443,7 +5561,24 @@ function registerErrorPageIpc() {
     if (!text) return { ok: false, error: '没有可复制的详情' };
     try {
       clipboard.writeText(text);
-      return { ok: true };
+      // 写完立刻回读校对：`writeText` 不抛异常并不等于真写进去了（会话被锁、
+      // 剪贴板被别的程序独占时它会安静地什么都不做）。回读对不上就如实报错，
+      // 不让界面显示一句假的「已复制」。
+      let readback = '';
+      try {
+        readback = clipboard.readText() || '';
+      } catch {
+        readback = '';
+      }
+      const head = text.split('\n')[0].trim();
+      if (!readback || (head && !readback.includes(head))) {
+        return {
+          ok: false,
+          error: '系统剪贴板当前不可用（可能被其它程序占用），详情没能复制',
+          readback,
+        };
+      }
+      return { ok: true, readback };
     } catch (err) {
       return { ok: false, error: `复制失败：${err.message}` };
     }
