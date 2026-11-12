@@ -15,7 +15,7 @@
 
 | 路径 | 是什么 | 能不能动 |
 | --- | --- | --- |
-| `src/main.js` | 主进程唯一入口（约 4800 行，WebContentsView 标签架构） | 可动，改动前先读上下文 |
+| `src/main.js` | 主进程唯一入口（约 6100 行，WebContentsView 标签架构） | 可动，改动前先读上下文 |
 | `src/core/*.js` | 28 个主进程模块（会话/代理/内核桥接/工具箱/更新器/扩展…） | 可动 |
 | `src/renderer/*` | 外壳与各浮层页面（`index.html` 外壳、`settings.*` 设置、`addr-suggest.*`、`bm-*`、`toolbox-ui.js`、`proxy-center.*`） | 可动 |
 | `src/preload.js` / `src/preload-tab.js` | contextBridge 暴露面（**安全边界**） | 可动，加接口要同步白名单 |
@@ -32,7 +32,7 @@
 - 版本：`package.json` = **1.17.0**；产物 `dist/Nyx-Setup-1.17.0.exe`（118,754,042 字节，sha256 `e2a4dab25ba4a278cb65b55ceef67997cf5b48989719c32201b44fadc299cc52`），`dist/win-unpacked` = 1.17.0。
 - 运行时：Electron 43.7.4 / Chromium 150 / Node 24；Windows。
 - 运行时依赖只有两个：`@modelcontextprotocol/sdk`、`zod`（MCP server 用）。
-- 回归基线（本轮实测，全绿）：`npm run verify` = 地址栏建议 **69 项** + 界面体验 **44 项** + 打包冒烟 **11 项** = **124 项 / 3 个脚本 / 98 秒**。
+- 回归基线（本轮实测，全绿）：`npm run verify` = 地址栏建议 **69 项** + 界面体验 **61 项** + 出站链路守卫 **12 项** + 打包冒烟 **11 项** = **153 项 / 4 个脚本 / 120 秒**。
 - 更新源：`%APPDATA%\Nyx\updates`（`latest.json` + 安装包 + `.blocks.json` + `extensions.json`）；留档 `%APPDATA%\Nyx\updates-archive\<版本>`。
 - 安装器：NSIS，`perMachine:false`（装到用户目录），自定义脚本 `build/installer.nsh`、打包后钩子 `build/after-pack.js`。
 - npm 命令必须用 `& 'C:\Program Files\nodejs\npm.cmd' run <script>`（`npm.ps1` 被执行策略拦）。
@@ -80,7 +80,7 @@
 
 ## 6. 验证脚本约定
 
-- 三个脚本：`verify-address-suggest.js`（地址栏 69）、`verify-ui-polish.js`（界面 44）、`verify-packaged-smoke.js`（包内 11，缺 `dist/win-unpacked` 时跳过）。
+- 四个脚本：`verify-address-suggest.js`（地址栏 69）、`verify-ui-polish.js`（界面 61）、`verify-link-guard.js`（出站链路守卫 12，纯 Node 不启动 Electron）、`verify-packaged-smoke.js`（包内 11，缺 `dist/win-unpacked` 时跳过）。
 - 新增断言写在对应脚本里，标签复用中文「（vX.Y.Z）」后缀；项数必须同步到 `scripts/verify-all.js` 的 `items` 与注释。
 - CDP 端到端：Node 24 全局 `WebSocket`，`--remote-debugging-port` 用 `pickFreePort()`。
 - `contextBridge` 暴露的 `window.nyx` 是**冻结代理**：测试里 `window.nyx.foo = stub` 会静默失效。要测状态机就把判定抽成**纯函数**（如 `trackCoursePause(state, now, prev)`）直接调。
@@ -120,3 +120,4 @@
 
 - 正在执行的清单：`docs/实测修复台账.md`（来源：`Nyx浏览器v1实测修复清单.md`，12 项）。
 - 顺序：**C1 → A4 → A2 → A1 → B4+B5 → B1/B2/B3 → A3/A5 → C2/C3 → C4**，一项一提交。
+- 进度：C1（`b848b6b`）、A4（`d33be32` + `018780b` + `2c9f248`）、A2（`4919583`）已完成；**下一项 A1（下载）**。
