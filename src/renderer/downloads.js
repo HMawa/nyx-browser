@@ -122,6 +122,11 @@ function buildItem(item) {
   meta.className = 'dl-meta';
   const bits = [];
   if (item.savePath) bits.push(item.savePath);
+  // 吞吐：让「慢」变成一个能报给开发者的数字，而不是一句感觉
+  if (item.avgBytesPerSec > 0) {
+    const seconds = item.durationMs > 0 ? (item.durationMs / 1000).toFixed(1) : '';
+    bits.push(`平均 ${formatBytes(item.avgBytesPerSec)}/s${seconds ? ` · 用时 ${seconds} s` : ''}`);
+  }
   if (item.mode === 'private') bits.push('隐私模式');
   if (item.startedAt) bits.push(formatTime(item.startedAt));
   meta.textContent = bits.join(' · ');

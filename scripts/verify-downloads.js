@@ -188,7 +188,32 @@ check('11. 下载完成：状态翻转、错误清空、汇总计入 done', () =
   return { ok, detail: { state: rec.state, summary } };
 });
 
-check('12. 下载中断：状态为 interrupted 且带中文原因（不再静默）', () => {
+check('12. 完成时记下时长与平均速度：慢是数字，不是感觉（A3）', () => {
+  let clock = 1_000_000;
+  const mgr = new DownloadManager({ push: () => {}, now: () => clock });
+  const item = new FakeItem({ savePath: path.join('D:\\dl', 'big.bin'), total: 2 * 1024 * 1024 });
+  mgr.attach(item, { mode: 'normal' });
+  clock += 2000; // 用了 2 秒
+  item.received = 2 * 1024 * 1024;
+  item.emit('done', {}, DOWNLOAD_STATES.completed);
+  const rec = mgr.list()[0];
+  const ok = rec.durationMs === 2000 && rec.avgBytesPerSec === 1024 * 1024;
+  return { ok, detail: { durationMs: rec.durationMs, avgBytesPerSec: rec.avgBytesPerSec } };
+});
+
+check('13. 一个字节都没收到的失败条目不编造平均速度（A3）', () => {
+  let clock = 5_000;
+  const mgr = new DownloadManager({ push: () => {}, now: () => clock });
+  const item = new FakeItem({ savePath: path.join('D:\\dl', 'zero.bin'), total: 0 });
+  mgr.attach(item, { mode: 'normal' });
+  clock += 1500;
+  item.emit('done', {}, DOWNLOAD_STATES.interrupted);
+  const rec = mgr.list()[0];
+  const ok = rec.durationMs === 0 && rec.avgBytesPerSec === 0 && rec.state === DOWNLOAD_STATES.interrupted;
+  return { ok, detail: { durationMs: rec.durationMs, avgBytesPerSec: rec.avgBytesPerSec } };
+});
+
+check('14. 下载中断：状态为 interrupted 且带中文原因（不再静默）', () => {
   const pushes = [];
   const mgr = new DownloadManager({ push: (p) => pushes.push(p) });
   const item = new FakeItem({ savePath: path.join('D:\\dl', 'bad.zip'), total: 100 });
@@ -200,7 +225,7 @@ check('12. 下载中断：状态为 interrupted 且带中文原因（不再静�
   return { ok, detail: { state: rec.state, error: rec.error } };
 });
 
-check('13. 清空历史：正在下载的条目不会被一起清掉', () => {
+check('15. 清空历史：正在下载的条目不会被一起清掉', () => {
   const mgr = new DownloadManager({ push: () => {} });
   const running = new FakeItem({ savePath: 'D:\\dl\\run.bin' });
   const finished = new FakeItem({ savePath: 'D:\\dl\\done.bin' });
@@ -212,7 +237,7 @@ check('13. 清空历史：正在下载的条目不会被一起清掉', () => {
   return { ok, detail: { left: left.map((it) => it.state) } };
 });
 
-check('14. 静态守卫：will-download 里不得出现 preventDefault + 异步 setSavePath', () => {
+check('16. 静态守卫：will-download 里不得出现 preventDefault + 异步 setSavePath', () => {
   const text = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
   const start = text.indexOf('function installDownloadHandler');
   const end = text.indexOf('function pickDownloadDir');

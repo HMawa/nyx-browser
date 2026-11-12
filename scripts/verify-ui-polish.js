@@ -1966,6 +1966,7 @@ async function main() {
     await shell.eval('window.nyx.openDownloads()');
     const downloadsTarget = await waitTarget((t) => t.url.endsWith('/downloads.html'), 12000);
     check('下载中心窗口能打开', !!downloadsTarget, downloadsTarget && downloadsTarget.url);
+    let dlMetaText = '';
     if (downloadsTarget) {
       downloadsPage = await new Cdp(downloadsTarget.webSocketDebuggerUrl).connect();
       await downloadsPage.send('Runtime.enable', {});
@@ -1982,6 +1983,7 @@ async function main() {
           emptyHidden: document.getElementById('dl-empty').hidden,
         };
       })()`);
+      dlMetaText = String(shown && shown.meta ? shown.meta : '');
       check(
         '下载中心列出该记录：文件名/状态/落点都可读（A1）',
         !!shown &&
@@ -1995,6 +1997,10 @@ async function main() {
     } else {
       check('下载中心列出该记录：文件名/状态/落点都可读（A1）', false, '下载中心窗口未出现');
     }
+
+    // 吞吐：清单 A3 说"大文件极慢"，所以慢必须是个数字——平均速度与用时写在条目里
+    const speedShown = /平均 .+\/s/.test(dlMetaText) && /用时 [\d.]+ s/.test(dlMetaText);
+    check('下载条目给出平均速度与用时（A3）', speedShown === true, dlMetaText || '没有条目');
 
     // 工具栏角标：已经没有进行中/失败项，角标必须隐藏（避免"永远挂个 1"）
     const badge = await shell.eval(`(() => {

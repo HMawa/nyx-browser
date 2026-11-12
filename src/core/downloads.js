@@ -184,6 +184,9 @@ class DownloadManager {
       receivedBytes: 0,
       totalBytes: 0,
       speedBytes: 0,
+      // 时长与平均速度：清单 A3 要「慢」有据可查，别只凭感觉
+      durationMs: 0,
+      avgBytesPerSec: 0,
       error: '',
       startedAt,
       endedAt: 0,
@@ -220,6 +223,12 @@ class DownloadManager {
       rec.totalBytes = Number(item.getTotalBytes ? item.getTotalBytes() : rec.totalBytes) || rec.totalBytes;
       rec.savePath = readPath() || rec.savePath;
       rec.speedBytes = 0;
+      // 时长与平均速度：只统计真的结束了、并且确实收到了字节的条目
+      const duration = rec.endedAt - rec.startedAt;
+      if (duration > 0 && rec.receivedBytes > 0) {
+        rec.durationMs = duration;
+        rec.avgBytesPerSec = Math.round((rec.receivedBytes * 1000) / duration);
+      }
       if (state === DOWNLOAD_STATES.completed) {
         rec.state = DOWNLOAD_STATES.completed;
         rec.error = '';

@@ -1701,12 +1701,25 @@ function installDownloadHandler() {
 
     item.once('done', (_event, state) => {
       const size = formatBytes(item.getReceivedBytes ? item.getReceivedBytes() : 0);
+      // 清单 A3：把这一次的时长与平均速度写进诊断日志，用户说"慢"时能直接报数字
+      if (runtime.diagnostics) {
+        const bytes = rec ? rec.receivedBytes : 0;
+        const ms = rec ? rec.durationMs : 0;
+        runtime.diagnostics.info('DOWNLOAD_DONE', {
+          filename,
+          state,
+          bytes,
+          ms,
+          mbps: ms > 0 && bytes > 0 ? Number((bytes / 1024 / 1024 / (ms / 1000)).toFixed(2)) : 0,
+        });
+      }
       if (state === DOWNLOAD_STATES.completed) {
+        const speed = rec && rec.avgBytesPerSec > 0 ? `，平均 ${formatBytes(rec.avgBytesPerSec)}/s` : '';
         notifyNotice({
           level: 'info',
           code: 'DOWNLOAD_COMPLETED',
           title: '下载完成',
-          message: `${filename}（${size}）已保存到 ${savePath}。点工具栏的下载按钮可以看到全部记录。`,
+          message: `${filename}（${size}${speed}）已保存到 ${savePath}。点工具栏的下载按钮可以看到全部记录。`,
         });
         return;
       }

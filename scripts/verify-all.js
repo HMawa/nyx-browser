@@ -5,9 +5,9 @@
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
- *  2. scripts/verify-ui-polish.js（界面体验，84 项）
+ *  2. scripts/verify-ui-polish.js（界面体验，85 项）
  *  3. scripts/verify-link-guard.js（出站链路守卫，12 项；纯 Node，不启动 Electron）
- *  4. scripts/verify-downloads.js（下载链路，14 项；纯 Node，不启动 Electron）
+ *  4. scripts/verify-downloads.js（下载链路，16 项；纯 Node，不启动 Electron）
  *  5. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
  *
  * 行为约定：
@@ -49,7 +49,7 @@ const STEPS = [
   {
     label: '界面体验回归',
     script: 'verify-ui-polish.js',
-    items: '84 项',
+    items: '85 项',
     timeoutMs: 300000,
   },
   {
@@ -61,7 +61,7 @@ const STEPS = [
   {
     label: '下载链路回归',
     script: 'verify-downloads.js',
-    items: '14 项',
+    items: '16 项',
     timeoutMs: 60000,
   },
   {
