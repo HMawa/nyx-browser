@@ -267,6 +267,41 @@
           <div class="sec-scroll">
             <section class="info-card">
               <div class="info-head">
+                <h3>隐私模式的出站方式</h3>
+                <span class="badge" id="privacy-link-badge">—</span>
+              </div>
+              <div class="info-body">
+                <p class="hint" id="privacy-link-hint">
+                  隐私模式默认强制经本机代理。只有你在这里显式改成「真实 IP」时才会直连，
+                  而且必须先勾选下方风险确认，主进程才会接受。
+                </p>
+                <div class="radio-row" role="radiogroup" aria-label="隐私模式的出站方式">
+                  <label class="radio-item">
+                    <input type="radio" name="privacy-link" id="privacy-link-proxy" value="proxy" checked />
+                    <span>
+                      <strong>经代理</strong>
+                      <em>出站流量强制走本机代理，站点看不到你的真实公网 IP。</em>
+                    </span>
+                  </label>
+                  <label class="radio-item">
+                    <input type="radio" name="privacy-link" id="privacy-link-direct" value="direct" />
+                    <span>
+                      <strong>真实 IP（直连）</strong>
+                      <em>不经过代理，直接用本机网络出口访问站点。</em>
+                    </span>
+                  </label>
+                </div>
+                <ul class="link-lost" id="privacy-link-lost" hidden></ul>
+                <label class="ack-row" id="privacy-link-ack-row" hidden>
+                  <input type="checkbox" id="privacy-link-ack" />
+                  <span>我已了解上述风险，仍要让隐私模式直连</span>
+                </label>
+                <p class="hint" id="privacy-link-status" role="status" aria-live="polite"></p>
+              </div>
+            </section>
+
+            <section class="info-card">
+              <div class="info-head">
                 <h3>加固状态</h3>
                 <span class="badge" id="privacy-badge">—</span>
                 <div class="info-head-actions">

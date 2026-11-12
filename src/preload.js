@@ -78,6 +78,18 @@ contextBridge.exposeInMainWorld('nyx', {
   /** 隐私现状：当前模式、加固口径、出口画像、WebRTC 策略、权限摘要、密码库统计 */
   getPrivacyStatus: () => ipcRenderer.invoke('nyx:privacy:status'),
 
+  /**
+   * 隐私模式的出站方式（proxy / direct）与其边界文案。
+   * 返回值的 options[].lost 是「真实 IP」会失去的保护，设置页原样展示。
+   */
+  privacyLink: () => ipcRenderer.invoke('nyx:privacy:link'),
+
+  /**
+   * 修改隐私模式的出站方式。选 direct 必须带 ack: true（用户已勾选风险确认），
+   * 否则主进程会拒绝，避免隐私模式被悄悄改成直连。
+   */
+  privacyLinkSet: (payload) => ipcRenderer.invoke('nyx:privacy:link-set', payload || {}),
+
   /** 权限决策轨迹（默认最近 50 条） */
   listPermissionDecisions: (limit) => ipcRenderer.invoke('nyx:permissions:list', limit),
 

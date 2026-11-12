@@ -274,8 +274,12 @@
     // 通知「网络与代理」分区脚本：它据此按需加载代理数据，且只在自身分区可见时才写状态栏
     document.dispatchEvent(new CustomEvent('nyx:section-change', { detail: section }));
 
-    if (section === 'privacy' && !privacyReady) {
-      loadPrivacy();
+    if (section === 'privacy') {
+      if (!privacyReady) {
+        loadPrivacy();
+      }
+      // 出站方式是随时可能被别的窗口改的（主进程也会改），每次进分区都重读
+      loadPrivacyLink();
     }
 
     // 扩展清单按需拉取：装载状态与文件系统耦合，进分区时读一次最新值
@@ -746,6 +750,143 @@
 
     table.appendChild(body);
     wrap.appendChild(table);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 隐私模式的出站方式（B3）                                             */
+  /* ------------------------------------------------------------------ */
+
+  /** 出站方式卡片是否已绑过事件（只绑一次，避免重复进入分区叠加监听） */
+  let privacyLinkWired = false;
+
+  /** 把主进程返回的取值与文案渲染到卡片上 */
+  function renderPrivacyLink(payload) {
+    const data = payload && payload.ok !== false ? payload : { link: 'proxy', options: [] };
+    const link = data.link === 'direct' ? 'direct' : 'proxy';
+    const options = Array.isArray(data.options) ? data.options : [];
+    const direct = options.find((item) => item && item.value === 'direct');
+    const lost = (direct && Array.isArray(direct.lost) && direct.lost) || [];
+
+    const proxyRadio = byId('privacy-link-proxy');
+    const directRadio = byId('privacy-link-direct');
+    if (proxyRadio) proxyRadio.checked = link === 'proxy';
+    if (directRadio) directRadio.checked = link === 'direct';
+
+    const badge = byId('privacy-link-badge');
+    if (badge) {
+      badge.textContent = link === 'proxy' ? '经代理' : '真实 IP';
+      badge.classList.toggle('warn', link === 'proxy');
+      badge.classList.toggle('bad', link === 'direct');
+    }
+
+    const lostBox = byId('privacy-link-lost');
+    if (lostBox) {
+      lostBox.textContent = '';
+      for (const line of lost) {
+        const li = document.createElement('li');
+        li.textContent = String(line);
+        lostBox.appendChild(li);
+      }
+      lostBox.hidden = link !== 'direct' && lost.length === 0;
+    }
+
+    // 风险确认只在「已选真实 IP」时才需要保留勾选状态展示；改回代理就收起并清空，
+    // 免得下次再选直连时拿旧的勾选当作"用户看过了"
+    const ackRow = byId('privacy-link-ack-row');
+    const ack = byId('privacy-link-ack');
+    if (ackRow) ackRow.hidden = link !== 'direct';
+    if (ack && link !== 'direct') ack.checked = false;
+
+    const status = byId('privacy-link-status');
+    if (status) {
+      status.textContent =
+        link === 'proxy'
+          ? `当前：经代理${data.mode === 'private' ? '（隐私模式生效中）' : ''}`
+          : `当前：真实 IP 直连${data.mode === 'private' ? '（隐私模式正在直连，站点能看到你的真实 IP）' : ''}`;
+      status.classList.toggle('is-warn', link === 'direct');
+    }
+  }
+
+  /** 读取并渲染出站方式；失败也要说清原因，不能静默停在「—」 */
+  async function loadPrivacyLink() {
+    if (!window.nyx.privacyLink) return;
+
+    try {
+      renderPrivacyLink(await window.nyx.privacyLink());
+    } catch (err) {
+      const status = byId('privacy-link-status');
+      if (status) status.textContent = `读取出站方式失败：${err.message}`;
+    }
+
+    if (!privacyLinkWired) wirePrivacyLink();
+  }
+
+  function wirePrivacyLink() {
+    const proxyRadio = byId('privacy-link-proxy');
+    const directRadio = byId('privacy-link-direct');
+    const ack = byId('privacy-link-ack');
+    const status = byId('privacy-link-status');
+    if (!proxyRadio || !directRadio || !ack) return;
+
+    privacyLinkWired = true;
+
+    // 勾选框只影响"能不能提交"，不自己改链路
+    ack.addEventListener('change', () => {
+      if (status) {
+        status.textContent = ack.checked
+          ? '已勾选风险确认，选择「真实 IP」后立即生效'
+          : '取消勾选后无法选择「真实 IP」';
+        status.classList.toggle('is-warn', ack.checked);
+      }
+      if (!ack.checked && directRadio.checked) {
+        directRadio.checked = false;
+        proxyRadio.checked = true;
+      }
+    });
+
+    const apply = async (link) => {
+      if (link === 'direct' && !ack.checked) {
+        // 没勾确认就不发请求：直接把选择回退，并说清为什么
+        directRadio.checked = false;
+        proxyRadio.checked = true;
+        if (status) {
+          status.textContent = '要把隐私模式改成直连，请先勾选「我已了解上述风险」。';
+          status.classList.add('is-warn');
+        }
+        return;
+      }
+
+      if (status) {
+        status.textContent = link === 'direct' ? '正在改为真实 IP…' : '正在改回经代理…';
+        status.classList.remove('is-warn');
+      }
+
+      let res = null;
+      try {
+        res = await window.nyx.privacyLinkSet({ link, ack: link === 'direct' });
+      } catch (err) {
+        res = { ok: false, error: err.message };
+      }
+
+      if (!res || res.ok === false) {
+        if (status) {
+          status.textContent = `没有改成：${(res && res.error) || '未知原因'}`;
+          status.classList.add('is-warn');
+        }
+        await loadPrivacyLink();
+        return;
+      }
+
+      setStatus(link === 'direct' ? '隐私模式出站已改为真实 IP' : '隐私模式出站已改回经代理');
+      await loadPrivacyLink();
+    };
+
+    proxyRadio.addEventListener('change', () => {
+      if (proxyRadio.checked) apply('proxy');
+    });
+    directRadio.addEventListener('change', () => {
+      if (directRadio.checked) apply('direct');
+    });
   }
 
   async function loadPrivacy() {

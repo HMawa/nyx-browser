@@ -423,6 +423,89 @@ async function main() {
       modeUi && JSON.stringify({ checked: modeUi.checked, ariaLabel: modeUi.ariaLabel }),
     );
 
+    /* ---------- B3. 隐私模式的出站方式：默认代理 / 显式真实 IP / 风险确认 ---------- */
+    const linkDefault = await shell.eval('window.nyx.privacyLink()');
+    const directOpt =
+      linkDefault && Array.isArray(linkDefault.options)
+        ? linkDefault.options.find((item) => item && item.value === 'direct')
+        : null;
+
+    check(
+      '隐私模式默认经代理，并给出选择「真实 IP」会失去哪些保护（B3）',
+      !!linkDefault &&
+        linkDefault.ok === true &&
+        linkDefault.link === 'proxy' &&
+        !!directOpt &&
+        Array.isArray(directOpt.lost) &&
+        directOpt.lost.length >= 3 &&
+        directOpt.lost.some((line) => /真实公网 IP/.test(line)),
+      linkDefault && JSON.stringify({ link: linkDefault.link, lost: directOpt && directOpt.lost }),
+    );
+
+    // 没有风险确认就不许改成直连——这是"用户显式选择"的唯一凭据
+    const noAck = await shell.eval("window.nyx.privacyLinkSet({ link: 'direct' })");
+    check(
+      '未勾选风险确认时，改成「真实 IP」会被拒绝并给出中文原因（B3）',
+      !!noAck &&
+        noAck.ok === false &&
+        /勾选/.test(noAck.error || '') &&
+        noAck.link === 'proxy',
+      JSON.stringify(noAck),
+    );
+
+    const withAck = await shell.eval("window.nyx.privacyLinkSet({ link: 'direct', ack: true })");
+    const afterAck = await shell.eval('window.nyx.privacyLink()');
+    check(
+      '勾选确认后能记住「真实 IP」，且非法取值被拒（B3）',
+      !!withAck &&
+        withAck.ok === true &&
+        withAck.link === 'direct' &&
+        !!afterAck &&
+        afterAck.link === 'direct',
+      JSON.stringify({ withAck, afterAck: afterAck && afterAck.link }),
+    );
+
+    const badLink = await shell.eval("window.nyx.privacyLinkSet({ link: 'open-bar' })");
+    const backToProxy = await shell.eval("window.nyx.privacyLinkSet({ link: 'proxy' })");
+    check(
+      '出站方式的取值被白名单校验，且能改回经代理（B3）',
+      !!backToProxy &&
+        backToProxy.ok === true &&
+        backToProxy.link === 'proxy' &&
+        !!badLink &&
+        badLink.link === 'proxy',
+      JSON.stringify({ badLink, backToProxy }),
+    );
+
+    const linkBadgePure = await shell.eval(`(() => {
+      const real = window.describeLinkBadge('private', 'direct');
+      const proxied = window.describeLinkBadge('private', 'proxy');
+      const normalDirect = window.describeLinkBadge('normal', 'direct');
+      return { real, proxied, normalDirect };
+    })()`);
+    check(
+      '隐私模式直连时徽标明确写「真实 IP」且带危险色类（B3）',
+      !!linkBadgePure &&
+        linkBadgePure.real.text === '真实 IP' &&
+        linkBadgePure.real.cls === 'link-real-ip' &&
+        /真实公网 IP|真实 IP/.test(linkBadgePure.real.title) &&
+        linkBadgePure.proxied.text === '代理' &&
+        linkBadgePure.normalDirect.text === '直连',
+      JSON.stringify(linkBadgePure),
+    );
+
+    // 静态守卫：隐私分区直连必须走 allowRealIp 显式放行，且这条路径要留痕
+    const sessionsSrc = fs.readFileSync(path.join(ROOT, 'src', 'core', 'sessions.js'), 'utf8');
+    const mainSrc = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
+    check(
+      '代码层：隐私分区直连只在 allowRealIp 下放行，并写诊断与模式事件（B3）',
+      /allowRealIp/.test(sessionsSrc) &&
+        /隐私模式必须经代理/.test(sessionsSrc) &&
+        /PRIVACY_REAL_IP_ENTERED/.test(mainSrc) &&
+        /PRIVACY_REAL_IP/.test(mainSrc),
+      '静态检查 sessions.js / main.js',
+    );
+
     // 后面几条用例假设当前是一个「不可收藏」的空白页标签（历史行为），这里显式造出来
     await shell.eval(`(async () => {
       const snap = await window.nyx.getState();
@@ -1940,6 +2023,89 @@ async function main() {
 
     /* ---------- 运行时无脚本异常 ---------- */
     const shellErrors = shell.exceptions();
+    /* ---------- B3（设置页侧）：卡片 / 未勾确认被拦 / 勾选后可改可回 ---------- */
+    // 放在这里是因为设置窗口要到脚本中段才创建，过早断言只能拿到 null。
+    if (settings) {
+      await shell.eval("window.nyx.openSettings({ section: 'privacy' })");
+      await sleep(1000);
+
+      const linkCard = await settings.eval(`(() => {
+        const proxy = document.getElementById('privacy-link-proxy');
+        const direct = document.getElementById('privacy-link-direct');
+        const lost = document.getElementById('privacy-link-lost');
+        const ack = document.getElementById('privacy-link-ack');
+        const ackRow = document.getElementById('privacy-link-ack-row');
+        const status = document.getElementById('privacy-link-status');
+        const badge = document.getElementById('privacy-link-badge');
+        if (!proxy || !direct || !lost || !ack || !status || !badge) return null;
+        return {
+          proxyChecked: proxy.checked,
+          directChecked: direct.checked,
+          badge: badge.textContent.trim(),
+          status: status.textContent.trim(),
+          lostHidden: lost.hidden,
+          ackRowHidden: ackRow ? ackRow.hidden : null,
+        };
+      })()`);
+      check(
+        '设置页有「隐私模式的出站方式」卡片并显示当前取值（B3）',
+        !!linkCard &&
+          linkCard.proxyChecked === true &&
+          linkCard.directChecked === false &&
+          /经代理/.test(linkCard.badge) &&
+          /经代理/.test(linkCard.status),
+        JSON.stringify(linkCard),
+      );
+
+      const blockedPick = await settings.eval(`(async () => {
+        const direct = document.getElementById('privacy-link-direct');
+        const proxy = document.getElementById('privacy-link-proxy');
+        const status = document.getElementById('privacy-link-status');
+        direct.checked = true;
+        direct.dispatchEvent(new Event('change', { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 300));
+        return {
+          proxyChecked: proxy.checked,
+          directChecked: direct.checked,
+          status: status.textContent,
+        };
+      })()`);
+      check(
+        '设置页里未勾确认就选「真实 IP」会被拦下并说明原因（B3）',
+        !!blockedPick &&
+          blockedPick.proxyChecked === true &&
+          blockedPick.directChecked === false &&
+          /勾选/.test(blockedPick.status),
+        JSON.stringify(blockedPick),
+      );
+
+      const ackFlow = await settings.eval(`(async () => {
+        const ack = document.getElementById('privacy-link-ack');
+        const direct = document.getElementById('privacy-link-direct');
+        const proxy = document.getElementById('privacy-link-proxy');
+        const lost = document.getElementById('privacy-link-lost');
+        // 勾确认 → 选直连（真的走 IPC）→ 再改回代理，别把隔离 profile 留在直连
+        ack.checked = true;
+        ack.dispatchEvent(new Event('change', { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 200));
+        const lostShown = !lost.hidden;
+        direct.checked = true;
+        direct.dispatchEvent(new Event('change', { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 800));
+        const afterDirect = await window.nyx.privacyLink();
+        proxy.checked = true;
+        proxy.dispatchEvent(new Event('change', { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 800));
+        const afterProxy = await window.nyx.privacyLink();
+        return { lostShown, directLink: afterDirect.link, back: afterProxy.link };
+      })()`);
+      check(
+        '勾选确认后设置页能把隐私模式改成真实 IP，再改回代理（B3）',
+        !!ackFlow && ackFlow.directLink === 'direct' && ackFlow.back === 'proxy',
+        JSON.stringify(ackFlow),
+      );
+    }
+
     check('主窗口无未捕获脚本异常', shellErrors.length === 0, shellErrors.slice(0, 3).join(' | '));
     if (settings) {
       const settingsErrors = settings.exceptions();

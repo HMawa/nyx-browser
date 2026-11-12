@@ -23,12 +23,20 @@ const UI_PREF_DEFAULTS = {
   downloadDir: '',
   /** 下载前是否弹窗询问保存位置（false 时静默存到 downloadDir） */
   downloadAsk: true,
+  /**
+   * 隐私模式的出站方式（清单 B3）：
+   *   'proxy'  默认，隐私模式强制经本机代理；
+   *   'direct' 用户显式选择的「真实 IP」直连——只有用户在设置里勾选风险确认后
+   *            才会写进这里，任何代码路径都不许自己把它改成 'direct'。
+   */
+  privacyLink: 'proxy',
 };
 
 /** 枚举型偏好的合法取值（键 → 允许值）。
  *  与 theme-nyx.css 里 <html data-theme="…"> 的取值必须一一对应。 */
 const UI_PREF_ENUMS = {
   theme: ['ink', 'aurora', 'paper', 'quiet'],
+  privacyLink: ['proxy', 'direct'],
 };
 
 class UiStore {

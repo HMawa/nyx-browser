@@ -524,6 +524,83 @@
   cursor: pointer;
 }
 
+/* 隐私模式出站方式（B3）：两行式单选 + 风险清单 + 确认勾选 */
+.radio-row .radio-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1 1 240px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-input);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.radio-row .radio-item:hover {
+  border-color: var(--border-strong);
+}
+
+.radio-row .radio-item:focus-within {
+  border-color: var(--accent-soft);
+  box-shadow: var(--ring);
+}
+
+.radio-row .radio-item input {
+  margin-top: 2px;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.radio-row .radio-item strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.radio-row .radio-item em {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+.link-lost {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  font-size: 11px;
+  line-height: 1.75;
+  color: var(--danger-soft);
+}
+
+.ack-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.ack-row input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--danger);
+  cursor: pointer;
+}
+
+#privacy-link-status.is-warn {
+  color: var(--danger-soft);
+}
+
 /* ---------------- 扩展插件 ---------------- */
 
 .ext-list {

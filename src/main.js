@@ -2055,6 +2055,45 @@ function buildProxyBlockedNotice(probe) {
 }
 
 /**
+ * 「隐私模式的出站方式」两种取值的对外说明（清单 B3）。
+ *
+ * 前端与本地接口共用这一份文案：`lost` 是选择「真实 IP」后会失去的保护，
+ * 设置页原样展示，避免两处文案各说一套。
+ */
+const PRIVACY_LINK_OPTIONS = [
+  {
+    value: 'proxy',
+    label: '经代理',
+    summary: '出站流量强制走本机代理，站点看不到你的真实公网 IP。',
+    lost: [],
+  },
+  {
+    value: 'direct',
+    label: '真实 IP（直连）',
+    summary: '不经过代理，直接用本机网络出口访问站点。',
+    lost: [
+      '真实公网 IP 会直接暴露给访问的每一个站点',
+      '代理层的位置伪装失效，出口地区与站点看到的地理位置不再一致',
+      '站点可以据此把你的这次访问与其他网络行为关联起来',
+      '本机仍然不落盘历史与缓存，但「不留痕」只对本机成立',
+    ],
+  },
+];
+
+/** 隐私模式按「真实 IP」进入时的前台提示：把失去的保护逐条说清 */
+function buildRealIpNotice() {
+  return {
+    level: 'warn',
+    code: 'PRIVACY_REAL_IP',
+    title: '隐私模式已开启，但出站是真实 IP',
+    message:
+      '你在「设置 → 隐私与安全」里选择了「真实 IP（直连）」，所以本次隐私模式不经过代理，' +
+      '访问的站点可以看到你的真实公网 IP。本机仍然不写历史、不保存缓存与 Cookie。' +
+      '需要隐藏 IP 时，请关闭隐私模式，或在设置里改回「经代理」并确认本机代理可用。',
+  };
+}
+
+/**
  * 向渲染层推送用户可见提示；页面未就绪时入队，等 did-finish-load 后按顺序补发。
  *
  * 只判 isDestroyed 是不够的：主窗口对象早就存在，但外壳页面（renderer.js）
@@ -2123,46 +2162,91 @@ async function switchMode(mode) {
 
   // 进入隐私模式前的前置校验；切回普通模式则重探一次链路
   if (next === 'private') {
-    // 隐私必须经代理：内核没跑且用户允许自启时，先按需拉起，避免"内核没开所以进不去"
-    await ensureProxyKernelForPrivate();
+    // 清单 B3：用户在设置里显式选择「真实 IP」→ 不探测代理、不拉内核，直接直连进入。
+    // 这条路必须留足痕迹（前台提示 + 诊断 + 模式事件），因为此刻隐私模式并不隐藏 IP。
+    const wantRealIp = Boolean(runtime.uiStore && runtime.uiStore.get().privacyLink === 'direct');
 
-    const probe = recordProbe(await isProxyReachable());
+    if (wantRealIp) {
+      sessions.setLink('private', 'direct', { allowRealIp: true });
 
-    if (!probe.reachable) {
-      const notice = buildProxyBlockedNotice(probe);
-      console.warn(
-        `[Nyx] 拒绝进入隐私模式：代理 ${probe.host}:${probe.port} 不可达（${probe.error}）`,
+      try {
+        await sessions.whenSessionReady('private');
+      } catch (err) {
+        const notice = {
+          level: 'error',
+          code: err.code || 'PRIVACY_LINK_APPLY_FAILED',
+          title: '没能按「真实 IP」进入隐私模式',
+          message:
+            `隐私分区没有接受直连配置（${err.message}）。` +
+            '本次切换已被拒绝，当前模式保持不变。' +
+            '可以在「设置 → 隐私与安全 → 隐私模式的出站方式」里改回「经代理」后重试。',
+        };
+        console.warn('[Nyx] 拒绝进入隐私模式：真实 IP 链路下发失败 ——', err.message);
+        diagnostics.error('PRIVACY_REAL_IP_APPLY_FAILED', { error: err.message });
+        notifyNotice(notice);
+        return {
+          ok: false,
+          code: notice.code,
+          error: notice.message,
+          state: currentSnapshot(),
+        };
+      }
+
+      const notice = buildRealIpNotice();
+      console.warn('[Nyx] 已按用户设置以真实 IP 直连进入隐私模式（出站不经代理）');
+      diagnostics.warn('PRIVACY_REAL_IP_ENTERED', {});
+      modeEventLog.record({
+        type: 'switch',
+        from: current,
+        to: 'private',
+        changed: true,
+        ok: true,
+        code: 'PRIVACY_REAL_IP',
+        message: '按用户设置在隐私模式下直连（真实 IP）',
+      });
+      notifyNotice(notice);
+    } else {
+      // 隐私必须经代理：内核没跑且用户允许自启时，先按需拉起，避免"内核没开所以进不去"
+      await ensureProxyKernelForPrivate();
+
+      const probe = recordProbe(await isProxyReachable());
+
+      if (!probe.reachable) {
+        const notice = buildProxyBlockedNotice(probe);
+        console.warn(
+          `[Nyx] 拒绝进入隐私模式：代理 ${probe.host}:${probe.port} 不可达（${probe.error}）`,
+        );
+        notifyNotice(notice);
+        return {
+          ok: false,
+          code: 'PROXY_UNREACHABLE',
+          error: notice.message,
+          state: currentSnapshot(),
+        };
+      }
+
+      // 隐私分区链路恒为代理（sessions 内部也会拒绝把它置为直连）
+      sessions.setLink('private', 'proxy');
+
+      try {
+        // 等待代理配置真正下发，失败则同样拒绝进入
+        await sessions.whenSessionReady('private');
+      } catch (err) {
+        const notice = buildProxyBlockedNotice({ ...probe, error: err.message });
+        console.warn('[Nyx] 拒绝进入隐私模式：代理配置下发失败 ——', err.message);
+        notifyNotice(notice);
+        return {
+          ok: false,
+          code: err.code || 'PROXY_SET_FAILED',
+          error: notice.message,
+          state: currentSnapshot(),
+        };
+      }
+
+      console.log(
+        `[Nyx] 代理校验通过（${probe.host}:${probe.port}，${probe.latencyMs}ms），进入隐私模式`,
       );
-      notifyNotice(notice);
-      return {
-        ok: false,
-        code: 'PROXY_UNREACHABLE',
-        error: notice.message,
-        state: currentSnapshot(),
-      };
     }
-
-    // 隐私分区链路恒为代理（sessions 内部也会拒绝把它置为直连）
-    sessions.setLink('private', 'proxy');
-
-    try {
-      // 等待代理配置真正下发，失败则同样拒绝进入
-      await sessions.whenSessionReady('private');
-    } catch (err) {
-      const notice = buildProxyBlockedNotice({ ...probe, error: err.message });
-      console.warn('[Nyx] 拒绝进入隐私模式：代理配置下发失败 ——', err.message);
-      notifyNotice(notice);
-      return {
-        ok: false,
-        code: err.code || 'PROXY_SET_FAILED',
-        error: notice.message,
-        state: currentSnapshot(),
-      };
-    }
-
-    console.log(
-      `[Nyx] 代理校验通过（${probe.host}:${probe.port}，${probe.latencyMs}ms），进入隐私模式`,
-    );
   } else {
     // 切回普通模式：不做拦截，只重探一次决定走代理还是直连
     const probe = recordProbe(await isProxyReachable());
@@ -2196,6 +2280,11 @@ async function switchMode(mode) {
   // 3. 离开隐私模式 → 清空隐私分区（先清后装，避免旧 profile 残留到下一次会话）
   if (current === 'private') {
     await sessions.purgePrivateSession();
+    // 退出后把隐私分区链路复位成代理：否则「真实 IP」会残留到下一次进入，
+    // 让下一次进去的人（甚至另一个使用这台机器的人）在不知情的情况下直连。
+    if (sessions.getLink('private') === 'direct') {
+      sessions.setLink('private', 'proxy');
+    }
     console.log('[Nyx] 已退出隐私模式，隐私分区痕迹已清空');
   }
 
@@ -4664,6 +4753,84 @@ function registerSettingsIpc() {
     if (runtime.tabManager) pushState(runtime.tabManager.snapshot());
 
     return { ok: true, ui: result.ui || currentUiPrefs() };
+  });
+
+  /**
+   * 隐私模式的出站方式（清单 B3）。
+   *
+   * 读：返回当前取值 + 两种取值的文案（含选「真实 IP」会失去哪些保护）。
+   * 写：只接受 proxy / direct；`direct` 必须带 `ack: true`（用户在设置里勾过风险确认），
+   *     否则拒绝——避免脚本或误点把隐私模式悄悄改成直连。
+   */
+  ipcMain.handle('nyx:privacy:link', () => ({
+    ok: true,
+    link: (runtime.uiStore && runtime.uiStore.get().privacyLink) || 'proxy',
+    mode: sessions.getMode(),
+    current: sessions.getLink('private'),
+    options: PRIVACY_LINK_OPTIONS,
+  }));
+
+  ipcMain.handle('nyx:privacy:link-set', async (_event, payload) => {
+    if (!runtime.uiStore) return { ok: false, error: '界面偏好存储未就绪' };
+
+    const want = payload && payload.link === 'direct' ? 'direct' : 'proxy';
+    if (want === 'direct' && !(payload && payload.ack === true)) {
+      return {
+        ok: false,
+        error: '选择「真实 IP」前需要先勾选「我已了解上述风险」',
+        link: (runtime.uiStore.get().privacyLink) || 'proxy',
+      };
+    }
+
+    const saved = runtime.uiStore.set('privacyLink', want);
+    if (!saved.ok) return saved;
+
+    // 当前就处在隐私模式：立刻改链路，并再次明确告知（不能等下次切换才生效）
+    if (sessions.getMode() === 'private') {
+      const changed = sessions.setLink('private', want, { allowRealIp: want === 'direct' });
+      try {
+        await sessions.whenSessionReady('private');
+      } catch (err) {
+        diagnostics.error('PRIVACY_LINK_SWITCH_FAILED', { link: want, error: err.message });
+        notifyNotice({
+          level: 'error',
+          code: 'PRIVACY_LINK_SWITCH_FAILED',
+          title: '出站方式没能立刻生效',
+          message:
+            `隐私分区没有接受新的出站方式（${err.message}）。` +
+            '设置已保存，下次进入隐私模式时会再次尝试；当前仍是原来的链路。',
+        });
+        return { ok: false, error: err.message, link: want };
+      }
+
+      if (changed) {
+        if (want === 'direct') {
+          diagnostics.warn('PRIVACY_REAL_IP_ENTERED', { during: 'private' });
+          modeEventLog.record({
+            type: 'switch',
+            from: 'private',
+            to: 'private',
+            changed: false,
+            ok: true,
+            code: 'PRIVACY_REAL_IP',
+            message: '隐私模式出站改为直连（真实 IP）',
+          });
+          notifyNotice(buildRealIpNotice());
+        } else {
+          diagnostics.info('PRIVACY_LINK_BACK_TO_PROXY', {});
+          notifyNotice({
+            level: 'info',
+            code: 'PRIVACY_LINK_PROXY',
+            title: '已改回经代理',
+            message: '隐私模式现在强制走本机代理，站点看不到你的真实 IP。',
+          });
+        }
+      }
+
+      if (runtime.tabManager) pushState(runtime.tabManager.snapshot());
+    }
+
+    return { ok: true, link: want, ui: saved.ui || currentUiPrefs() };
   });
 
   // 设置中心「启动与主页 / 下载 / 关于与更新」只读信息

@@ -412,6 +412,13 @@ body.private-mode .mode-group {
   color: var(--accent-soft);
 }
 
+/* 隐私模式 + 真实 IP：这不是普通状态，必须比「代理」更扎眼（B3） */
+.link-badge.link-real-ip {
+  border-color: var(--danger);
+  color: var(--danger-soft);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
 .mode-switch {
   position: relative;
   width: 40px;

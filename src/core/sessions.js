@@ -248,16 +248,24 @@ function getLink(mode = currentMode) {
  *
  * @param {'normal'|'private'} mode
  * @param {'proxy'|'direct'} link
+ * @param {{allowRealIp?: boolean}} [options] 隐私分区只有调用方明确传入
+ *   `allowRealIp: true`（用户已在设置里勾选风险确认）时才允许直连；缺省的
+ *   任何调用都会被拒绝并保持原链路，避免「静默降级成直连」。
  * @returns {boolean} 链路是否发生了变化（调用方据此决定是否记录日志 / 推送状态）
  */
-function setLink(mode, link) {
+function setLink(mode, link, options) {
   const key = mode === 'private' ? 'private' : 'normal';
   const next = link === 'proxy' ? 'proxy' : 'direct';
+  const allowRealIp = Boolean(options && options.allowRealIp === true);
 
-  // 隐私分区绝不直连：直接拒绝并保持原链路
+  // 隐私分区默认绝不直连：只有用户显式选择「真实 IP」才放行
   if (key === 'private' && next === 'direct') {
-    console.warn('[Nyx] 已拒绝把隐私分区置为直连（隐私模式必须经代理）');
-    return false;
+    if (!allowRealIp) {
+      console.warn('[Nyx] 已拒绝把隐私分区置为直连（隐私模式必须经代理）');
+      return false;
+    }
+    // 放行也要留痕：这条日志是"隐私模式在直连"的唯一机器可读证据
+    console.warn('[Nyx] 隐私分区按用户设置以真实 IP 直连（出站不经代理）');
   }
 
   const changed = getLink(key) !== next;

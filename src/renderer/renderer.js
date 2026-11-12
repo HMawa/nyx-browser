@@ -204,20 +204,47 @@ function renderToolbar() {
  * 链路真相来自主进程（state.network.link），界面只做展示，不自行推断：
  * 隐私模式恒为"代理"，普通模式在代理不可用时为"直连"。
  */
+/**
+ * 出站链路徽标文案（B3）。抽成纯函数，回归脚本可以直接喂取值验证，
+ * 不用去猜渲染结果。
+ *
+ * 隐私模式 + 直连 = 用户显式选的「真实 IP」：必须一眼看出来，
+ * 所以文字改成「真实 IP」并带上危险色类，不能再含糊地写「直连」。
+ */
+function describeLinkBadge(mode, link) {
+  const isPrivate = mode === 'private';
+  const value = link === 'proxy' ? 'proxy' : 'direct';
+
+  if (isPrivate && value === 'direct') {
+    return {
+      text: '真实 IP',
+      cls: 'link-real-ip',
+      title: '隐私模式正在直连：站点能看到你的真实公网 IP（你在设置里显式选择了「真实 IP」）',
+    };
+  }
+
+  return {
+    text: value === 'proxy' ? '代理' : '直连',
+    cls: value === 'proxy' ? 'link-proxy' : 'link-direct',
+    title: '',
+  };
+}
+
 function renderLinkBadge() {
   if (!els.linkBadge) return;
 
   const network = state.network || null;
   const link = network && network.link ? network.link : state.mode === 'private' ? 'proxy' : 'direct';
-  const isProxy = link === 'proxy';
+  const badge = describeLinkBadge(state.mode, link);
 
-  els.linkBadge.textContent = isProxy ? '代理' : '直连';
-  els.linkBadge.classList.toggle('link-proxy', isProxy);
+  els.linkBadge.textContent = badge.text;
+  els.linkBadge.classList.toggle('link-proxy', badge.cls === 'link-proxy');
+  els.linkBadge.classList.toggle('link-real-ip', badge.cls === 'link-real-ip');
   els.linkBadge.title = network
-    ? `当前出站链路：${isProxy ? '代理' : '直连'}｜探测目标 ${network.host || '127.0.0.1'}:${
+    ? `${badge.title || '当前出站链路'}｜探测目标 ${network.host || '127.0.0.1'}:${
         network.port || '-'
       }${network.note ? `｜${network.note}` : ''}`
-    : '当前出站链路';
+    : badge.title || '当前出站链路';
 }
 
 function render() {
