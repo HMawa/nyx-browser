@@ -41,15 +41,27 @@ let starKey = '';
 
 /** 失败页当前展示的原始失败对象（「复制详情」要用原始字段，不是渲染后的文案） */
 let currentPageError = null;
+/** 键盘切标签时记下"重渲染后焦点该落到哪个标签"，渲染完即清空 */
+let pendingTabFocusId = '';
 
 /** 渲染标签列表 */
 function renderTabs() {
   els.tabs.textContent = '';
 
-  for (const tab of state.tabs) {
+  const tabs = state.tabs || [];
+
+  for (const tab of tabs) {
     const item = document.createElement('div');
     item.className = `tab${tab.active ? ' active' : ''}`;
     item.title = tab.url || tab.title;
+    // 标签是"可切换的选项"，不是普通盒子：给读屏和键盘一条正规路径。
+    // 焦点用游标式（roving tabindex）：只有当前标签能被 Tab 命中，
+    // 组内用左右方向键移动，避免每加一个标签就多一次 Tab 停留。
+    item.setAttribute('role', 'tab');
+    item.setAttribute('aria-selected', tab.active ? 'true' : 'false');
+    item.setAttribute('aria-label', tab.title || '新标签页');
+    item.dataset.tabId = String(tab.id);
+    item.tabIndex = tab.active ? 0 : -1;
 
     if (tab.loading) {
       const spinner = document.createElement('span');
@@ -66,6 +78,9 @@ function renderTabs() {
     close.className = 'tab-close';
     close.textContent = '×';
     close.title = '关闭标签';
+    close.setAttribute('role', 'button');
+    close.setAttribute('aria-label', `关闭标签：${tab.title || tab.url || '新标签页'}`);
+    close.tabIndex = -1;
     close.addEventListener('click', (event) => {
       event.stopPropagation();
       window.nyx.closeTab(tab.id);
@@ -76,7 +91,41 @@ function renderTabs() {
       if (!tab.active) window.nyx.activateTab(tab.id);
     });
 
+    item.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        if (!tab.active) window.nyx.activateTab(tab.id);
+        return;
+      }
+      // Delete / Backspace 关标签：和鼠标点 × 同一效果
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault();
+        window.nyx.closeTab(tab.id);
+        return;
+      }
+      // 左右方向键在标签之间移动焦点，焦点落到哪个就切到哪个（浏览器通行做法）
+      if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+        event.preventDefault();
+        const index = tabs.indexOf(tab);
+        const step = event.key === 'ArrowRight' ? 1 : -1;
+        const target = tabs[(index + step + tabs.length) % tabs.length];
+        if (!target) return;
+        // 切标签会整条重渲染，旧节点会被丢掉，焦点也就丢了：
+        // 先记下"焦点该落在谁身上"，渲染完再补回去
+        pendingTabFocusId = String(target.id);
+        window.nyx.activateTab(target.id);
+      }
+    });
+
     els.tabs.appendChild(item);
+  }
+
+  // 键盘切标签后把焦点补回到新活动标签上，否则焦点会掉到 body 上，
+  // 用户得重新 Tab 一遍才能继续操作
+  if (pendingTabFocusId) {
+    const node = els.tabs.querySelector(`.tab[data-tab-id="${pendingTabFocusId}"]`);
+    pendingTabFocusId = '';
+    if (node) node.focus();
   }
 }
 

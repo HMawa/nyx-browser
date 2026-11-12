@@ -1438,6 +1438,80 @@ async function main() {
       JSON.stringify({ tabbedTo, ...focusRing }),
     );
 
+    /* ---------- 外壳：标签语义 / 键盘切标签 / 地址栏光晕（v1.17.0 界面统一） ----------
+       标签原来是纯 div：读屏不知道这是什么，键盘也进不去。这一轮补上
+       role=tab/tablist + 游标式 tabindex，并让左右方向键能真正切标签。 */
+    const tabA11y = await shell.eval(`(() => {
+      const list = document.getElementById('tabs');
+      const nodes = Array.from(list.querySelectorAll('.tab'));
+      return {
+        listRole: list.getAttribute('role'),
+        count: nodes.length,
+        allRole: nodes.every((n) => n.getAttribute('role') === 'tab'),
+        selected: nodes.filter((n) => n.getAttribute('aria-selected') === 'true').length,
+        activeIndex: nodes.findIndex((n) => n.classList.contains('active')),
+        indexes: nodes.map((n) => n.tabIndex),
+      };
+    })()`);
+    check(
+      '标签栏具备 tablist/tab 语义且只有活动标签可 Tab 命中（v1.17.0）',
+      !!tabA11y &&
+        tabA11y.listRole === 'tablist' &&
+        tabA11y.count >= 2 &&
+        tabA11y.allRole === true &&
+        tabA11y.selected === 1 &&
+        tabA11y.indexes[tabA11y.activeIndex] === 0 &&
+        tabA11y.indexes.filter((v) => v === -1).length === tabA11y.count - 1,
+      JSON.stringify(tabA11y),
+    );
+
+    // 真按键走一遍：聚焦活动标签 → 按右方向键 → 应切到下一个标签、焦点跟过去、焦点环可见
+    const beforeTab = await shell.eval(`(() => {
+      const node = document.querySelector('.tab.active');
+      node.focus();
+      return { id: node.dataset.tabId };
+    })()`);
+    await shell.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', windowsVirtualKeyCode: 39, nativeVirtualKeyCode: 39, key: 'ArrowRight', code: 'ArrowRight' });
+    await shell.send('Input.dispatchKeyEvent', { type: 'keyUp', windowsVirtualKeyCode: 39, nativeVirtualKeyCode: 39, key: 'ArrowRight', code: 'ArrowRight' });
+    await sleep(900);
+    const afterTab = await shell.eval(`(() => {
+      const node = document.querySelector('.tab.active');
+      const focused = document.activeElement;
+      const cs = getComputedStyle(focused);
+      return {
+        id: node ? node.dataset.tabId : '',
+        focusedTag: focused ? focused.className : '',
+        focusedId: focused && focused.dataset ? focused.dataset.tabId || '' : '',
+        focusVisible: focused && focused.matches ? focused.matches(':focus-visible') : false,
+        outlineWidth: cs.outlineWidth,
+      };
+    })()`);
+    check(
+      '右方向键能切换标签且焦点跟随并可见（v1.17.0）',
+      !!afterTab &&
+        afterTab.id &&
+        afterTab.id !== (beforeTab && beforeTab.id) &&
+        afterTab.focusedId === afterTab.id &&
+        afterTab.focusVisible === true &&
+        parseFloat(afterTab.outlineWidth) >= 2,
+      JSON.stringify({ beforeTab, afterTab }),
+    );
+
+    // 地址栏聚焦光晕必须是主题强调色（旧版写死了上一套紫色主题的 rgba）
+    const addressGlow = await shell.eval(`(() => {
+      const input = document.getElementById('address');
+      input.focus();
+      const cs = getComputedStyle(input);
+      return { boxShadow: cs.boxShadow, borderRadius: cs.borderRadius };
+    })()`);
+    check(
+      '地址栏聚焦光晕使用主题强调色而非旧紫色（v1.17.0）',
+      !!addressGlow &&
+        String(addressGlow.boxShadow).includes('200, 164, 92') &&
+        !String(addressGlow.boxShadow).includes('139, 92, 246'),
+      JSON.stringify(addressGlow),
+    );
+
     /* ---------- 运行时无脚本异常 ---------- */
     const shellErrors = shell.exceptions();
     check('主窗口无未捕获脚本异常', shellErrors.length === 0, shellErrors.slice(0, 3).join(' | '));

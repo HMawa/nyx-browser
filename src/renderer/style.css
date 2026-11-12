@@ -72,6 +72,7 @@ body {
 }
 
 .tab {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -79,11 +80,11 @@ body {
   max-width: 200px;
   height: 28px;
   padding: 0 6px 0 10px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: var(--bg-tab);
   color: var(--text-dim);
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background 0.16s ease, color 0.16s ease;
 }
 
 .tab:hover {
@@ -91,10 +92,29 @@ body {
   color: var(--text-main);
 }
 
+/* 活动标签：底色提亮 + 底部一小段强调色短线。
+   不用整圈描边——一圈亮线在标签变多时会变成噪音，短线能把"当前是哪个"
+   说清楚，又不和工具栏的按钮边框抢注意力。 */
 .tab.active {
   background: var(--bg-tab-active);
   color: var(--text-main);
-  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.tab.active::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 1px;
+  width: 56%;
+  height: 2px;
+  transform: translateX(-50%);
+  border-radius: var(--r-pill);
+  background: var(--accent);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
 }
 
 .tab-title {
@@ -124,19 +144,25 @@ body {
 }
 
 .tab-close {
-  width: 18px;
-  height: 18px;
-  line-height: 16px;
+  width: 20px;
+  height: 20px;
+  line-height: 18px;
   text-align: center;
-  border-radius: 5px;
+  border-radius: var(--r-sm);
   color: inherit;
   font-size: 12px;
   flex: 0 0 auto;
+  transition: background 0.16s ease, color 0.16s ease;
 }
 
 .tab-close:hover {
-  background: rgba(239, 68, 68, 0.22);
-  color: #ffe4e6;
+  background: color-mix(in srgb, var(--danger) 22%, transparent);
+  color: var(--danger-soft);
+}
+
+.tab-close:focus-visible {
+  outline: 2px solid var(--danger-soft);
+  outline-offset: 1px;
 }
 
 /* ---------------- 工具栏 ---------------- */
@@ -158,18 +184,27 @@ body {
   width: 30px;
   height: 30px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: var(--bg-tab);
   color: var(--text-main);
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+  transition: background 0.16s ease, border-color 0.16s ease, opacity 0.16s ease;
 }
 
 .icon-btn:hover:not(:disabled) {
   background: var(--bg-tab-active);
   border-color: var(--accent);
+}
+
+/* 键盘焦点：外壳里每个可点控件都要能看见自己停在哪儿 */
+.icon-btn:focus-visible,
+.new-tab:focus-visible,
+.mode-switch:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+  box-shadow: var(--ring);
 }
 
 .icon-btn:disabled {
@@ -269,17 +304,20 @@ body {
   height: 32px;
   padding: 0 12px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--r-md);
   background: var(--bg-input);
   color: var(--text-main);
   font-size: 13px;
   outline: none;
   user-select: text;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
+/* 聚焦光晕用的是主题强调色（金色），历史上这里写的是旧紫色主题的 rgba，
+   换主题后一直没跟上，会和外框的金色描边打架 */
 .address:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.18);
+  box-shadow: var(--ring);
 }
 
 /* ---------------- 模式开关 ---------------- */
@@ -290,7 +328,7 @@ body {
   flex: 0 0 auto;
   padding: 3px 8px 3px 12px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--r-md);
   background: var(--bg-tab);
 }
 
@@ -496,6 +534,11 @@ body.private-mode .shell {
   background: var(--bg-tab-active);
   color: var(--text-main);
   border-color: var(--border);
+}
+
+.bm-item:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
 }
 
 .bm-item:active {
