@@ -379,6 +379,13 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--bg-tab);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+/* 隐私模式的状态色（清单 B2）：整组边框与底色跟着变，用户一眼能看出开着没有 */
+body.private-mode .mode-group {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-tab));
 }
 
 .mode-label {

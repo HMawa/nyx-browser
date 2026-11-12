@@ -353,6 +353,76 @@ async function main() {
       })()`);
     }
 
+    /* ---------- B2. 隐私开关：可见文字 / 状态色 / 悬停说明 ---------- */
+    const modeUi = await shell.eval(`(() => {
+      const group = document.getElementById('mode-group');
+      const toggle = document.getElementById('mode-toggle');
+      const label = document.getElementById('mode-label');
+      if (!group || !toggle || !label) return null;
+      const cs = getComputedStyle(label);
+      const normalBorder = getComputedStyle(group).borderTopColor;
+      const normalBg = getComputedStyle(group).backgroundColor;
+      // 只切样式类验证"隐私模式的状态色"，不动真实模式（切模式需要可用代理，测试环境没有）
+      document.body.classList.add('private-mode');
+      const privateBorder = getComputedStyle(group).borderTopColor;
+      const privateBg = getComputedStyle(group).backgroundColor;
+      const privateLabel = getComputedStyle(label).color;
+      document.body.classList.remove('private-mode');
+      return {
+        label: label.textContent.trim(),
+        labelColor: cs.color,
+        labelWeight: Number(cs.fontWeight) || 400,
+        normalBorder,
+        normalBg,
+        privateBorder,
+        privateBg,
+        privateLabel,
+        checked: toggle.getAttribute('aria-checked'),
+        title: toggle.title || '',
+        ariaLabel: toggle.getAttribute('aria-label') || '',
+        normal: window.describeModeSwitch('normal'),
+        priv: window.describeModeSwitch('private'),
+      };
+    })()`);
+    check(
+      '隐私开关有可见文字，且开关状态有颜色区分（B2）',
+      !!modeUi &&
+        modeUi.label === '普通模式' &&
+        modeUi.labelColor !== 'rgba(0, 0, 0, 0)' &&
+        modeUi.privateBorder !== modeUi.normalBorder &&
+        modeUi.privateBg !== modeUi.normalBg &&
+        modeUi.privateLabel !== modeUi.labelColor,
+      modeUi && JSON.stringify({
+        label: modeUi.label,
+        color: modeUi.labelColor,
+        normalBorder: modeUi.normalBorder,
+        privateBorder: modeUi.privateBorder,
+        privateLabel: modeUi.privateLabel,
+      }),
+    );
+    check(
+      '隐私开关的悬停说明写清了禁历史/禁缓存/走代理（B2）',
+      !!modeUi &&
+        /历史/.test(modeUi.normal.hint) &&
+        /缓存/.test(modeUi.normal.hint) &&
+        /代理/.test(modeUi.normal.hint) &&
+        /历史/.test(modeUi.priv.hint) &&
+        /缓存/.test(modeUi.priv.hint) &&
+        /代理/.test(modeUi.priv.hint) &&
+        modeUi.title === modeUi.normal.hint,
+      modeUi && JSON.stringify({ title: modeUi.title, privHint: modeUi.priv.hint }),
+    );
+    check(
+      '隐私开关有 aria-checked 与可读的无障碍标签（B2）',
+      !!modeUi &&
+        modeUi.checked === 'false' &&
+        modeUi.priv.label === '全隐私模式' &&
+        /已开启/.test(modeUi.priv.ariaLabel) &&
+        /已关闭/.test(modeUi.ariaLabel) &&
+        /历史/.test(modeUi.ariaLabel),
+      modeUi && JSON.stringify({ checked: modeUi.checked, ariaLabel: modeUi.ariaLabel }),
+    );
+
     // 后面几条用例假设当前是一个「不可收藏」的空白页标签（历史行为），这里显式造出来
     await shell.eval(`(async () => {
       const snap = await window.nyx.getState();

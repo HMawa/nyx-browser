@@ -134,6 +134,30 @@ function renderTabs() {
 }
 
 /** 渲染工具栏（地址栏 + 前进后退可用状态） */
+/**
+ * 隐私开关的文案（清单 B2）。
+ *
+ * 做成纯函数是为了能被回归脚本直接调：contextBridge 暴露的 window.nyx 是冻结代理，
+ * 测试没法给它打桩，只能把"文案与说明"这类纯逻辑抽出来单独验。
+ * 说明里必须写清隐私模式的三件事——不写历史、不留缓存、强制走代理，
+ * 否则用户看到的只是一个不知道开没开的开关。
+ */
+function describeModeSwitch(mode) {
+  const isPrivate = mode === 'private';
+  if (isPrivate) {
+    return {
+      label: '全隐私模式',
+      hint: '当前是全隐私模式：不写浏览历史、不保存缓存与 Cookie、所有请求强制走代理。点一下回到普通模式。',
+      ariaLabel: '全隐私模式开关，当前已开启：不写历史、不留缓存、强制走代理',
+    };
+  }
+  return {
+    label: '普通模式',
+    hint: '当前是普通模式：会保存历史与缓存，可直连或经代理。点一下切到全隐私模式（不写历史、不留缓存、强制走代理）。',
+    ariaLabel: '全隐私模式开关，当前已关闭：会保留历史与缓存',
+  };
+}
+
 function renderToolbar() {
   const active = state.tabs.find((tab) => tab.active) || null;
 
@@ -161,8 +185,14 @@ function renderToolbar() {
   els.forward.disabled = !active || !active.canGoForward;
 
   const isPrivate = state.mode === 'private';
+  const modeText = describeModeSwitch(state.mode);
   els.modeToggle.setAttribute('aria-checked', isPrivate ? 'true' : 'false');
-  els.modeLabel.textContent = isPrivate ? '全隐私模式' : '普通模式';
+  // 悬停说明必须写清"切过去会发生什么"（清单 B2：禁历史/禁缓存/走代理），
+  // 原来的 title 只有"切换隐私模式"四个字，等于没有说明。
+  els.modeToggle.title = modeText.hint;
+  els.modeToggle.setAttribute('aria-label', modeText.ariaLabel);
+  els.modeLabel.textContent = modeText.label;
+  els.modeLabel.title = modeText.hint;
   document.body.classList.toggle('private-mode', isPrivate);
 
   renderLinkBadge();
