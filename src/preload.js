@@ -204,6 +204,26 @@ contextBridge.exposeInMainWorld('nyx', {
     return () => ipcRenderer.removeListener('nyx:settings:section', listener);
   },
 
+  /* ---------------- 下载中心（A1） ---------------- */
+
+  /** 打开（或复用）下载中心窗口 */
+  openDownloads: () => ipcRenderer.invoke('nyx:downloads:open'),
+
+  /** 下载列表 + 汇总（工具栏角标用） */
+  listDownloads: () => ipcRenderer.invoke('nyx:downloads:list'),
+
+  /**
+   * 订阅下载状态推送（进行中数量 → 工具栏角标）。
+   * @param {(payload:{items:Array<object>, summary:object})=>void} handler
+   * @returns {() => void} 取消订阅
+   */
+  onDownloadsState: (handler) => {
+    if (typeof handler !== 'function') return () => {};
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on('nyx:downloads:state', listener);
+    return () => ipcRenderer.removeListener('nyx:downloads:state', listener);
+  },
+
   /* ---------------- 下载设置 ---------------- */
 
   /** 弹系统目录选择框，返回用户选定的下载保存目录 */

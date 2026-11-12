@@ -67,6 +67,7 @@ const { HistoryStore } = require('./core/history-store');
 const { SiteIcons } = require('./core/site-icons');
 const { BookmarkStore } = require('./core/bookmark-store');
 const { Diagnostics } = require('./core/diagnostics');
+const { DownloadManager, DOWNLOAD_STATES, formatBytes, sanitizeFilename, uniquePath } = require('./core/downloads');
 
 /**
  * 验收 / 调试用的隔离用户数据目录（环境变量 NYX_USER_DATA）。
@@ -212,6 +213,10 @@ const runtime = {
   vault: null,
   /** 诊断日志（清单 C1）：错误环形缓冲 + 诊断包导出 */
   diagnostics: null,
+  /** 下载记账与下载中心（清单 A1）：进度 / 落点 / 失败原因都在这里 */
+  downloads: null,
+  /** 下载中心窗口（独立 BrowserWindow） */
+  downloadsWindow: null,
   panicking: false,
   quitting: false,
   /** 渲染层尚未就绪时暂存的提示，待页面加载完成后推送 */
@@ -620,7 +625,10 @@ async function bootstrap() {
   sessions.getSession('normal');
   sessions.getSession('private');
 
-  // 普通模式下载处理器（隐私分区已整体禁止下载落盘）
+  // 下载记账（清单 A1）：所有下载都进同一个列表，状态变化即推给下载中心与外壳
+  runtime.downloads = new DownloadManager({ push: () => pushDownloadsState() });
+
+  // 普通模式下载处理器（隐私分区已整体禁止下载落盘，处理器里会给出解释性提示）
   installDownloadHandler();
 
   // 诊断上下文（清单 C1）：诊断页 / 诊断包 / 错误记录都从这里读实时状态，
@@ -1535,16 +1543,15 @@ function downloadResource(url) {
     savePath = path.join(dir, `${stem}-${Date.now()}${ext}`);
   }
 
+  // 落点先登记再触发下载：常驻 will-download 处理器会按序取用这个路径，
+  // 不会再弹第二个保存框；进度与结果统一由它记账并推到下载中心。
+  pendingDownloadPaths.push(savePath);
   try {
-    wc.session.once('will-download', (event, item) => {
-      try {
-        item.setSavePath(savePath);
-      } catch {
-        /* 落点设置失败则交给系统默认对话框 */
-      }
-    });
     wc.downloadURL(target);
   } catch (err) {
+    // 启动失败必须把预登记落点收回，否则会污染下一次下载
+    const idx = pendingDownloadPaths.indexOf(savePath);
+    if (idx >= 0) pendingDownloadPaths.splice(idx, 1);
     return { ok: false, error: `下载启动失败：${err.message}` };
   }
 
@@ -1567,49 +1574,163 @@ function uniqueSavePath(dir, name) {
 }
 
 /**
- * 普通模式页面下载处理器（常驻 will-download）：
- *   按下载偏好决定「弹窗询问」或「静默存到指定目录」。
- * 隐私分区在 sessions.js 里已整体禁止下载落盘，不在此列。
+ * 日志/诊断里的地址只保留协议+主机+路径，丢掉查询串。
+ * 下载链接的 query 里经常带一次性签名票据，写进诊断包再导出就外泄了。
+ */
+function redactUrlForLog(url) {
+  try {
+    const parsed = new URL(String(url || ''));
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+  } catch {
+    return String(url || '').slice(0, 80);
+  }
+}
+
+/**
+ * 工具箱「下载此资源」预登记的落点队列。
+ *
+ * 常驻 will-download 处理器与 downloadResource() 会先后收到同一个事件，
+ * 谁先设落点谁生效；用队列把「我已经替用户决定好了保存路径」这件事传过去，
+ * 避免常驻处理器再弹一次保存框。
+ */
+const pendingDownloadPaths = [];
+
+/** 取出（并移除）一个预登记落点；没有则返回空串 */
+function takePendingDownloadPath() {
+  return pendingDownloadPaths.length ? pendingDownloadPaths.shift() : '';
+}
+
+/** 下载目录：用户设置且仍然存在的目录优先，否则系统下载目录 */
+function resolveDownloadDir() {
+  const prefs = runtime.uiStore ? runtime.uiStore.get() : {};
+  const configured = typeof prefs.downloadDir === 'string' ? prefs.downloadDir.trim() : '';
+  if (configured) {
+    try {
+      if (fs.existsSync(configured)) return configured;
+    } catch {
+      /* 目录不可访问：回落系统下载目录 */
+    }
+  }
+  return app.getPath('downloads');
+}
+
+/**
+ * 普通模式页面下载处理器（常驻 will-download）+ 隐私模式拦截告知。
+ *
+ * 历史 bug（实测清单 A1「下载全都报废了」）：这里原本先
+ * `event.preventDefault()` 再去 `await dialog.showSaveDialog(...)`，
+ * 而 will-download 里 preventDefault 的语义就是「取消这次下载」——等保存框
+ * 结果回来时 DownloadItem 已被销毁，`setSavePath` 抛
+ * `DownloadItem used after being destroyed` 又被空 catch 吞掉。
+ * 表现就是文件 0 字节、界面一声不响。
+ *
+ * 现在的规则（不可回退）：
+ *   1. 落点必须**同步**确定：保存框用 showSaveDialogSync，落点先钉再放行；
+ *   2. 绝不 preventDefault，用户取消时显式 item.cancel()；
+ *   3. 每个下载都交给 DownloadManager 记账并推到下载中心；
+ *   4. 完成/中断/取消都要有前台提示（失败必须可见）。
+ * 隐私分区在 sessions.js 里已整体禁止落盘，这里只补一句看得见的解释。
  */
 function installDownloadHandler() {
   if (runtime.downloadHandlerInstalled) return;
   runtime.downloadHandlerInstalled = true;
 
-  const ses = sessions.getSession('normal');
-  ses.on('will-download', (event, item) => {
-    // 工具箱主动下载（downloadResource）已用 once 钉过落点，不重复接管
-    if (item.getSavePath && item.getSavePath()) return;
-
+  const normal = sessions.getSession('normal');
+  normal.on('will-download', (event, item) => {
+    const filename = sanitizeFilename(item.getFilename ? item.getFilename() : '');
+    const url = item.getURL ? item.getURL() : '';
+    const pinned = takePendingDownloadPath();
     const prefs = runtime.uiStore ? runtime.uiStore.get() : {};
-    const dir = prefs.downloadDir && fs.existsSync(prefs.downloadDir)
-      ? prefs.downloadDir
-      : app.getPath('downloads');
-    const filename = item.getFilename() || `nyx-${Date.now()}.bin`;
-    const target = uniqueSavePath(dir, filename);
 
-    if (prefs.downloadAsk !== false) {
-      event.preventDefault();
+    let savePath = pinned;
+    if (!savePath && prefs.downloadAsk !== false) {
       const win = runtime.mainWindow && !runtime.mainWindow.isDestroyed() ? runtime.mainWindow : null;
-      dialog.showSaveDialog(win, {
+      const picked = dialog.showSaveDialogSync(win, {
         title: '保存下载内容',
-        defaultPath: target,
-      }).then((result) => {
-        if (result.canceled || !result.filePath) return;
-        try {
-          item.setSavePath(result.filePath);
-        } catch {
-          /* 落点设置失败则放弃本次接管 */
-        }
+        defaultPath: uniquePath(resolveDownloadDir(), filename),
+        buttonLabel: '保存',
       });
-    } else {
-      try {
-        item.setSavePath(target);
-      } catch {
-        /* 交给系统默认行为 */
+      if (!picked) {
+        // 用户主动取消：明确 cancel，并且不留下"卡在进行中"的假记录
+        try {
+          item.cancel();
+        } catch {
+          /* 已经结束的 item 不用再 cancel */
+        }
+        if (runtime.diagnostics) {
+          runtime.diagnostics.info('DOWNLOAD_CANCELLED_BY_DIALOG', { filename, url: redactUrlForLog(url) });
+        }
+        return;
       }
+      savePath = picked;
     }
+    if (!savePath) savePath = uniquePath(resolveDownloadDir(), filename);
+
+    try {
+      item.setSavePath(savePath);
+    } catch (err) {
+      // 设不上落点就别装作下载成功：记日志 + 前台说清
+      if (runtime.diagnostics) {
+        runtime.diagnostics.error('DOWNLOAD_SET_PATH_FAILED', { filename, savePath, message: err.message });
+      }
+      notifyNotice({
+        level: 'error',
+        code: 'DOWNLOAD_SET_PATH_FAILED',
+        title: '这个文件存不下来',
+        message: `无法把下载保存到「${savePath}」：${err.message}。可以到设置 → 下载里换个保存目录再试。`,
+      });
+      return;
+    }
+
+    const rec = runtime.downloads
+      ? runtime.downloads.attach(item, { mode: 'normal', savePath, filename, url })
+      : null;
+
+    if (runtime.diagnostics) {
+      runtime.diagnostics.info('DOWNLOAD_START', { filename, savePath, url: redactUrlForLog(url), id: rec && rec.id });
+    }
+
+    item.once('done', (_event, state) => {
+      const size = formatBytes(item.getReceivedBytes ? item.getReceivedBytes() : 0);
+      if (state === DOWNLOAD_STATES.completed) {
+        notifyNotice({
+          level: 'info',
+          code: 'DOWNLOAD_COMPLETED',
+          title: '下载完成',
+          message: `${filename}（${size}）已保存到 ${savePath}。点工具栏的下载按钮可以看到全部记录。`,
+        });
+        return;
+      }
+      const failed = rec ? rec.error : '';
+      const text = failed || (state === DOWNLOAD_STATES.cancelled ? '下载已被取消' : '下载中断');
+      if (runtime.diagnostics) {
+        runtime.diagnostics.warn('DOWNLOAD_FAILED', { filename, savePath, state, error: text });
+      }
+      notifyNotice({
+        level: state === DOWNLOAD_STATES.cancelled ? 'warn' : 'error',
+        code: 'DOWNLOAD_FAILED',
+        title: state === DOWNLOAD_STATES.cancelled ? '下载已取消' : '下载失败',
+        message: `${filename}：${text}。落点 ${savePath}。详情见工具栏「下载」。`,
+      });
+    });
+  });
+
+  // 隐私分区：sessions.js 已 preventDefault 阻止落盘，这里补用户可见的解释
+  const privateSession = sessions.getSession('private');
+  privateSession.on('will-download', (_event, item) => {
+    const filename = sanitizeFilename(item.getFilename ? item.getFilename() : '');
+    if (runtime.diagnostics) {
+      runtime.diagnostics.warn('DOWNLOAD_BLOCKED_PRIVATE', { filename });
+    }
+    notifyNotice({
+      level: 'warn',
+      code: 'DOWNLOAD_BLOCKED_PRIVATE',
+      title: '隐私模式不保存文件',
+      message: `隐私模式不把下载写到磁盘，所以「${filename}」没有保存。需要这个文件请点模式开关切到普通模式，再重新下载。`,
+    });
   });
 }
+
 
 /** 弹目录选择框，返回用户选定的下载保存目录（用于设置中心） */
 async function pickDownloadDir() {
@@ -1720,6 +1841,10 @@ function createMainWindow() {
     } else if (mod && !input.alt && key === 'r') {
       event.preventDefault();
       if (runtime.tabManager) runtime.tabManager.reload();
+    } else if (mod && !input.alt && key === 'j') {
+      // Ctrl+J：下载中心（对齐主流浏览器习惯；工具栏也有入口）
+      event.preventDefault();
+      openDownloads();
     } else if (input.alt && input.key === 'ArrowLeft') {
       event.preventDefault();
       if (runtime.tabManager) runtime.tabManager.goBack();
@@ -2672,6 +2797,7 @@ function registerIpc() {
 
   // 主界面加载失败页（A4）：重试 / 跳诊断 / 复制详情
   registerErrorPageIpc();
+  registerDownloadsIpc();
 
   registerUpdateIpc();
 
@@ -4298,6 +4424,137 @@ function openSettings(section) {
   });
 
   return { ok: true, reused: false };
+}
+
+/* ------------------------------------------------------------------ */
+/* 下载中心                                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 打开（或复用）下载中心窗口。
+ *
+ * 为什么必须有个窗口：清单 A1 的另一半问题是「前台零提示」——用户既看不到
+ * 进度，也看不到失败原因和文件到底存到哪。提示条只能讲一件事，历史和落点
+ * 需要一个能看全的地方。
+ */
+function openDownloads() {
+  const existing = runtime.downloadsWindow;
+  if (existing && !existing.isDestroyed()) {
+    existing.show();
+    existing.focus();
+    pushDownloadsState();
+    return { ok: true, reused: true };
+  }
+
+  const win = new BrowserWindow({
+    width: 720,
+    height: 560,
+    minWidth: 560,
+    minHeight: 380,
+    title: 'Nyx 下载',
+    backgroundColor: THEME_BG[(runtime.uiStore && runtime.uiStore.get().theme) || 'ink'],
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-downloads.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+
+  runtime.downloadsWindow = win;
+  win.setMenuBarVisibility(false);
+  // 下载中心只承载本地页面
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (event, url) => {
+    if (!url.startsWith('file://')) event.preventDefault();
+  });
+
+  win.loadFile(path.join(__dirname, 'renderer', 'downloads.html'));
+  win.webContents.once('did-finish-load', () => pushDownloadsState());
+  win.on('closed', () => {
+    runtime.downloadsWindow = null;
+  });
+
+  return { ok: true, reused: false };
+}
+
+/** 把下载列表推给下载中心窗口（窗口没开就什么都不做） */
+function pushDownloadsState() {
+  const win = runtime.downloadsWindow;
+  if (!win || win.isDestroyed()) return;
+  const payload = runtime.downloads
+    ? { items: runtime.downloads.list(), summary: runtime.downloads.summary() }
+    : { items: [], summary: { total: 0, active: 0, done: 0, failed: 0, cancelled: 0 } };
+  try {
+    win.webContents.send('nyx:downloads:state', payload);
+  } catch {
+    /* 窗口正在关闭时发送会抛，忽略 */
+  }
+  // 外壳工具栏上的角标也要跟着动（进行中数量）
+  const shell = runtime.mainWindow;
+  if (shell && !shell.isDestroyed() && runtime.shellReady) {
+    try {
+      shell.webContents.send('nyx:downloads:state', payload);
+    } catch {
+      /* 同上 */
+    }
+  }
+}
+
+/** 下载中心 IPC */
+function registerDownloadsIpc() {
+  ipcMain.handle('nyx:downloads:open', () => openDownloads());
+
+  ipcMain.handle('nyx:downloads:list', () => {
+    if (!runtime.downloads) {
+      return { ok: false, error: '下载模块还没就绪', items: [], summary: null };
+    }
+    return { ok: true, items: runtime.downloads.list(), summary: runtime.downloads.summary() };
+  });
+
+  ipcMain.handle('nyx:downloads:clear', () => {
+    if (!runtime.downloads) return { ok: false, error: '下载模块还没就绪' };
+    const items = runtime.downloads.clear();
+    pushDownloadsState();
+    return { ok: true, items };
+  });
+
+  // 在资源管理器中定位文件：文件已被移走时给出中文原因，而不是默默没反应
+  ipcMain.handle('nyx:downloads:reveal', (_event, payload) => {
+    const target = payload && typeof payload.savePath === 'string' ? payload.savePath : '';
+    if (!target) return { ok: false, error: '这条记录没有保存路径' };
+    if (!fs.existsSync(target)) {
+      return { ok: false, error: '文件已经不在了（可能被移动或删除）' };
+    }
+    shell.showItemInFolder(target);
+    return { ok: true };
+  });
+
+  // 直接打开文件（下载完想马上看）
+  ipcMain.handle('nyx:downloads:open-file', async (_event, payload) => {
+    const target = payload && typeof payload.savePath === 'string' ? payload.savePath : '';
+    if (!target) return { ok: false, error: '这条记录没有保存路径' };
+    if (!fs.existsSync(target)) return { ok: false, error: '文件已经不在了（可能被移动或删除）' };
+    const message = await shell.openPath(target);
+    return message ? { ok: false, error: message } : { ok: true };
+  });
+
+  // 复制下载地址
+  ipcMain.handle('nyx:downloads:copy-url', (_event, payload) => {
+    const url = payload && typeof payload.url === 'string' ? payload.url : '';
+    if (!url) return { ok: false, error: '这条记录没有地址' };
+    clipboard.writeText(url);
+    return { ok: true };
+  });
+
+  // 打开保存目录本身（目录被删了就给出中文提示）
+  ipcMain.handle('nyx:downloads:open-dir', async () => {
+    const dir = resolveDownloadDir();
+    if (!fs.existsSync(dir)) return { ok: false, error: `下载目录不在了：${dir}` };
+    const message = await shell.openPath(dir);
+    return message ? { ok: false, error: message } : { ok: true, path: dir };
+  });
 }
 
 /* ------------------------------------------------------------------ */

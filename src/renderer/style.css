@@ -212,6 +212,55 @@ body {
   cursor: default;
 }
 
+/* ---------------- 工具栏下载入口（清单 A1） ----------------
+   进行中数量用角标表达；失败由红点标记（同时有 sr-only 文案，便于读屏）。
+   只改相对定位与角标，不动 .icon-btn 的尺寸，避免顶栏错位。 */
+.icon-btn.dl-entry {
+  position: relative;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+}
+
+.dl-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 15px;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* 有失败项时角标转警示色，让"下了但没成"这件事一眼可见 */
+.dl-badge.has-failed {
+  background: var(--danger);
+  color: var(--bg-shell);
+}
+
+/* 只给读屏用的文本：视觉上不占位 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ---------------- 工具栏书签星标（v1.4.0） ----------------
    地址栏与工具箱按钮之间的 ☆/★。
    每条规则都要求元素同时带 .icon-btn 与 .bm-star 两个类，因此不会外溢到

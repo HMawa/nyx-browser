@@ -179,6 +179,18 @@ async function main() {
   fs.mkdirSync(userData, { recursive: true });
   seedHistory();
 
+  // 下载用例（A1）的隔离条件：把「下载前询问保存位置」关掉、落点钉在 workDir 里。
+  // 关掉询问不是为了绕过保存框——A1 的修复正是把保存框改成同步调用，自动化里
+  // 弹模态框会把整条链卡住。静默落盘这条分支同样走 installDownloadHandler 的
+  // setSavePath 路径，被断言覆盖。
+  const downloadDir = path.join(workDir, 'downloads');
+  fs.mkdirSync(downloadDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(userData, 'ui-preferences.json'),
+    JSON.stringify({ downloadAsk: false, downloadDir }, null, 2),
+    'utf8',
+  );
+
   // 扩展在线检查 / 全部更新 / 版本历史都读隔离 userData 的 updates/extensions.json：
   // 仓库本身不随包分发扩展，这里不种任何扩展；没有 extensions.json 时相关用例按跳过处理。
 
@@ -201,6 +213,7 @@ async function main() {
 
   let shell = null;
   let settings = null;
+  let downloadsPage = null;
   let httpServer = null;
 
   try {
@@ -1283,6 +1296,18 @@ async function main() {
     let httpMode = 404;
     const http = require('node:http');
     httpServer = http.createServer((req, res) => {
+      // A1 用例专用：给一个 256KB 的附件下载响应（Content-Disposition: attachment），
+      // 让 Chromium 走真正的下载链路，而不是当页面渲染。
+      if (String(req.url || '').startsWith('/a1-probe.bin')) {
+        const body = Buffer.alloc(256 * 1024, 0x4e);
+        res.writeHead(200, {
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': String(body.length),
+          'Content-Disposition': 'attachment; filename="a1-probe.bin"',
+        });
+        res.end(body);
+        return;
+      }
       res.writeHead(httpMode, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(
         httpMode === 200
@@ -1334,16 +1359,23 @@ async function main() {
     await shell.eval("document.getElementById('pe-copy').click()");
     await sleep(700);
     const copyFoot = await shell.eval("document.getElementById('pe-foot').textContent || ''");
-    const clip = (() => {
+    // 剪贴板是进程外状态：Electron 写完后系统剪贴板偶尔还会被别的进程占用几毫秒，
+    // 一次读不到就判失败会造出假红。这里轮询到稳定命中为止（最多 8 次 × 250ms）。
+    const readClipboard = () => {
       try {
-        // 剪贴板是进程外状态，只能借系统命令回读
         return require('node:child_process').execFileSync('powershell', ['-NoProfile', '-Command', 'Get-Clipboard'], {
           encoding: 'utf8',
         });
       } catch {
         return '';
       }
-    })();
+    };
+    let clip = '';
+    for (let i = 0; i < 8; i += 1) {
+      clip = readClipboard();
+      if (clip.includes(String(httpPort))) break;
+      await sleep(250);
+    }
     check(
       '失败页「复制详情」把地址与状态码写进剪贴板（A4）',
       String(copyFoot).includes('已复制') && clip.includes(String(httpPort)) && clip.includes('HTTP 404'),
@@ -1546,6 +1578,98 @@ async function main() {
       JSON.stringify(addressGlow),
     );
 
+    /* ---------- J. 清单 A1：下载必须真的落盘，并且进度/落点/失败原因看得见 ----------
+
+       实测清单原话是「文件下载这一块儿全都报废了，前台零提示」。根因是
+       will-download 里 preventDefault 后再异步 setSavePath（等于取消下载）。
+       这一节不看代码，直接让应用下载一个真实文件：
+         ① 文件必须真的出现在磁盘上、字节数对得上；
+         ② 主进程的下载记账必须把它标成 completed 且带上落点；
+         ③ 下载中心窗口必须能把它列出来（名字/状态/落点都在）；
+         ④ 工具栏角标在没有进行中/失败项时必须消失，不能一直挂个数字。 */
+    await shell.eval(`window.nyx.navigate(${JSON.stringify(`http://127.0.0.1:${httpPort}/a1-probe.bin`)})`);
+    const expectedFile = path.join(downloadDir, 'a1-probe.bin');
+    let fileAt = 0;
+    for (let i = 0; i < 40; i += 1) {
+      await sleep(400);
+      try {
+        fileAt = fs.statSync(expectedFile).size;
+      } catch {
+        fileAt = 0;
+      }
+      if (fileAt >= 256 * 1024) break;
+    }
+    const dlList = await shell.eval(`window.nyx.listDownloads()`);
+    const dlItem = dlList && Array.isArray(dlList.items) ? dlList.items[0] : null;
+    check(
+      '普通模式下载真的落盘（不再 0 字节、不再静默取消）（A1）',
+      fileAt === 256 * 1024 &&
+        !!dlItem &&
+        dlItem.state === 'completed' &&
+        dlItem.error === '' &&
+        String(dlItem.savePath) === expectedFile,
+      JSON.stringify({ fileAt, item: dlItem && { state: dlItem.state, error: dlItem.error, savePath: dlItem.savePath, total: dlItem.totalBytes } }),
+    );
+
+    // 下载中心窗口：必须能把这条记录渲染出来（名字 / 已完成 / 落点）
+    await shell.eval('window.nyx.openDownloads()');
+    const downloadsTarget = await waitTarget((t) => t.url.endsWith('/downloads.html'), 12000);
+    check('下载中心窗口能打开', !!downloadsTarget, downloadsTarget && downloadsTarget.url);
+    if (downloadsTarget) {
+      downloadsPage = await new Cdp(downloadsTarget.webSocketDebuggerUrl).connect();
+      await downloadsPage.send('Runtime.enable', {});
+      await sleep(900);
+      const shown = await downloadsPage.eval(`(() => {
+        const rows = Array.from(document.querySelectorAll('.dl-item'));
+        const first = rows[0];
+        return {
+          rows: rows.length,
+          name: first ? (first.querySelector('.dl-name') || {}).textContent : '',
+          state: first ? (first.querySelector('.dl-state') || {}).textContent : '',
+          meta: first ? (first.querySelector('.dl-meta') || {}).textContent : '',
+          summary: (document.getElementById('dl-summary') || {}).textContent || '',
+          emptyHidden: document.getElementById('dl-empty').hidden,
+        };
+      })()`);
+      check(
+        '下载中心列出该记录：文件名/状态/落点都可读（A1）',
+        !!shown &&
+          shown.rows >= 1 &&
+          shown.name === 'a1-probe.bin' &&
+          shown.state === '已完成' &&
+          String(shown.meta).includes(downloadDir) &&
+          shown.emptyHidden === true,
+        JSON.stringify(shown),
+      );
+    } else {
+      check('下载中心列出该记录：文件名/状态/落点都可读（A1）', false, '下载中心窗口未出现');
+    }
+
+    // 工具栏角标：已经没有进行中/失败项，角标必须隐藏（避免"永远挂个 1"）
+    const badge = await shell.eval(`(() => {
+      const el = document.getElementById('dl-badge');
+      return { hidden: el ? el.hidden : null, text: el ? el.textContent : '', hasFailed: el ? el.classList.contains('has-failed') : null };
+    })()`);
+    check(
+      '下载结束后工具栏角标归零隐藏（A1）',
+      !!badge && badge.hidden === true && badge.hasFailed === false,
+      JSON.stringify(badge),
+    );
+
+    // 隐私模式不落盘这件事必须"说出来"：静态确认拦截与告知文案同时存在
+    const privateGuard = (() => {
+      const sessionsSrc = fs.readFileSync(path.join(ROOT, 'src', 'core', 'sessions.js'), 'utf8');
+      const mainSrc = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
+      const blocksDownload = /will-download[\s\S]{0,200}preventDefault/.test(sessionsSrc);
+      const tellsUser = mainSrc.includes('DOWNLOAD_BLOCKED_PRIVATE') && mainSrc.includes('隐私模式不保存文件');
+      return { blocksDownload, tellsUser };
+    })();
+    check(
+      '隐私模式下载被拦截且有中文解释（不再是"点了没反应"）（A1）',
+      privateGuard.blocksDownload === true && privateGuard.tellsUser === true,
+      JSON.stringify(privateGuard),
+    );
+
     /* ---------- 运行时无脚本异常 ---------- */
     const shellErrors = shell.exceptions();
     check('主窗口无未捕获脚本异常', shellErrors.length === 0, shellErrors.slice(0, 3).join(' | '));
@@ -1559,6 +1683,7 @@ async function main() {
     try {
       if (shell) shell.close();
       if (settings) settings.close();
+      if (downloadsPage) downloadsPage.close();
     } catch {
       /* 忽略 */
     }

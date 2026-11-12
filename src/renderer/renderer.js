@@ -16,6 +16,10 @@ const els = {
   modeToggle: document.getElementById('mode-toggle'),
   modeLabel: document.getElementById('mode-label'),
   proxy: document.getElementById('btn-proxy'),
+  // 下载中心入口（A1）
+  downloads: document.getElementById('btn-downloads'),
+  dlBadge: document.getElementById('dl-badge'),
+  dlBadgeLabel: document.getElementById('dl-badge-label'),
   linkBadge: document.getElementById('link-badge'),
   modeGroup: document.getElementById('mode-group'),
   // 加载失败页（A4）
@@ -750,3 +754,38 @@ function showNotice(notice) {
 window.nyx.onState(applyState);
 window.nyx.onNotice(showNotice);
 window.nyx.getState().then(applyState);
+
+/* ---------------- 下载中心（清单 A1） ---------------- */
+
+/** 工具栏下载入口：点开下载中心窗口；有进行中/失败时角标给出数量 */
+function applyDownloadsBadge(payload) {
+  if (!els.dlBadge) return;
+  const summary = (payload && payload.summary) || { active: 0, failed: 0 };
+  const active = Number(summary.active) || 0;
+  const failed = Number(summary.failed) || 0;
+  const total = active + failed;
+  els.dlBadge.hidden = total <= 0;
+  els.dlBadge.textContent = String(total);
+  els.dlBadge.classList.toggle('has-failed', failed > 0);
+  if (els.dlBadgeLabel) {
+    els.dlBadgeLabel.textContent = total > 0 ? `${active} 项进行中，${failed} 项失败` : '';
+  }
+  if (els.downloads) {
+    els.downloads.title = total > 0 ? `下载中心（${active} 进行中 / ${failed} 失败）` : '下载中心（Ctrl+J）';
+  }
+}
+
+if (els.downloads) {
+  els.downloads.addEventListener('click', () => window.nyx.openDownloads());
+}
+
+if (window.nyx.onDownloadsState) {
+  window.nyx.onDownloadsState(applyDownloadsBadge);
+}
+// 首屏同步一次：角标不能等第一次下载事件才出现
+if (window.nyx.listDownloads) {
+  window.nyx.listDownloads().then((res) => {
+    if (res && res.ok) applyDownloadsBadge({ summary: res.summary });
+  });
+}
+

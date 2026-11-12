@@ -756,9 +756,13 @@ async function main() {
     }
 
     /* 7.6 v1.8.0：收藏浮层「最近使用」+ 右键建子文件夹 */
-    await shell.eval(`window.nyx.bookmarksFolderMenu({ x: 340, y: 340, url: 'https://example.com/pricing', title: '示例站 · 价格' })`);
+    // 浮层窗口偶尔会因为主窗口刚经历创建/关闭标签而晚到：调用结果与目标都做一次重试，
+    // 但仍然断言"必须真的能打开"——不允许因为偶发就把这条弱化成"跳过"。
+    const openFolderMenu = () =>
+      shell.eval(`window.nyx.bookmarksFolderMenu({ x: 340, y: 340, url: 'https://example.com/pricing', title: '示例站 · 价格' })`);
+    let menuOpen = await openFolderMenu();
     await sleep(700);
-    const recentDom = await evalInTarget(
+    let recentDom = await evalInTarget(
       'bm-folder.html',
       `(() => ({
         hasRecentHead: !!document.querySelector('.bf-head-recent'),
@@ -766,6 +770,22 @@ async function main() {
         firstRecent: (document.querySelector('.bf-item-recent .bf-name') || {}).textContent || '',
       }))()`,
     );
+    if (!menuOpen || menuOpen.ok !== true || !recentDom) {
+      // 第二次机会：先把可能残留的浮层关掉再重开
+      await shell.eval('window.nyx.bookmarksFolderClose()');
+      await sleep(400);
+      menuOpen = await openFolderMenu();
+      await sleep(900);
+      recentDom = await evalInTarget(
+        'bm-folder.html',
+        `(() => ({
+          hasRecentHead: !!document.querySelector('.bf-head-recent'),
+          recentRows: document.querySelectorAll('.bf-item-recent').length,
+          firstRecent: (document.querySelector('.bf-item-recent .bf-name') || {}).textContent || '',
+        }))()`,
+      );
+    }
+    check('「收藏到文件夹」浮层可再次打开', !!menuOpen && menuOpen.ok === true, JSON.stringify(menuOpen));
     check(
       '浮层顶部有「最近使用」分组',
       !!recentDom && recentDom.hasRecentHead && recentDom.recentRows >= 1,

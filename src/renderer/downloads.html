@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;"
+    />
+    <title>Nyx 下载</title>
+    <link rel="stylesheet" href="downloads.css" />
+    <!-- 主题包必须最后加载：靠同权重后置接管本页里的硬编码颜色 -->
+    <link rel="stylesheet" href="theme-nyx.css" />
+  </head>
+  <body class="dl-body">
+    <header class="dl-head">
+      <div class="dl-head-title">
+        <h1>下载</h1>
+        <!-- 动态摘要：屏幕阅读器靠 role=status 感知变化，视觉用户靠文字本身 -->
+        <p class="dl-summary" id="dl-summary" role="status" aria-live="polite">还没有下载记录</p>
+      </div>
+      <div class="dl-head-actions">
+        <button type="button" class="dl-btn" id="btn-dl-open-dir">打开下载目录</button>
+        <button type="button" class="dl-btn" id="btn-dl-clear">清空已结束</button>
+      </div>
+    </header>
+
+    <!-- 空状态：给出下一步，而不是一片空白 -->
+    <section class="dl-empty" id="dl-empty">
+      <p class="dl-empty-title">这里还没有文件</p>
+      <p class="dl-empty-body">
+        普通模式下点页面里的下载链接即可；隐私模式不把文件写到磁盘，需要下载请先切到普通模式。
+        按 <kbd>Ctrl</kbd> + <kbd>J</kbd> 可以随时回到这个窗口。
+      </p>
+    </section>
+
+    <ul class="dl-list" id="dl-list" role="list"></ul>
+
+    <p class="dl-hint" id="dl-hint" role="status" aria-live="polite"></p>
+
+    <script src="downloads.js"></script>
+  </body>
+</html>
