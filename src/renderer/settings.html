@@ -30,6 +30,7 @@
           <li><button type="button" class="nav-item" data-sec="network">网络与代理</button></li>
           <li><button type="button" class="nav-item" data-sec="downloads">下载</button></li>
           <li><button type="button" class="nav-item" data-sec="extensions">扩展插件</button></li>
+          <li><button type="button" class="nav-item" data-sec="diagnostics">诊断</button></li>
           <li><button type="button" class="nav-item" data-sec="about">关于与更新</button></li>
         </ul>
 
@@ -673,6 +674,47 @@
         </section>
 
         <!-- ============ 关于与更新 ============ -->
+        <!-- 诊断（清单 C1）：所有失败必须在这里看得见，否则「静默失败」无从排查 -->
+        <section class="sec-panel" data-sec="diagnostics">
+          <header class="sec-head">
+            <h2>诊断</h2>
+            <p>版本、运行状态与最近的错误记录。遇到打不开、下不了、连不上的情况，先来这里看一眼，或直接导出诊断包发给维护者。</p>
+          </header>
+
+          <div class="sec-scroll">
+            <section class="info-card">
+              <div class="info-head">
+                <h3>运行状态</h3>
+                <span class="badge" id="diag-badge">—</span>
+              </div>
+              <div class="info-body">
+                <div class="kv-grid" id="diag-grid"></div>
+                <div class="sec-actions">
+                  <button type="button" class="btn" id="btn-diag-refresh">刷新</button>
+                  <button type="button" class="btn btn-primary" id="btn-diag-export">导出诊断包</button>
+                  <button type="button" class="btn btn-mini" id="btn-diag-open">打开日志目录</button>
+                  <button type="button" class="btn btn-mini" id="btn-diag-clear">清空记录</button>
+                </div>
+                <p class="hint" id="diag-hint">
+                  诊断包是 ZIP，内含「诊断报告.txt」「errors.jsonl」「manifest.json」；导出前已脱敏，URL 里的
+                  token / key 与 Authorization、sk-* 一律打码。
+                </p>
+              </div>
+            </section>
+
+            <section class="info-card">
+              <div class="info-head">
+                <h3>最近错误</h3>
+                <span class="badge" id="diag-count">—</span>
+              </div>
+              <div class="info-body">
+                <p class="hint" id="diag-empty" hidden>暂无记录。下次出现异常时会自动记到这里。</p>
+                <div class="diag-list" id="diag-list"></div>
+              </div>
+            </section>
+          </div>
+        </section>
+
         <section class="sec-panel" data-sec="about">
           <header class="sec-head">
             <h2>关于与更新</h2>

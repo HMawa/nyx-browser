@@ -17,6 +17,7 @@
     network: '网络与代理',
     downloads: '下载',
     extensions: '扩展插件',
+    diagnostics: '诊断',
     about: '关于与更新',
   };
 
@@ -298,6 +299,181 @@
       // 更新源占用（v1.16.0）：体积随发版变化，每次进来重新统计
       loadFootprint();
     }
+
+    // 诊断（清单 C1）：状态与错误记录随时会变，每次进入都重新拉
+    if (section === 'diagnostics') {
+      loadDiagnostics();
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 诊断（清单 C1）                                                     */
+  /* ------------------------------------------------------------------ */
+
+  /** 只绑一次按钮，避免每次切回分区重复绑定 */
+  let diagWired = false;
+
+  function wireDiagActions() {
+    if (diagWired) return;
+    diagWired = true;
+
+    const refresh = byId('btn-diag-refresh');
+    if (refresh) {
+      refresh.addEventListener('click', () => loadDiagnostics());
+    }
+
+    const exportBtn = byId('btn-diag-export');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', async () => {
+        exportBtn.disabled = true;
+        try {
+          const result = await window.nyx.exportDiagnostics();
+          if (result && result.ok) {
+            setStatus(`诊断包已导出（${formatBytes(result.bytes)}）`);
+            await loadDiagnostics();
+          } else if (result && result.canceled) {
+            setStatus('已取消导出');
+          } else {
+            setStatus(`导出失败：${(result && result.error) || '未知原因'}`, true);
+          }
+        } catch (err) {
+          setStatus(`导出失败：${err.message}`, true);
+        } finally {
+          exportBtn.disabled = false;
+        }
+      });
+    }
+
+    const openBtn = byId('btn-diag-open');
+    if (openBtn) {
+      openBtn.addEventListener('click', async () => {
+        const result = await window.nyx.openDiagnosticsFolder();
+        if (!result || !result.ok) {
+          setStatus(`打开日志目录失败：${(result && result.error) || '未知原因'}`, true);
+        }
+      });
+    }
+
+    const clearBtn = byId('btn-diag-clear');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', async () => {
+        await window.nyx.clearDiagnostics();
+        setStatus('诊断记录已清空');
+        await loadDiagnostics();
+      });
+    }
+  }
+
+  /** 把一条记录渲染成一行（时间 / 级别 / 内容 + 附加信息） */
+  function buildDiagItem(entry) {
+    const row = document.createElement('div');
+    row.className = `diag-item is-${entry.level}`;
+    row.dataset.code = entry.code;
+
+    const time = document.createElement('span');
+    time.className = 'diag-time';
+    const at = new Date(entry.at);
+    time.textContent = Number.isNaN(at.getTime())
+      ? escapeText(entry.at)
+      : at.toLocaleString('zh-CN', { hour12: false });
+    time.title = escapeText(entry.at);
+
+    const level = document.createElement('span');
+    level.className = 'diag-level';
+    level.textContent = entry.level === 'error' ? '错误' : entry.level === 'warn' ? '警告' : '提示';
+
+    const body = document.createElement('span');
+    body.className = 'diag-body';
+    body.textContent = escapeText(entry.message);
+
+    const code = document.createElement('span');
+    code.className = 'diag-code';
+    code.textContent = escapeText(entry.code);
+    body.appendChild(code);
+
+    if (entry.extra !== undefined) {
+      const extra = document.createElement('span');
+      extra.className = 'diag-extra';
+      extra.textContent = JSON.stringify(entry.extra);
+      body.appendChild(extra);
+    }
+
+    row.appendChild(time);
+    row.appendChild(level);
+    row.appendChild(body);
+    return row;
+  }
+
+  async function loadDiagnostics() {
+    wireDiagActions();
+
+    const statusEl = byId('diag-badge');
+    const gridEl = byId('diag-grid');
+    const listEl = byId('diag-list');
+    const countEl = byId('diag-count');
+    const emptyEl = byId('diag-empty');
+
+    let status = null;
+    try {
+      status = await window.nyx.getDiagnosticsStatus();
+    } catch (err) {
+      if (statusEl) statusEl.textContent = '读取失败';
+      if (gridEl) renderKvGrid(gridEl, [['错误', err.message]]);
+      return;
+    }
+    if (!status || !status.ok) {
+      if (statusEl) statusEl.textContent = '读取失败';
+      return;
+    }
+
+    const context = status.context || {};
+    const counts = status.counts || { error: 0, warn: 0, info: 0, total: 0 };
+
+    if (statusEl) {
+      statusEl.textContent = counts.error
+        ? `${counts.error} 条错误`
+        : counts.total
+          ? '无错误'
+          : '暂无记录';
+      statusEl.classList.toggle('is-bad', Boolean(counts.error));
+    }
+
+    if (gridEl) {
+      renderKvGrid(gridEl, [
+        ['应用版本', context.appVersion || '未知'],
+        ['Electron', context.electron || '未知'],
+        ['Chromium', context.chrome || '未知'],
+        ['Node', context.node || '未知'],
+        ['运行模式', context.mode || '未知'],
+        ['连接方式', context.link || '未知'],
+        ['代理', context.proxy || '未知'],
+        ['GPU 策略', context.gpu || '未知'],
+        ['平台', `${context.platform || '未知'} / ${context.arch || '未知'}`],
+        ['日志文件', status.logPath || '未知'],
+      ]);
+    }
+
+    if (countEl) {
+      countEl.textContent = `错误 ${counts.error} / 警告 ${counts.warn} / 提示 ${counts.info}`;
+    }
+
+    let list = { items: [] };
+    try {
+      list = await window.nyx.listDiagnostics(status.displayLimit || 20);
+    } catch (err) {
+      if (listEl) {
+        listEl.textContent = '';
+        listEl.appendChild(hintLine(`读取记录失败：${err.message}`));
+      }
+      return;
+    }
+
+    const items = (list && list.items) || [];
+    if (listEl) {
+      listEl.textContent = '';
+      for (const entry of items) listEl.appendChild(buildDiagItem(entry));
+    }
+    if (emptyEl) emptyEl.hidden = items.length > 0;
   }
 
   navEl.addEventListener('click', (event) => {

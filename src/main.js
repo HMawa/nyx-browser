@@ -65,6 +65,7 @@ const { getHardwareStatus } = require('./core/hardware');
 const { HistoryStore } = require('./core/history-store');
 const { SiteIcons } = require('./core/site-icons');
 const { BookmarkStore } = require('./core/bookmark-store');
+const { Diagnostics } = require('./core/diagnostics');
 
 /**
  * 验收 / 调试用的隔离用户数据目录（环境变量 NYX_USER_DATA）。
@@ -83,6 +84,23 @@ if (process.env.NYX_USER_DATA) {
     console.warn('[Nyx] 隔离用户数据目录不可用，将继续使用默认目录：', err.message);
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* 诊断日志（清单 C1）                                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 全局诊断实例。
+ *
+ * 必须在这里（userData 路径确定之后、任何可能失败的代码之前）创建并挂钩子：
+ * 否则启动早期的异常只写进 stdout，打包后的用户永远看不到 —— 那正是清单里
+ * 「下载全废却零提示」「隐私模式静默变直连」无法定论的根因。
+ */
+const diagnostics = new Diagnostics({
+  stateDir: app.getPath('userData'),
+  appVersion: app.getVersion(),
+});
+diagnostics.installProcessHooks(app);
 
 /* ------------------------------------------------------------------ */
 /* 常量                                                                */
@@ -194,6 +212,8 @@ const runtime = {
   hardening: null,
   /** 密码与表单记忆库（safeStorage 加密后落盘，只在填充瞬间解密） */
   vault: null,
+  /** 诊断日志（清单 C1）：错误环形缓冲 + 诊断包导出 */
+  diagnostics: null,
   panicking: false,
   quitting: false,
   /** 渲染层尚未就绪时暂存的提示，待页面加载完成后推送 */
@@ -594,6 +614,53 @@ async function bootstrap() {
 
   // 普通模式下载处理器（隐私分区已整体禁止下载落盘）
   installDownloadHandler();
+
+  // 诊断上下文（清单 C1）：诊断页 / 诊断包 / 错误记录都从这里读实时状态，
+  // 免得每个调用点各拼一份、说法还不一致。任何一项取不到都给「未知」，不抛异常。
+  runtime.diagnostics = diagnostics;
+  diagnostics.setContextProvider(() => {
+    const context = {
+      appVersion: app.getVersion(),
+      mode: '未知',
+      link: '未知',
+      proxy: '未知',
+      gpu: '未知',
+    };
+
+    try {
+      context.mode = sessions.getMode() === 'private' ? '全隐私模式' : '普通模式';
+      context.link = sessions.getLink() === 'proxy' ? '经代理' : '直连（真实 IP）';
+    } catch (err) {
+      context.linkError = err && err.message;
+    }
+
+    try {
+      const kernel = runtime.proxyService && typeof runtime.proxyService.status === 'function'
+        ? runtime.proxyService.status()
+        : null;
+      const reachable = runtime.network ? runtime.network.proxyReachable : null;
+      const probeText = reachable === null || reachable === undefined ? '未探测' : reachable ? '可达' : '不可达';
+      context.proxy =
+        `内核${kernel && kernel.running ? '运行中' : '未运行'}` +
+        `／混合端口 ${kernel && kernel.mixedPort ? kernel.mixedPort : '—'}` +
+        `／探测 ${probeText}` +
+        (kernel && kernel.lastError ? `／最近错误：${kernel.lastError}` : '');
+    } catch (err) {
+      context.proxy = `读取失败：${err && err.message ? err.message : err}`;
+    }
+
+    try {
+      const feature = typeof app.getGPUFeatureStatus === 'function' ? app.getGPUFeatureStatus() : null;
+      const compositing = (feature && feature.gpu_compositing) || '';
+      const enabled = compositing.startsWith('enabled');
+      context.gpu = `硬件加速${enabled ? '已启用' : '未启用'}／GPU 合成 ${compositing || '未知'}`;
+    } catch (err) {
+      context.gpu = `读取失败：${err && err.message ? err.message : err}`;
+    }
+
+    return context;
+  });
+  diagnostics.info('APP_READY', '诊断服务已就绪', { userData: app.getPath('userData') });
 
   // 扩展管理器：必须在普通分区建立之后初始化（扩展装到分区上，不装到进程上）
   initExtensions();
@@ -2045,6 +2112,61 @@ function registerIpc() {
 
   // 硬件能力（GPU 加速状态 / NPU 本地 AI）只读探测
   ipcMain.handle('nyx:hardware:status', () => getHardwareStatus());
+
+  /* ---------------------------------------------------------------- */
+  /* 诊断（清单 C1）                                                    */
+  /* ---------------------------------------------------------------- */
+
+  ipcMain.handle('nyx:diagnostics:status', () => diagnostics.status());
+
+  ipcMain.handle('nyx:diagnostics:list', (_event, limit) => diagnostics.list(limit));
+
+  ipcMain.handle('nyx:diagnostics:clear', () => diagnostics.clear());
+
+  ipcMain.handle('nyx:diagnostics:open-folder', async () => {
+    try {
+      fs.mkdirSync(diagnostics.logDir, { recursive: true });
+      const error = await shell.openPath(diagnostics.logDir);
+      if (error) return { ok: false, error };
+      return { ok: true, path: diagnostics.logDir };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  /**
+   * 导出诊断包。
+   *
+   * 默认弹系统保存对话框（用户要能自己选放哪，这也是清单「导出诊断包」的本意）；
+   * 传了 payload.path 就直接写那个路径，供自动化验收用。
+   */
+  ipcMain.handle('nyx:diagnostics:export', async (_event, payload) => {
+    const options = payload || {};
+    let destPath = options.path ? path.resolve(String(options.path)) : '';
+
+    if (!destPath) {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const result = await dialog.showSaveDialog(runtime.mainWindow || undefined, {
+        title: '导出 Nyx 诊断包',
+        defaultPath: path.join(app.getPath('downloads'), `Nyx-诊断包-${stamp}.zip`),
+        filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }],
+      });
+      if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+      destPath = result.filePath;
+    }
+
+    try {
+      const bundle = diagnostics.exportBundle(destPath);
+      diagnostics.info('DIAG_EXPORT', `诊断包已导出：${path.basename(destPath)}`, {
+        bytes: bundle.bytes,
+        entries: bundle.entries,
+      });
+      return bundle;
+    } catch (err) {
+      diagnostics.error('DIAG_EXPORT_FAILED', `诊断包导出失败：${err.message}`, { stack: err.stack });
+      return { ok: false, error: err.message };
+    }
+  });
 
   // 下载设置：选择保存目录 / 打开当前下载目录
   ipcMain.handle('nyx:download:pick-dir', () => pickDownloadDir());

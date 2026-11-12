@@ -329,6 +329,71 @@
   margin-top: 10px;
 }
 
+/* 诊断记录列表（清单 C1）：三列 = 时间 / 级别 / 内容，长文本可换行 */
+.diag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.diag-item {
+  display: grid;
+  grid-template-columns: 128px 56px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+}
+
+.diag-time {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.diag-level {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.diag-item.is-error .diag-level {
+  color: var(--danger-soft);
+}
+
+.diag-item.is-warn .diag-level {
+  color: var(--warn-soft);
+}
+
+.diag-body {
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+  user-select: text;
+}
+
+.diag-code {
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+
+.diag-extra {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+
 /* 置顶导入 / 导出行（v1.15.0）：按钮与说明文字同一行时垂直居中，说明不挤压按钮 */
 #pinned-io-row {
   align-items: center;

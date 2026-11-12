@@ -1137,6 +1137,100 @@ async function main() {
       JSON.stringify(groupCap),
     );
 
+    /* ---------- G. 清单 C1：诊断页（状态可见 / 失败留痕 / 导出诊断包 / 脱敏） ---------- */
+
+    // G1：诊断分区存在且状态字段齐全（清单要求：版本、Electron+Chromium、连接方式、代理状态、GPU 策略）
+    const diagStatus = await settings.eval(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const nav = document.querySelector('.nav-item[data-sec="diagnostics"]');
+      if (!nav) return { missingNav: true };
+      nav.click();
+      await wait(900);
+      const panel = document.querySelector('.sec-panel[data-sec="diagnostics"]');
+      const grid = document.getElementById('diag-grid');
+      const keys = grid ? Array.from(grid.querySelectorAll('.kv-item .k')).map((n) => n.textContent) : [];
+      const values = grid ? Array.from(grid.querySelectorAll('.kv-item .v')).map((n) => n.textContent) : [];
+      return {
+        panelVisible: !!panel && panel.classList.contains('active'),
+        keys,
+        values,
+        badge: (document.getElementById('diag-badge') || {}).textContent || '',
+        count: (document.getElementById('diag-count') || {}).textContent || '',
+        statusTitle: (document.getElementById('statusbar') || {}).textContent || '',
+      };
+    })()`);
+    check(
+      '设置新增「诊断」分区并显示版本/模式/连接方式/代理/GPU（C1）',
+      !!diagStatus &&
+        diagStatus.panelVisible === true &&
+        ['应用版本', 'Electron', 'Chromium', 'Node', '运行模式', '连接方式', '代理', 'GPU 策略', '平台', '日志文件'].every(
+          (key) => (diagStatus.keys || []).includes(key),
+        ) &&
+        (diagStatus.values || []).filter((v) => v && v !== '未知').length >= 6,
+      JSON.stringify(diagStatus),
+    );
+
+    // G2：真实加载失败必须留痕（打开一个必然连不上的地址，诊断记录里要出现 LOAD_FAILED + 中文原因）
+    const failUrl = 'http://127.0.0.1:65530/nyx-diag-probe?token=SECRET123';
+    await shell.eval(`window.nyx.createTab(${JSON.stringify(failUrl)})`);
+    await sleep(1800);
+    const diagList = await settings.eval(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      document.getElementById('btn-diag-refresh').click();
+      await wait(900);
+      const res = await window.nyx.listDiagnostics(20);
+      const items = (res && res.items) || [];
+      const hit = items.find((it) => it.code === 'LOAD_FAILED') || null;
+      return {
+        total: res && res.total,
+        codes: items.map((it) => it.code),
+        hit,
+        rowCount: document.querySelectorAll('#diag-list .diag-item').length,
+        raw: JSON.stringify(items),
+      };
+    })()`);
+    check(
+      '页面加载失败会写入诊断记录（C1）',
+      !!diagList &&
+        !!diagList.hit &&
+        String(diagList.hit.level) === 'error' &&
+        /拒绝|解析|超时|不可达|连接/.test(String(diagList.hit.message)) &&
+        diagList.rowCount > 0,
+      JSON.stringify({ total: diagList && diagList.total, codes: diagList && diagList.codes, hit: diagList && diagList.hit }),
+    );
+
+    // G3：导出诊断包（写出真实 ZIP，文件头必须是 PK\x03\x04）
+    const zipPath = path.join(workDir, `diag-${Date.now()}.zip`);
+    const diagExport = await settings.eval(`(async () => window.nyx.exportDiagnostics({ path: ${JSON.stringify(zipPath)} }))()`);
+    const zipOk = (() => {
+      try {
+        const buf = fs.readFileSync(zipPath);
+        return { bytes: buf.length, magic: buf.slice(0, 4).toString('hex') };
+      } catch (err) {
+        return { bytes: 0, magic: '', error: err.message };
+      }
+    })();
+    check(
+      '诊断包可导出为合法 ZIP（C1）',
+      !!diagExport && diagExport.ok === true && diagExport.entries >= 3 && zipOk.magic === '504b0304' && zipOk.bytes > 0,
+      JSON.stringify({ diagExport, zipOk }),
+    );
+
+    // G4：导出内容必须脱敏（token=SECRET123 不能原样出现）
+    const zipText = (() => {
+      try {
+        return fs.readFileSync(zipPath).toString('utf8');
+      } catch {
+        return '';
+      }
+    })();
+    const listRaw = String((diagList && diagList.raw) || '');
+    check(
+      '诊断记录与诊断包已脱敏（C1）',
+      !listRaw.includes('SECRET123') && !zipText.includes('SECRET123'),
+      JSON.stringify({ inList: listRaw.includes('SECRET123'), inZip: zipText.includes('SECRET123') }),
+    );
+
     /* ---------- 运行时无脚本异常 ---------- */
     const shellErrors = shell.exceptions();
     check('主窗口无未捕获脚本异常', shellErrors.length === 0, shellErrors.slice(0, 3).join(' | '));

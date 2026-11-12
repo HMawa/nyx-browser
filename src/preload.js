@@ -169,6 +169,23 @@ contextBridge.exposeInMainWorld('nyx', {
   /** 只读探测 GPU 加速状态与 NPU 设备，供设置中心展示 */
   getHardwareStatus: () => ipcRenderer.invoke('nyx:hardware:status'),
 
+  /* ---------------- 诊断（清单 C1） ---------------- */
+
+  /** 诊断页顶部状态：版本、运行状态（模式/链路/代理/GPU）、记录条数 */
+  getDiagnosticsStatus: () => ipcRenderer.invoke('nyx:diagnostics:status'),
+
+  /** 最近 N 条诊断记录（新的在前，默认 20 条） */
+  listDiagnostics: (limit) => ipcRenderer.invoke('nyx:diagnostics:list', limit),
+
+  /** 清空内存缓冲与落盘日志（用户主动「清空记录」时用） */
+  clearDiagnostics: () => ipcRenderer.invoke('nyx:diagnostics:clear'),
+
+  /** 导出诊断包（ZIP）；给了 payload.path 就直接写该路径，否则弹保存对话框 */
+  exportDiagnostics: (payload) => ipcRenderer.invoke('nyx:diagnostics:export', payload || {}),
+
+  /** 在资源管理器中打开诊断日志目录 */
+  openDiagnosticsFolder: () => ipcRenderer.invoke('nyx:diagnostics:open-folder'),
+
   /* ---------------- 下载设置 ---------------- */
 
   /** 弹系统目录选择框，返回用户选定的下载保存目录 */
