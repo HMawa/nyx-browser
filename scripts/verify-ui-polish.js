@@ -201,6 +201,7 @@ async function main() {
 
   let shell = null;
   let settings = null;
+  let httpServer = null;
 
   try {
     /* ---------- 主窗口 ---------- */
@@ -1231,6 +1232,137 @@ async function main() {
       JSON.stringify({ inList: listRaw.includes('SECRET123'), inZip: zipText.includes('SECRET123') }),
     );
 
+    /* ---------- H. 清单 A4：加载失败页（错误码 / 中文原因 / 重试 / 诊断 / 复制） ---------- */
+
+    // G2 已经打开了一个必然连不上的地址，这里直接复用它检查失败页
+    const failPage = await shell.eval(`(() => {
+      const box = document.getElementById('page-error');
+      return {
+        visible: !!box && !box.hidden,
+        code: (document.getElementById('pe-code') || {}).textContent || '',
+        title: (document.getElementById('pe-title') || {}).textContent || '',
+        reason: (document.getElementById('pe-reason') || {}).textContent || '',
+        url: (document.getElementById('pe-url') || {}).textContent || '',
+        mode: (document.getElementById('pe-mode') || {}).textContent || '',
+        hints: Array.from(document.querySelectorAll('#pe-hints li')).map((n) => n.textContent),
+      };
+    })()`);
+    check(
+      '连接失败时主界面显示失败页（错误码 + 中文原因 + 可执行建议）（A4）',
+      !!failPage &&
+        failPage.visible === true &&
+        /^ERR_/.test(failPage.code) &&
+        /[一-龥]/.test(failPage.reason) &&
+        failPage.url.includes('65530') &&
+        failPage.mode === '普通模式' &&
+        failPage.hints.length > 0,
+      JSON.stringify(failPage),
+    );
+
+    // 失败信息必须随状态快照一起下发：视图已被隐藏，外壳只能靠快照知道"该显示失败页"
+    const failState = await shell.eval(`(async () => {
+      const s = await window.nyx.getState();
+      const active = (s.tabs || []).find((t) => t.active) || null;
+      return { tabCount: (s.tabs || []).length, active: active ? { title: active.title, url: active.url, loadError: active.loadError } : null };
+    })()`);
+    check(
+      '失败信息随状态快照下发（视图已隐藏，外壳据此渲染）（A4）',
+      !!failState &&
+        !!failState.active &&
+        !!failState.active.loadError &&
+        failState.active.loadError.code === failPage.code &&
+        // errorCode 是 Chromium 的负数错误码（-102 = ERR_CONNECTION_REFUSED），
+        // 必须一并下发：用户报障时凭它才能精确定位，光有字符串描述不够。
+        Number.isFinite(Number(failState.active.loadError.errorCode)) &&
+        Number(failState.active.loadError.errorCode) < 0,
+      JSON.stringify(failState && failState.active),
+    );
+
+    // 本地起一个可控服务器：先返回 404（"服务器有响应但状态码是错误"），
+    // 再切成 200 验证「重试」真能恢复页面——重试按钮不能只是装饰。
+    let httpMode = 404;
+    const http = require('node:http');
+    httpServer = http.createServer((req, res) => {
+      res.writeHead(httpMode, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(
+        httpMode === 200
+          ? '<!doctype html><meta charset="utf-8"><title>恢复了</title><h1 id="ok">恢复成功</h1>'
+          : '<!doctype html><meta charset="utf-8"><title>Not Found</title><h1>Not Found</h1>',
+      );
+    });
+    await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+    const httpPort = httpServer.address().port;
+
+    await shell.eval(`window.nyx.createTab(${JSON.stringify(`http://127.0.0.1:${httpPort}/missing`)} )`);
+    await sleep(1600);
+    const httpErr = await shell.eval(`(() => ({
+      visible: !document.getElementById('page-error').hidden,
+      code: (document.getElementById('pe-code') || {}).textContent || '',
+      title: (document.getElementById('pe-title') || {}).textContent || '',
+      reason: (document.getElementById('pe-reason') || {}).textContent || '',
+      hints: document.querySelectorAll('#pe-hints li').length,
+    }))()`);
+    check(
+      '服务器返回 404 时显示失败页并把状态码翻成中文原因（A4）',
+      !!httpErr && httpErr.visible === true && httpErr.code === 'HTTP 404' && httpErr.title === '页面不存在' && httpErr.hints > 0,
+      JSON.stringify(httpErr),
+    );
+
+    // 站点恢复后点「重试」：页面应正常加载、失败页收起
+    httpMode = 200;
+    await shell.eval("document.getElementById('pe-retry').click()");
+    await sleep(2000);
+    const afterRetry = await shell.eval(`(async () => {
+      const s = await window.nyx.getState();
+      const active = (s.tabs || []).find((t) => t.active);
+      return {
+        visible: !document.getElementById('page-error').hidden,
+        loadError: active ? active.loadError : 'no-active',
+        url: active ? active.url : '',
+      };
+    })()`);
+    check(
+      '失败页「重试」能恢复页面并自动收起失败页（A4）',
+      !!afterRetry && afterRetry.visible === false && afterRetry.loadError === null && String(afterRetry.url).includes(String(httpPort)),
+      JSON.stringify(afterRetry),
+    );
+
+    // 复制详情 / 打开诊断：两个按钮都必须有实际效果，不能点完毫无反应
+    httpMode = 404;
+    await shell.eval(`window.nyx.createTab(${JSON.stringify(`http://127.0.0.1:${httpPort}/missing-again`)} )`);
+    await sleep(1600);
+    await shell.eval("document.getElementById('pe-copy').click()");
+    await sleep(700);
+    const copyFoot = await shell.eval("document.getElementById('pe-foot').textContent || ''");
+    const clip = (() => {
+      try {
+        // 剪贴板是进程外状态，只能借系统命令回读
+        return require('node:child_process').execFileSync('powershell', ['-NoProfile', '-Command', 'Get-Clipboard'], {
+          encoding: 'utf8',
+        });
+      } catch {
+        return '';
+      }
+    })();
+    check(
+      '失败页「复制详情」把地址与状态码写进剪贴板（A4）',
+      String(copyFoot).includes('已复制') && clip.includes(String(httpPort)) && clip.includes('HTTP 404'),
+      JSON.stringify({ copyFoot, clipHead: clip.slice(0, 80) }),
+    );
+
+    await shell.eval("document.getElementById('pe-diagnostics').click()");
+    await sleep(1400);
+    const jumped = await settings.eval(`(() => {
+      const nav = document.querySelector('.nav-item[data-sec="diagnostics"]');
+      const panel = document.querySelector('.sec-panel[data-sec="diagnostics"]');
+      return { nav: !!nav && nav.classList.contains('active'), panel: !!panel && panel.classList.contains('active') };
+    })()`);
+    check(
+      '失败页「打开诊断」让设置窗口直接落到诊断分区（A4）',
+      !!jumped && jumped.nav === true && jumped.panel === true,
+      JSON.stringify(jumped),
+    );
+
     /* ---------- 运行时无脚本异常 ---------- */
     const shellErrors = shell.exceptions();
     check('主窗口无未捕获脚本异常', shellErrors.length === 0, shellErrors.slice(0, 3).join(' | '));
@@ -1244,6 +1376,11 @@ async function main() {
     try {
       if (shell) shell.close();
       if (settings) settings.close();
+    } catch {
+      /* 忽略 */
+    }
+    try {
+      if (httpServer) httpServer.close();
     } catch {
       /* 忽略 */
     }

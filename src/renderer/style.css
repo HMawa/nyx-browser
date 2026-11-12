@@ -1950,3 +1950,106 @@ body.private-mode .shell {
 .ck-item:hover .ck-ops {
   display: flex;
 }
+
+/* ---------------- 加载失败页（A4） ----------------
+   标签视图加载失败时主进程会把视图隐藏，这块浮层占住内容区。
+   它是外壳的一部分，所以顶栏/地址栏照常可用——用户随时能改地址或用后退。 */
+
+.page-error {
+  position: fixed;
+  top: var(--height-shell);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg-shell);
+  overflow: auto;
+}
+
+.page-error-card {
+  width: min(520px, 100%);
+  padding: 28px 30px 24px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-tab);
+  user-select: text;
+}
+
+.pe-code-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.pe-code {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--danger-soft);
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 12px;
+}
+
+.pe-mode {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.pe-title {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.pe-reason {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-main);
+}
+
+.pe-url {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+
+.pe-hints {
+  margin: 0 0 14px;
+  padding-left: 20px;
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--text-dim);
+}
+
+.pe-hints li {
+  list-style: disc;
+}
+
+.pe-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pe-actions .tb-btn {
+  height: 30px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+.pe-foot {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+

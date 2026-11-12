@@ -5,7 +5,7 @@
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，69 项）
- *  2. scripts/verify-ui-polish.js（界面体验，48 项）
+ *  2. scripts/verify-ui-polish.js（界面体验，54 项）
  *  3. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
  *
  * 行为约定：
@@ -47,7 +47,7 @@ const STEPS = [
   {
     label: '界面体验回归',
     script: 'verify-ui-polish.js',
-    items: '48 项',
+    items: '54 项',
     timeoutMs: 240000,
   },
   {

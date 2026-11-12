@@ -186,6 +186,24 @@ contextBridge.exposeInMainWorld('nyx', {
   /** 在资源管理器中打开诊断日志目录 */
   openDiagnosticsFolder: () => ipcRenderer.invoke('nyx:diagnostics:open-folder'),
 
+  /* ---------------- 主界面加载失败页（A4） ---------------- */
+
+  /** 重试当前标签上一次失败的地址 */
+  errorRetry: () => ipcRenderer.invoke('nyx:error:retry'),
+
+  /** 打开设置中心并直接落到「诊断」分区 */
+  errorOpenDiagnostics: () => ipcRenderer.invoke('nyx:error:diagnostics'),
+
+  /** 复制失败详情（错误码 / 原因 / 地址 / 模式链路）到剪贴板 */
+  errorCopyDetail: (text) => ipcRenderer.invoke('nyx:error:copy', { text }),
+
+  /** 订阅「切到某个设置分区」指令（主界面错误页跳诊断用），返回取消订阅函数 */
+  onSettingsSection: (handler) => {
+    const listener = (_event, section) => handler(section);
+    ipcRenderer.on('nyx:settings:section', listener);
+    return () => ipcRenderer.removeListener('nyx:settings:section', listener);
+  },
+
   /* ---------------- 下载设置 ---------------- */
 
   /** 弹系统目录选择框，返回用户选定的下载保存目录 */

@@ -2596,6 +2596,9 @@ function registerIpc() {
   // 设置中心：界面偏好与应用信息
   registerSettingsIpc();
 
+  // 主界面加载失败页（A4）：重试 / 跳诊断 / 复制详情
+  registerErrorPageIpc();
+
   registerUpdateIpc();
 
   // 扩展插件（设置中心「扩展插件」分区）
@@ -4158,12 +4161,23 @@ function syncProxyPort() {
 }
 
 /** 打开（或聚焦）设置窗口：独立窗口，不占用标签额度 */
-function openSettings() {
+function openSettings(section) {
+  // 要跳的分区（当前只有错误页的「打开诊断」用）：窗口已开时用事件切分区、不重新加载，
+  // 免得把用户已经填了一半的表单冲掉。
+  const wantSection = typeof section === 'string' && section ? section : '';
+
   const existing = runtime.proxyWindow;
   if (existing && !existing.isDestroyed()) {
     existing.show();
     existing.focus();
     notifyProxyState();
+    if (wantSection) {
+      try {
+        existing.webContents.send('nyx:settings:section', wantSection);
+      } catch {
+        /* 忽略：窗口正在关闭时发送会抛 */
+      }
+    }
     return { ok: true, reused: true };
   }
 
@@ -4194,7 +4208,16 @@ function openSettings() {
   });
 
   win.loadFile(path.join(__dirname, 'renderer', 'settings.html'));
-  win.webContents.once('did-finish-load', () => notifyProxyState());
+  win.webContents.once('did-finish-load', () => {
+    notifyProxyState();
+    if (wantSection) {
+      try {
+        win.webContents.send('nyx:settings:section', wantSection);
+      } catch {
+        /* 忽略 */
+      }
+    }
+  });
 
   win.on('closed', () => {
     runtime.proxyWindow = null;
@@ -4822,6 +4845,47 @@ function registerExtensionsIpc() {
     }
     const failure = await shell.openPath(runtime.extensions.storePath);
     return failure ? { ok: false, error: failure } : { ok: true };
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* 主界面加载失败页 IPC（A4）                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 失败页是外壳的一部分（`#page-error`，见 index.html），三个按钮都走主进程：
+ *   - 重试：回到用户原本想打开的地址（requestedUrl，不是失败后可能被改写的 tab.url）
+ *   - 打开诊断：设置窗口直接落到「诊断」分区，把最近错误摊给用户看
+ *   - 复制详情：把错误码 / 原因 / 地址 / 模式链路拼成一段能直接粘贴报障的文本
+ *
+ * 为什么失败页不做成标签内的本地页面：标签视图的 preload 在创建时就绑定了，
+ * 换不了 preload 就没有 IPC，按钮等于摆设；外壳本来就有完整的 window.nyx。
+ */
+function registerErrorPageIpc() {
+  ipcMain.handle('nyx:error:retry', () => {
+    if (!runtime.tabManager) return { ok: false, error: '标签管理器尚未就绪' };
+    const result = runtime.tabManager.retryLoadError();
+    // 重试也留痕：用户说"点了没反应"时，日志里要能看出试过几次、打的哪个地址
+    if (runtime.diagnostics) {
+      runtime.diagnostics.info('LOAD_RETRY', { url: result.url || '', ok: result.ok });
+    }
+    return result;
+  });
+
+  ipcMain.handle('nyx:error:diagnostics', () => {
+    if (runtime.diagnostics) runtime.diagnostics.info('OPEN_DIAGNOSTICS_FROM_ERROR_PAGE', {});
+    return openSettings('diagnostics');
+  });
+
+  ipcMain.handle('nyx:error:copy', (_event, payload) => {
+    const text = String((payload && payload.text) || '').trim();
+    if (!text) return { ok: false, error: '没有可复制的详情' };
+    try {
+      clipboard.writeText(text);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: `复制失败：${err.message}` };
+    }
   });
 }
 

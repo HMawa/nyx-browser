@@ -2161,5 +2161,13 @@
     if (toggle) toggle.checked = ui.showModeSwitch !== false;
   });
 
+  // 主界面加载失败页（A4）的「打开诊断」会要求设置窗口直接落到「诊断」分区
+  if (window.nyx.onSettingsSection) {
+    window.nyx.onSettingsSection((section) => {
+      if (!SEC_LABELS[section]) return;
+      activate(section);
+    });
+  }
+
   init();
 })();

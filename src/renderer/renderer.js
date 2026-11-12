@@ -18,6 +18,18 @@ const els = {
   proxy: document.getElementById('btn-proxy'),
   linkBadge: document.getElementById('link-badge'),
   modeGroup: document.getElementById('mode-group'),
+  // 加载失败页（A4）
+  pageError: document.getElementById('page-error'),
+  peCode: document.getElementById('pe-code'),
+  peTitle: document.getElementById('pe-title'),
+  peReason: document.getElementById('pe-reason'),
+  peUrl: document.getElementById('pe-url'),
+  peMode: document.getElementById('pe-mode'),
+  peHints: document.getElementById('pe-hints'),
+  peRetry: document.getElementById('pe-retry'),
+  peDiagnostics: document.getElementById('pe-diagnostics'),
+  peCopy: document.getElementById('pe-copy'),
+  peFoot: document.getElementById('pe-foot'),
 };
 
 /** 当前界面状态快照 */
@@ -25,6 +37,9 @@ let state = { mode: 'normal', activeId: null, maxTabs: 12, network: null, tabs: 
 
 /** 星标当前对应的地址（缓存键，避免每次状态推送都问一次主进程） */
 let starKey = '';
+
+/** 失败页当前展示的原始失败对象（「复制详情」要用原始字段，不是渲染后的文案） */
+let currentPageError = null;
 
 /** 渲染标签列表 */
 function renderTabs() {
@@ -124,7 +139,89 @@ function renderLinkBadge() {
 function render() {
   renderTabs();
   renderToolbar();
+  renderPageError();
   applyUiPrefs();
+}
+
+/* ---------------- 加载失败页（A4） ---------------- */
+
+/**
+ * 失败码 → 给用户的可执行建议。
+ *
+ * 只在"能说出下一步该怎么办"时才给建议：一句正确的废话（"请检查网络"）
+ * 比没有建议更浪费时间，所以没收录的错误码宁可不显示提示列表。
+ */
+const ERROR_HINTS = new Map([
+  ['ERR_NAME_NOT_RESOLVED', ['确认域名拼写正确（域名可能已经不存在）', '刚改过代理或 DNS 的话，等几秒再重试']],
+  ['ERR_NAME_RESOLUTION_FAILED', ['确认域名拼写正确（域名可能已经不存在）', '刚改过代理或 DNS 的话，等几秒再重试']],
+  ['ERR_CONNECTION_REFUSED', ['对方服务器没有在这个端口上提供服务（也可能已停机）', '如果是本机地址，确认对应程序已经启动']],
+  ['ERR_CONNECTION_TIMED_OUT', ['对方没有在超时时间内响应，可能是线路问题或站点不可用', '开了代理的话，先在「网络与代理」里看看节点是否可用']],
+  ['ERR_CONNECTION_RESET', ['连接被对方中断，可能是站点侧限制或链路抖动', '重试一次；持续如此建议换节点']],
+  ['ERR_CONNECTION_CLOSED', ['连接建立后被对方关闭', '重试一次，或稍后再来']],
+  ['ERR_INTERNET_DISCONNECTED', ['本机当前没有可用的网络连接', '确认网卡、Wi-Fi 或路由器状态']],
+  ['ERR_PROXY_CONNECTION_FAILED', ['代理没有连上：内核未运行或端口不可达', '到「网络与代理」启动内核，或换一个节点']],
+  ['ERR_TUNNEL_CONNECTION_FAILED', ['代理隧道建立失败，通常是节点拒绝了这次连接', '换一个节点，或在代理中心查看该节点的可用性']],
+  ['ERR_CERT_AUTHORITY_INVALID', ['证书签发者不被信任，常见于自签名站点或中间人设备', '公共网站上出现这条提示就不要继续了']],
+  ['ERR_CERT_COMMON_NAME_INVALID', ['证书和域名不匹配，可能是配置错误或有人冒用', '公共网站上出现这条提示就不要继续了']],
+  ['ERR_CERT_DATE_INVALID', ['证书已过期或本机时间不对', '先确认系统时间准确']],
+  ['ERR_SSL_PROTOCOL_ERROR', ['TLS 握手失败，对方可能不支持当前协议版本', '换用 https 站点或联系站点管理员']],
+  ['ERR_EMPTY_RESPONSE', ['服务器没有返回任何内容就断开了连接', '重试一次；持续如此多半是站点问题']],
+  ['ERR_BLOCKED_BY_CLIENT', ['这次请求被本机策略拦截了（可能来自扩展或防护规则）', '检查是否开启了拦截类设置']],
+  ['ERR_ADDRESS_UNREACHABLE', ['目标地址在当前网络下不可达', '确认网络环境，或换一条出口链路']],
+  ['ERR_ABORTED', ['加载被中断（通常是又发起了一次导航）', '重新点一次链接即可']],
+]);
+
+/** 一次失败在界面上要呈现的全部内容（纯函数，便于回归脚本直接喂数据） */
+function buildPageErrorView(err, mode) {
+  const info = err || {};
+  const hints = ERROR_HINTS.get(info.code) || [];
+  const tail = info.at ? new Date(info.at).toLocaleTimeString('zh-CN', { hour12: false }) : '';
+  return {
+    code: info.code || 'ERR_FAILED',
+    title: info.title || '这一页没能打开',
+    reason: info.reason || '没有拿到可读的失败原因',
+    url: info.url ? `地址：${info.url}` : '',
+    mode: info.mode === 'private' ? '全隐私模式' : mode === 'private' ? '全隐私模式' : '普通模式',
+    hints,
+    foot: tail ? `这次失败已记入诊断日志（${tail}）` : '这次失败已记入诊断日志',
+  };
+}
+
+/** 渲染加载失败页：没有失败态时整块隐藏 */
+function renderPageError() {
+  if (!els.pageError) return;
+  const active = (state.tabs || []).find((tab) => tab.active);
+  const err = active && active.loadError;
+
+  if (!err) {
+    if (!els.pageError.hidden) els.pageError.hidden = true;
+    currentPageError = null;
+    return;
+  }
+
+  currentPageError = err;
+  const view = buildPageErrorView(err, state.mode);
+
+  els.pageError.hidden = false;
+  els.peCode.textContent = view.code;
+  els.peTitle.textContent = view.title;
+  els.peReason.textContent = view.reason;
+  els.peUrl.textContent = view.url;
+  els.peUrl.hidden = !view.url;
+  els.peMode.textContent = view.mode;
+  els.peFoot.textContent = view.foot;
+
+  if (view.hints.length > 0) {
+    els.peHints.textContent = '';
+    for (const hint of view.hints) {
+      const li = document.createElement('li');
+      li.textContent = hint;
+      els.peHints.appendChild(li);
+    }
+    els.peHints.hidden = false;
+  } else {
+    els.peHints.hidden = true;
+  }
 }
 
 /**
@@ -168,6 +265,49 @@ els.newTab.addEventListener('click', () => window.nyx.createTab(''));
 els.back.addEventListener('click', () => window.nyx.goBack());
 els.forward.addEventListener('click', () => window.nyx.goForward());
 els.reload.addEventListener('click', () => window.nyx.reload());
+
+/* 失败页按钮：重试 / 打开诊断 / 复制详情（A4） */
+if (els.peRetry) {
+  els.peRetry.addEventListener('click', async () => {
+    els.peRetry.disabled = true;
+    els.peFoot.textContent = '正在重试…';
+    try {
+      const result = await window.nyx.errorRetry();
+      if (!result || !result.ok) {
+        // 重试本身失败也要说出来，不能让按钮点完看起来什么都没发生
+        els.peFoot.textContent = `重试没能发起：${(result && result.error) || '未知原因'}`;
+      }
+    } catch (err) {
+      els.peFoot.textContent = `重试没能发起：${err.message}`;
+    } finally {
+      els.peRetry.disabled = false;
+    }
+  });
+}
+
+if (els.peDiagnostics) {
+  els.peDiagnostics.addEventListener('click', () => {
+    window.nyx.errorOpenDiagnostics();
+  });
+}
+
+if (els.peCopy) {
+  els.peCopy.addEventListener('click', async () => {
+    const err = currentPageError;
+    if (!err) return;
+    const lines = [
+      `Nyx 加载失败：${err.title || ''}（${err.code || ''}）`,
+      `原因：${err.reason || ''}`,
+      `地址：${err.url || ''}`,
+      `模式：${err.mode === 'private' ? '全隐私模式' : '普通模式'}`,
+      `错误码：${err.errorCode || err.code || ''}`,
+      `时间：${err.at ? new Date(err.at).toLocaleString('zh-CN', { hour12: false }) : ''}`,
+      `版本：${state.appVersion || '未知'}`,
+    ];
+    const result = await window.nyx.errorCopyDetail(lines.join('\n'));
+    els.peFoot.textContent = result && result.ok ? '详情已复制到剪贴板' : `复制失败：${(result && result.error) || '未知原因'}`;
+  });
+}
 
 /* ---------------- 地址栏历史建议（v1.3.0 新增） ---------------- */
 

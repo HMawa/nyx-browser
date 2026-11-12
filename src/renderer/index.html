@@ -348,6 +348,30 @@
       <div class="tb-drawer-body tb-scroll" id="detail-body"></div>
     </div>
 
+    <!--
+      加载失败页（A4）。
+      标签视图加载失败时主进程会把它隐藏，内容区就由这块浮层接管；按钮走 window.nyx，
+      因此不需要往标签里塞一个本地错误页（标签的 preload 是创建时绑定的，换不了）。
+    -->
+    <div class="page-error" id="page-error" hidden>
+      <div class="page-error-card">
+        <div class="pe-code-row">
+          <span class="pe-code" id="pe-code">ERR_FAILED</span>
+          <span class="pe-mode" id="pe-mode"></span>
+        </div>
+        <h2 class="pe-title" id="pe-title">这一页没能打开</h2>
+        <p class="pe-reason" id="pe-reason"></p>
+        <p class="pe-url" id="pe-url"></p>
+        <ul class="pe-hints" id="pe-hints" hidden></ul>
+        <div class="pe-actions">
+          <button class="tb-btn tb-btn-primary" id="pe-retry" type="button">重试</button>
+          <button class="tb-btn" id="pe-diagnostics" type="button">打开诊断</button>
+          <button class="tb-btn" id="pe-copy" type="button">复制详情</button>
+        </div>
+        <p class="pe-foot" id="pe-foot"></p>
+      </div>
+    </div>
+
     <script src="renderer.js"></script>
     <script src="bookmark-bar.js"></script>
     <script src="toolbox-ui.js"></script>
