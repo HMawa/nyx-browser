@@ -304,6 +304,8 @@
       refreshUpdateStatus();
       // 更新源占用（v1.16.0）：体积随发版变化，每次进来重新统计
       loadFootprint();
+      // 安全基线（C2）：运行时版本每次进来的真相，必须实时比对而不是缓存
+      loadSecurityBaseline();
     }
 
     // 诊断（清单 C1）：状态与错误记录随时会变，每次进入都重新拉
@@ -2116,7 +2118,86 @@
      清理命令也由主进程返回，避免设置页把发版脚本路径写死。
   */
 
-  async function loadFootprint() {
+  // 安全基线（C2）：把「声明的运行时版本」与「机器上真正跑的版本」摆在一起
+let securityBaselineWired = false;
+
+function wireSecurityBaseline() {
+  if (securityBaselineWired) return;
+  securityBaselineWired = true;
+
+  for (const btn of document.querySelectorAll('[data-advisory]')) {
+    btn.addEventListener('click', async () => {
+      const key = btn.dataset.advisory;
+      if (typeof window.nyx.openSecurityAdvisory !== 'function') {
+        setStatus('当前内核不支持打开安全公告', true);
+        return;
+      }
+      const res = await window.nyx.openSecurityAdvisory({ key }).catch((err) => ({
+        ok: false,
+        error: err && err.message ? err.message : String(err),
+      }));
+      if (!res || res.ok === false) {
+        setStatus(`没能打开公告页：${(res && res.error) || '未知原因'}`, true);
+      } else {
+        setStatus('已在系统浏览器打开安全公告');
+      }
+    });
+  }
+}
+
+async function loadSecurityBaseline() {
+  wireSecurityBaseline();
+
+  const grid = byId('security-baseline-grid');
+  const badge = byId('security-baseline-badge');
+  const summary = byId('security-baseline-summary');
+  if (!grid) return;
+
+  if (typeof window.nyx.securityBaseline !== 'function') {
+    if (badge) badge.textContent = '不支持';
+    grid.textContent = '';
+    if (summary) summary.textContent = '当前内核不支持读取安全基线。';
+    return;
+  }
+
+  const res = await window.nyx.securityBaseline().catch((err) => ({
+    ok: false,
+    error: err && err.message ? err.message : String(err),
+  }));
+
+  if (!res || (res.ok === false && !Array.isArray(res.items))) {
+    if (badge) {
+      badge.textContent = '读取失败';
+      badge.className = 'badge bad';
+    }
+    grid.textContent = '';
+    if (summary) {
+      summary.textContent = `读取安全基线失败：${(res && res.error) || '未知原因'}`;
+      summary.className = 'hint is-warn';
+    }
+    return;
+  }
+
+  const items = Array.isArray(res.items) ? res.items : [];
+  renderKvGrid(
+    grid,
+    items.map((item) => [
+      item.label,
+      item.match ? `${item.actual}（与声明一致）` : `${item.actual || '未知'}（声明 ${item.declared || '—'}）`,
+    ]),
+  );
+
+  if (badge) {
+    badge.textContent = res.ok ? '一致' : '有差异';
+    badge.className = res.ok ? 'badge ok' : 'badge bad';
+  }
+  if (summary) {
+    summary.textContent = res.summary || (res.ok ? '运行时与安全基线一致' : '运行时与安全基线不一致');
+    summary.className = res.ok ? 'hint' : 'hint is-warn';
+  }
+}
+
+async function loadFootprint() {
     const grid = byId('update-footprint-grid');
     const badge = byId('footprint-badge');
     const paths = byId('footprint-paths');

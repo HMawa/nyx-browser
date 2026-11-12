@@ -102,6 +102,12 @@ contextBridge.exposeInMainWorld('nyx', {
   /** 立即重启应用（用于让显卡策略生效）；不返回值也会退出进程 */
   restartApp: () => ipcRenderer.invoke('nyx:app:restart'),
 
+  /** 安全基线（C2）：声明的 Electron/Chromium/Node 版本 vs 机器上跑的版本 */
+  securityBaseline: () => ipcRenderer.invoke('nyx:security:baseline'),
+
+  /** 打开安全公告页（只接受 electron / chromium / node 三个 key，URL 由主进程决定） */
+  openSecurityAdvisory: (payload) => ipcRenderer.invoke('nyx:security:advisory', payload || {}),
+
   /** 权限决策轨迹（默认最近 50 条） */
   listPermissionDecisions: (limit) => ipcRenderer.invoke('nyx:permissions:list', limit),
 

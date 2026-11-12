@@ -845,6 +845,37 @@
               </div>
             </section>
 
+            <!-- 安全基线（C2）：声明版本 vs 机器上跑的版本，不一致就显红 -->
+            <section class="info-card">
+              <div class="info-head">
+                <h3>安全基线</h3>
+                <span class="badge" id="security-baseline-badge">—</span>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  这里比对的是「本项目声明依赖的运行时版本」与「这台机器上实际跑的版本」。
+                  两者不一致时，按文档去核对安全公告就会核错对象，所以这里必须一眼看出差异。
+                </p>
+                <div class="kv-grid" id="security-baseline-grid"></div>
+                <p class="hint" id="security-baseline-summary" role="status" aria-live="polite">
+                  读取中…
+                </p>
+                <div class="sec-actions">
+                  <button type="button" class="btn btn-mini" data-advisory="electron">
+                    Electron 安全公告
+                  </button>
+                  <button type="button" class="btn btn-mini" data-advisory="chromium">
+                    Chromium 发布记录
+                  </button>
+                  <button type="button" class="btn btn-mini" data-advisory="node">Node 安全发布</button>
+                </div>
+                <p class="hint">
+                  对照方法与升级计划见仓库内 <code>docs/Nyx-安全基线-C2-CVE对照.md</code>：
+                  本页只如实报告版本，不在此处下「有没有漏洞」的结论。
+                </p>
+              </div>
+            </section>
+
             <section class="info-card">
               <div class="info-head">
                 <h3>关于 Nyx</h3>

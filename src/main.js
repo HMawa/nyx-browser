@@ -80,6 +80,9 @@ const {
   summarizeGpuInfo,
 } = require('./core/gpu-policy');
 
+// 安全基线（C2）：声明版本 vs 运行时版本，设置页可见 + 回归可卡
+const { ADVISORY_SOURCES, securityBaselinePayload } = require('./core/security-baseline');
+
 /**
  * 验收 / 调试用的隔离用户数据目录（环境变量 NYX_USER_DATA）。
  *
@@ -4960,6 +4963,31 @@ function registerSettingsIpc() {
       return { ok: true };
     } catch (err) {
       diagnostics.error('APP_RESTART_FAILED', { error: err && err.message });
+      return { ok: false, error: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  // 安全基线（C2）：只报「声明的版本 vs 机器上跑的版本」，不编造 CVE 结论
+  ipcMain.handle('nyx:security:baseline', () =>
+    securityBaselinePayload({
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      appVersion: app.getVersion(),
+    }),
+  );
+
+  // 只允许打开白名单里的公告页：不允许渲染进程传任意 URL 给 shell.openExternal
+  ipcMain.handle('nyx:security:advisory', (_event, payload) => {
+    const key = payload && typeof payload.key === 'string' ? payload.key : '';
+    const source = ADVISORY_SOURCES.find((item) => item.key === key);
+    if (!source) return { ok: false, error: `未知的公告入口：${key || '（空）'}` };
+    try {
+      shell.openExternal(source.url);
+      diagnostics.info('SECURITY_ADVISORY_OPENED', { key: source.key });
+      return { ok: true, url: source.url };
+    } catch (err) {
+      diagnostics.error('SECURITY_ADVISORY_FAILED', { key: source.key, error: err && err.message });
       return { ok: false, error: err && err.message ? err.message : String(err) };
     }
   });

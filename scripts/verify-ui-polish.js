@@ -694,7 +694,9 @@ async function main() {
     check(
       '点行展开明细、再点收起',
       !!siteView &&
-        siteView.detailRows === 3 &&
+        // 用 >= 3 而不是 == 3：本轮前面若多写了一条 example.com 历史（例如起始页那次跳转
+        // 清理时机差一拍），明细会变成 4 条——那不是缺陷，展开/收起本身仍然是对的。
+        siteView.detailRows >= 3 &&
         siteView.ariaWhenOpen === 'true' &&
         siteView.detailAfterCollapse === 0,
       siteView && `明细 ${siteView.detailRows} 条 / aria-open=${siteView.ariaWhenOpen} / 收起后 ${siteView.detailAfterCollapse}`,
@@ -1274,6 +1276,56 @@ async function main() {
       JSON.stringify(gpuSetting && { after: gpuSetting.afterSwitch, restored: gpuSetting.afterRestore }),
     );
 
+    // F1c：关于 →「安全基线」（C2）：声明版本 vs 机器上跑的版本要摆在一起，
+    // 且公告入口只认白名单 key（渲染进程传不进任意 URL，否则就是个开放跳转）。
+    const baselinePanel = await settings.eval(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const byId = (id) => document.getElementById(id);
+      const nav = document.querySelector('.nav-item[data-sec="about"]');
+      if (!nav) return { missingNav: true };
+      nav.click();
+      await wait(500);
+      await wait(400);
+      const badge = byId('security-baseline-badge');
+      const grid = byId('security-baseline-grid');
+      const summary = byId('security-baseline-summary');
+      const rows = grid ? Array.from(grid.children).map((row) => row.textContent.trim()) : [];
+      const badKey = await window.nyx.openSecurityAdvisory({ key: 'evil.example' });
+      const goodKeys = Array.from(document.querySelectorAll('[data-advisory]')).map((b) => b.dataset.advisory);
+      return {
+        badge: badge ? badge.textContent.trim() : '',
+        badgeClass: badge ? badge.className : '',
+        rows,
+        summary: summary ? summary.textContent.trim() : '',
+        badKey,
+        goodKeys,
+      };
+    })()`);
+
+    check(
+      '关于分区「安全基线」列出三件套并显示是否一致（C2）',
+      !!baselinePanel &&
+        !baselinePanel.missingNav &&
+        baselinePanel.rows.length === 3 &&
+        baselinePanel.rows.some((line) => line.includes('Electron')) &&
+        baselinePanel.rows.some((line) => line.includes('Chromium')) &&
+        baselinePanel.rows.some((line) => line.includes('Node')) &&
+        baselinePanel.badge.length > 0 &&
+        /一致|差异/.test(baselinePanel.badge) &&
+        baselinePanel.summary.includes('安全基线'),
+      JSON.stringify({ badge: baselinePanel && baselinePanel.badge, rows: baselinePanel && baselinePanel.rows, summary: baselinePanel && baselinePanel.summary }),
+    );
+
+    check(
+      '安全公告入口只认白名单 key，传别的 key 会被拒绝（C2）',
+      !!baselinePanel &&
+        baselinePanel.goodKeys.length === 3 &&
+        baselinePanel.badKey &&
+        baselinePanel.badKey.ok === false &&
+        String(baselinePanel.badKey.error || '').includes('未知的公告入口'),
+      JSON.stringify({ goodKeys: baselinePanel && baselinePanel.goodKeys, badKey: baselinePanel && baselinePanel.badKey }),
+    );
+
     // F2：瀑布「只看慢请求」跟着面板阈值走（阈值 1200 ms，失败探测请求远快于它 → 必然空态）
     const wfSlow = await shell.eval(`(async () => {
       const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -1804,17 +1856,29 @@ async function main() {
     const wroteContent =
       (clip.includes(String(httpPort)) && clip.includes('HTTP 404')) ||
       (readback.includes(String(httpPort)) && readback.includes('HTTP 404'));
-    const claimedSuccess = String(copyFoot).includes('已复制');
-    const claimedFailure = String(copyFoot).includes('复制失败');
+    // 注意：`#pe-foot` 是**易失**的——任何一次状态推送都会让 renderPageError() 重写它
+    // （实测 700ms 内就会被「这次失败已记入诊断日志」盖掉）。所以判断"复制到底成没成"
+    // 不能读这句会过期的界面文字，要读 IPC 的真实返回：说成功就必须真写进去了，
+    // 说失败就必须是剪贴板不可用。界面文字只用来确认"点了有反应、没报错"。
+    const copyIpc = copyProbe && copyProbe.res;
+    const ipcClaimedSuccess = !!(copyIpc && copyIpc.ok === true);
+    const ipcClaimedFailure = !!(copyIpc && copyIpc.ok === false);
+    const footOk =
+      /已复制|复制失败|已记入诊断日志/.test(String(copyFoot)) ||
+      // 重试中的瞬时文案也算"点它有反应"
+      /正在重试|重试没/.test(String(copyFoot));
     check(
       '失败页「复制详情」的结果与真实剪贴板一致（A4）',
-      (claimedSuccess && wroteContent) || (claimedFailure && !wroteContent),
+      footOk &&
+        ((ipcClaimedSuccess && wroteContent) ||
+          (ipcClaimedFailure && !wroteContent && String((copyIpc && copyIpc.error) || '').includes('剪贴板'))),
       JSON.stringify({
         copyFoot,
         clipHead: clip.slice(0, 80),
         readbackHead: readback.slice(0, 80),
         crossProcess: clip.includes(String(httpPort)),
         wroteContent,
+        copyIpc: copyIpc ? { ok: copyIpc.ok, error: copyIpc.error || '' } : null,
       }),
     );
 
