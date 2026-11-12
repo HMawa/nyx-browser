@@ -354,19 +354,35 @@
       因此不需要往标签里塞一个本地错误页（标签的 preload 是创建时绑定的，换不了）。
     -->
     <div class="page-error" id="page-error" hidden>
-      <div class="page-error-card">
-        <div class="pe-code-row">
+      <div
+        class="page-error-card"
+        role="alert"
+        aria-labelledby="pe-title"
+        aria-describedby="pe-reason"
+      >
+        <div class="pe-state">
+          <span class="pe-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 9.5v4.2" />
+              <path d="M12 17.1v.4" />
+              <path d="M10.7 3.8 2.6 17.9A1.6 1.6 0 0 0 4 20.3h16a1.6 1.6 0 0 0 1.4-2.4L13.3 3.8a1.6 1.6 0 0 0-2.6 0Z" />
+            </svg>
+          </span>
           <span class="pe-code" id="pe-code">ERR_FAILED</span>
           <span class="pe-mode" id="pe-mode"></span>
         </div>
         <h2 class="pe-title" id="pe-title">这一页没能打开</h2>
         <p class="pe-reason" id="pe-reason"></p>
         <p class="pe-url" id="pe-url"></p>
-        <ul class="pe-hints" id="pe-hints" hidden></ul>
+        <div class="pe-hint-block" id="pe-hint-block" hidden>
+          <p class="pe-hint-label">可以试试</p>
+          <ul class="pe-hints" id="pe-hints"></ul>
+        </div>
         <div class="pe-actions">
           <button class="tb-btn tb-btn-primary" id="pe-retry" type="button">重试</button>
           <button class="tb-btn" id="pe-diagnostics" type="button">打开诊断</button>
-          <button class="tb-btn" id="pe-copy" type="button">复制详情</button>
+          <button class="pe-link" id="pe-copy" type="button">复制详情</button>
         </div>
         <p class="pe-foot" id="pe-foot"></p>
       </div>

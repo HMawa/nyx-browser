@@ -1953,7 +1953,11 @@ body.private-mode .shell {
 
 /* ---------------- 加载失败页（A4） ----------------
    标签视图加载失败时主进程会把视图隐藏，这块浮层占住内容区。
-   它是外壳的一部分，所以顶栏/地址栏照常可用——用户随时能改地址或用后退。 */
+   它是外壳的一部分，所以顶栏/地址栏照常可用——用户随时能改地址或用后退。
+
+   设计取向：用户此刻正在"被拒绝"的状态里，画面必须安静、克制、只给一条主路径。
+   所以没有插画、没有渐变大字，只有一枚状态图标 + 一条明确的主按钮；
+   层次靠字号与间距拉开，颜色只用在错误码、图标和主按钮三处。 */
 
 .page-error {
   position: fixed;
@@ -1963,93 +1967,218 @@ body.private-mode .shell {
   bottom: 0;
   z-index: 5;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 24px;
-  background: var(--bg-shell);
+  /* 顶部留白随窗口高度增长：小窗口不至于把内容挤到底部，大窗口又不会空太多 */
+  padding: clamp(28px, 9vh, 96px) 24px 32px;
+  background:
+    radial-gradient(110% 62% at 50% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 62%),
+    var(--bg-shell);
   overflow: auto;
 }
 
 .page-error-card {
-  width: min(520px, 100%);
-  padding: 28px 30px 24px;
+  width: min(560px, 100%);
+  padding: 30px 32px 26px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   background: var(--bg-tab);
+  /* 卡片浮在壳底色之上：靠一层向下扩散的阴影，而不是更亮的背景色 */
+  box-shadow: 0 20px 52px -28px rgba(0, 0, 0, 0.78);
   user-select: text;
+  animation: pe-enter 200ms ease-out both;
 }
 
-.pe-code-row {
+@keyframes pe-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 状态行：图标 + 错误码 + 模式，一行读完"错在哪" */
+.pe-state {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 14px;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.pe-icon {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger-soft);
+}
+
+.pe-icon svg {
+  width: 19px;
+  height: 19px;
 }
 
 .pe-code {
-  padding: 2px 8px;
+  padding: 3px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-input);
+  border-radius: var(--r-sm);
+  background: var(--bg-code);
   color: var(--danger-soft);
-  font-family: Consolas, "Cascadia Mono", monospace;
-  font-size: 12px;
+  font: 600 12px/1.2 Consolas, "Cascadia Mono", monospace;
+  letter-spacing: 0.02em;
 }
 
 .pe-mode {
-  color: var(--text-dim);
+  color: var(--text-faint);
   font-size: 12px;
 }
 
 .pe-title {
-  margin: 0 0 8px;
-  font-size: 17px;
+  margin: 0 0 10px;
+  font-size: 20px;
   font-weight: 600;
+  line-height: 1.4;
   color: var(--text-main);
 }
 
 .pe-reason {
-  margin: 0 0 10px;
-  font-size: 13px;
-  line-height: 1.7;
+  margin: 0 0 14px;
+  font-size: 14px;
+  line-height: 1.75;
   color: var(--text-main);
 }
 
+/* 地址用等宽字体包在独立底色里：方便一眼确认"打的是哪个地址"并整段选中 */
 .pe-url {
-  margin: 0 0 12px;
-  font-size: 12px;
-  line-height: 1.6;
+  margin: 0 0 16px;
+  padding: 9px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  background: var(--bg-input);
   color: var(--text-dim);
+  font: 12px/1.6 Consolas, "Cascadia Mono", monospace;
   word-break: break-all;
 }
 
-.pe-hints {
-  margin: 0 0 14px;
-  padding-left: 20px;
+.pe-hint-block {
+  margin: 0 0 20px;
+}
+
+.pe-hint-label {
+  margin: 0 0 8px;
+  color: var(--text-faint);
   font-size: 12px;
-  line-height: 1.8;
-  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+
+.pe-hints {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 7px;
 }
 
 .pe-hints li {
-  list-style: disc;
+  position: relative;
+  padding-left: 15px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.65;
 }
 
+.pe-hints li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 9px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+/* 动作区：一个主按钮 + 一个次按钮 + 一个文字按钮，主次一眼可分 */
 .pe-actions {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
 .pe-actions .tb-btn {
-  height: 30px;
-  padding: 0 14px;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: var(--r-md);
   font-size: 13px;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.pe-actions .tb-btn-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.pe-actions .tb-btn-primary:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+}
+
+.pe-actions .tb-btn:disabled {
+  opacity: 0.55;
+}
+
+.pe-link {
+  height: 34px;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--text-dim);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, var(--text-dim) 45%, transparent);
+  cursor: pointer;
+  transition: color 0.16s ease;
+}
+
+.pe-link:hover {
+  color: var(--text-main);
+}
+
+/* 键盘可达：焦点环必须看得见，不能靠浏览器默认的那一圈细虚线 */
+.page-error-card :is(.tb-btn, .pe-link):focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+  box-shadow: var(--ring);
 }
 
 .pe-foot {
-  margin: 14px 0 0;
+  margin: 16px 0 0;
+  color: var(--text-faint);
   font-size: 12px;
-  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+/* 尊重系统的"减少动态效果"：进入动画与按钮过渡都不做 */
+@media (prefers-reduced-motion: reduce) {
+  .page-error-card {
+    animation: none;
+  }
+
+  .pe-actions .tb-btn,
+  .pe-link {
+    transition: none;
+  }
 }
 

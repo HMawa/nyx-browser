@@ -25,6 +25,7 @@ const els = {
   peReason: document.getElementById('pe-reason'),
   peUrl: document.getElementById('pe-url'),
   peMode: document.getElementById('pe-mode'),
+  peHintBlock: document.getElementById('pe-hint-block'),
   peHints: document.getElementById('pe-hints'),
   peRetry: document.getElementById('pe-retry'),
   peDiagnostics: document.getElementById('pe-diagnostics'),
@@ -171,10 +172,26 @@ const ERROR_HINTS = new Map([
   ['ERR_ABORTED', ['加载被中断（通常是又发起了一次导航）', '重新点一次链接即可']],
 ]);
 
+/** HTTP 状态码 → 可执行建议（网络层错误码之外的另一半：服务器是通的，只是拒绝了这次请求） */
+function buildHttpHints(status) {
+  const code = Number(status) || 0;
+  if (code === 401) return ['这一页需要先登录', '登录该站点后再打开这个地址'];
+  if (code === 403) return ['当前账号没有访问这一页的权限', '换一个有权限的账号，或从站点首页进入'];
+  if (code === 404 || code === 410) {
+    return ['确认地址有没有写错（少打一个字符也会这样）', '从站点首页或站内搜索重新进入这一页'];
+  }
+  if (code === 407) return ['代理要求先认证', '到「网络与代理」里检查代理的账号密码'];
+  if (code === 429) return ['请求太频繁被站点限流了', '等一会儿再试，别连续刷新'];
+  if (code === 451) return ['该页面因法律原因不可用', '这不是本机问题，换一个来源'];
+  if (code >= 500) return ['站点自己出错了（不是本机或网络的问题）', '过一会儿再试，或稍后从站点首页进入'];
+  if (code >= 400) return ['站点不接受这次请求', '从上一页重新进入这个链接试试'];
+  return [];
+}
+
 /** 一次失败在界面上要呈现的全部内容（纯函数，便于回归脚本直接喂数据） */
 function buildPageErrorView(err, mode) {
   const info = err || {};
-  const hints = ERROR_HINTS.get(info.code) || [];
+  const hints = ERROR_HINTS.get(info.code) || (info.kind === 'http' ? buildHttpHints(info.status) : []);
   const tail = info.at ? new Date(info.at).toLocaleTimeString('zh-CN', { hour12: false }) : '';
   return {
     code: info.code || 'ERR_FAILED',
@@ -211,6 +228,8 @@ function renderPageError() {
   els.peMode.textContent = view.mode;
   els.peFoot.textContent = view.foot;
 
+  // 建议列表收在「可以试试」小标题下；没有建议时连标题一起收，不留空档
+  const hintBlock = els.peHintBlock || els.peHints;
   if (view.hints.length > 0) {
     els.peHints.textContent = '';
     for (const hint of view.hints) {
@@ -218,9 +237,10 @@ function renderPageError() {
       li.textContent = hint;
       els.peHints.appendChild(li);
     }
-    els.peHints.hidden = false;
+    if (hintBlock) hintBlock.hidden = false;
   } else {
-    els.peHints.hidden = true;
+    els.peHints.textContent = '';
+    if (hintBlock) hintBlock.hidden = true;
   }
 }
 

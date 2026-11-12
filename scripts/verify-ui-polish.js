@@ -1363,6 +1363,81 @@ async function main() {
       JSON.stringify(jumped),
     );
 
+    /* ---------- 失败页的视觉与无障碍（v1.17.0 界面重做） ----------
+       这一轮把失败页按「简洁、克制、只留一条主路径」重做：语义属性、主次按钮的
+       层次差别、键盘焦点环都改成靠样式实现，所以直接读计算样式来断言，
+       而不是截图比对（截图比对在 CI 上没有稳定基线）。 */
+    const a11y = await shell.eval(`(() => {
+      const card = document.querySelector('.page-error-card');
+      const retry = document.getElementById('pe-retry');
+      const diag = document.getElementById('pe-diagnostics');
+      const copy = document.getElementById('pe-copy');
+      const hintLabel = document.querySelector('.pe-hint-label');
+      const bg = (el) => getComputedStyle(el).backgroundColor;
+      return {
+        role: card && card.getAttribute('role'),
+        labelledby: card && card.getAttribute('aria-labelledby'),
+        describedby: card && card.getAttribute('aria-describedby'),
+        retryBg: bg(retry),
+        diagBg: bg(diag),
+        retryWeight: getComputedStyle(retry).fontWeight,
+        copyBg: bg(copy),
+        copyBorderWidth: getComputedStyle(copy).borderTopWidth,
+        hintLabel: hintLabel ? hintLabel.textContent.trim() : '',
+      };
+    })()`);
+    check(
+      '失败页带 role=alert 并以标题/原因做无障碍关联（v1.17.0）',
+      !!a11y &&
+        a11y.role === 'alert' &&
+        a11y.labelledby === 'pe-title' &&
+        a11y.describedby === 'pe-reason' &&
+        a11y.hintLabel === '可以试试',
+      JSON.stringify(a11y),
+    );
+
+    // 主按钮实心强调色、次按钮描边、复制是纯文字按钮：三者计算样式必须真的不同，
+    // 否则「看起来一样」的按钮会让用户在报错时不知道该点哪个
+    const distinct =
+      !!a11y &&
+      a11y.retryBg !== a11y.diagBg &&
+      a11y.retryBg !== 'rgba(0, 0, 0, 0)' &&
+      Number(a11y.retryWeight) >= 600 &&
+      a11y.copyBg === 'rgba(0, 0, 0, 0)' &&
+      a11y.copyBorderWidth === '0px';
+    check('失败页主按钮/次按钮/文字按钮三者视觉可分（v1.17.0）', distinct, JSON.stringify(a11y));
+
+    // 键盘焦点环：只能用真实按键（Input.dispatchKeyEvent）走到按钮上，
+    // 脚本 focus() 不会命中 :focus-visible，测出来的结果是假的
+    await shell.eval('(() => { const el = document.activeElement; if (el && el.blur) el.blur(); return true; })()');
+    let tabbedTo = '';
+    for (let i = 0; i < 30; i += 1) {
+      await shell.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9, key: 'Tab', code: 'Tab' });
+      await shell.send('Input.dispatchKeyEvent', { type: 'keyUp', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9, key: 'Tab', code: 'Tab' });
+      tabbedTo = await shell.eval("document.activeElement && document.activeElement.id ? document.activeElement.id : ''");
+      if (tabbedTo.startsWith('pe-')) break;
+    }
+    const focusRing = await shell.eval(`(() => {
+      const el = document.getElementById(${JSON.stringify('pe-retry')}) || document.activeElement;
+      const cs = getComputedStyle(el);
+      return {
+        active: document.activeElement ? document.activeElement.id : '',
+        focusVisible: el.matches(':focus-visible'),
+        outlineStyle: cs.outlineStyle,
+        outlineWidth: cs.outlineWidth,
+        outlineColor: cs.outlineColor,
+      };
+    })()`);
+    check(
+      '失败页按钮键盘可达且焦点环可见（v1.17.0）',
+      !!focusRing &&
+        String(focusRing.active).startsWith('pe-') &&
+        focusRing.focusVisible === true &&
+        focusRing.outlineStyle === 'solid' &&
+        parseFloat(focusRing.outlineWidth) >= 2,
+      JSON.stringify({ tabbedTo, ...focusRing }),
+    );
+
     /* ---------- 运行时无脚本异常 ---------- */
     const shellErrors = shell.exceptions();
     check('主窗口无未捕获脚本异常', shellErrors.length === 0, shellErrors.slice(0, 3).join(' | '));
