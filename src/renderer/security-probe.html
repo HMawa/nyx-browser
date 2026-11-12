@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      注入演示用的空白页（清单 C3）。
+      它的唯一作用：给 preload.js 一个同构的运行环境，让主进程能在里面真的去
+      拿 require / 动态求值 / 改写暴露面。所以它自己必须什么也不做——
+      演示脚本由主进程 executeJavaScript 注入，页面里不留任何业务代码。
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline';"
+    />
+    <title>Nyx 安全演示</title>
+  </head>
+  <body>
+    <p>这个页只用于一次性的安全自检，不会显示给用户。</p>
+  </body>
+</html>

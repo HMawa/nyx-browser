@@ -83,6 +83,17 @@ const {
 // 安全基线（C2）：声明版本 vs 运行时版本，设置页可见 + 回归可卡
 const { ADVISORY_SOURCES, securityBaselinePayload } = require('./core/security-baseline');
 
+// 外壳防护现值表（C3）：每个窗口角色的期望开关值 + CSP 审计 + preload 暴露面分类
+const {
+  WINDOW_ROLES: SECURITY_WINDOW_ROLES,
+  auditCsp,
+  auditPreferences,
+  buildProbeScript,
+  buildSwitchesPayload,
+  describeProbeResult,
+  parseCsp,
+} = require('./core/security-switches');
+
 /**
  * 验收 / 调试用的隔离用户数据目录（环境变量 NYX_USER_DATA）。
  *
@@ -269,6 +280,13 @@ const runtime = {
    * 只用于诊断页展示与"到底用的哪张卡"的如实汇报，取不到时保持 null。
    */
   gpuInfo: null,
+  /**
+   * 窗口安全开关登记表（清单 C3）：role → 实际传给 webPreferences 的原始对象。
+   *
+   * 现值表要回答的是「这台机器上现在到底开没开」，所以登记的是**创建窗口时真正
+   * 传进去的那份对象**，不是另写一份"理想配置"文档。
+   */
+  securityWindows: new Map(),
   panicking: false,
   quitting: false,
   /** 渲染层尚未就绪时暂存的提示，待页面加载完成后推送 */
@@ -1859,7 +1877,180 @@ async function saveScreenshot(base64, fullPage) {
   return { ok: true, path: picked.filePath };
 }
 
+/* ------------------------------------------------------------------ */
+/* 外壳防护现值表（清单 C3）                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 登记一个窗口角色实际使用的 webPreferences。
+ *
+ * 为什么登记"原始对象"而不是把结论写死：清单要的是"现状表"，而现状只能从
+ * 创建窗口的那一行读出来。这样以后有人把 sandbox 改成 false，表格和测试会当场红。
+ * @param {string} role WINDOW_ROLES 里的角色名
+ * @param {object} prefs 传给 BrowserWindow / WebContentsView 的 webPreferences
+ */
+function registerSecurityWindow(role, prefs) {
+  if (!role) return;
+  try {
+    runtime.securityWindows.set(role, prefs && typeof prefs === 'object' ? { ...prefs } : {});
+  } catch (err) {
+    console.warn('[Nyx] 窗口安全开关登记失败：', err.message);
+  }
+}
+
+/**
+ * 扫一遍本地渲染页的 CSP。
+ * 只读文件，不启动窗口：这样设置页打开就能看到"哪个页面缺 CSP"。
+ */
+function scanRendererCsp() {
+  const dir = path.join(__dirname, 'renderer');
+  let names = [];
+  try {
+    names = fs.readdirSync(dir).filter((name) => /\.html$/i.test(name));
+  } catch (err) {
+    console.warn('[Nyx] 渲染页目录读取失败：', err.message);
+    return [];
+  }
+
+  const rows = [];
+  for (const name of names.sort()) {
+    let html = '';
+    try {
+      html = fs.readFileSync(path.join(dir, name), 'utf8');
+    } catch (err) {
+      rows.push({
+        file: `src/renderer/${name}`,
+        ok: false,
+        found: false,
+        policy: '',
+        warnings: [`读取失败：${err.message}`],
+      });
+      continue;
+    }
+    const verdict = auditCsp(parseCsp(html));
+    rows.push({
+      file: `src/renderer/${name}`,
+      ok: verdict.ok,
+      found: verdict.found,
+      policy: verdict.policy,
+      warnings: verdict.warnings,
+    });
+  }
+  return rows;
+}
+
+/**
+ * 组装现值表：窗口开关实测值 + CSP 扫描 + preload 暴露面。
+ * @returns {Promise<object>}
+ */
+async function collectSecuritySwitches() {
+  const audits = [];
+  const notCreated = [];
+  for (const declared of SECURITY_WINDOW_ROLES) {
+    if (!runtime.securityWindows.has(declared.role)) {
+      // 本次启动还没创建过这个窗口（例如浮层只在用到时才建）——如实登记为"没验到"
+      notCreated.push({ role: declared.role, label: declared.label, why: declared.why });
+      continue;
+    }
+    audits.push(auditPreferences(declared.role, runtime.securityWindows.get(declared.role)));
+  }
+
+  let preloadKeys = [];
+  const win = runtime.mainWindow;
+  if (win && !win.isDestroyed()) {
+    try {
+      preloadKeys = await win.webContents.executeJavaScript(
+        'Object.keys((window.nyx || window.nyxDownloads || {}))',
+        true,
+      );
+    } catch (err) {
+      console.warn('[Nyx] 读取 preload 暴露面失败：', err.message);
+      preloadKeys = [];
+    }
+  }
+
+  const payload = buildSwitchesPayload({
+    audits,
+    cspFiles: scanRendererCsp(),
+    preloadKeys: Array.isArray(preloadKeys) ? preloadKeys : [],
+  });
+  payload.notCreated = notCreated;
+  return payload;
+}
+
+/**
+ * 注入演示（清单 C3）：在一个与外壳同构的隐藏窗口里真的去拿 require / eval / 改暴露面，
+ * 把结果原样报回来。
+ *
+ * 为什么用真窗口而不是静态分析：静态只能证明"代码里写着 sandbox:false"，
+ * 证明不了"渲染进程里真的没有 require"。清单要的是一次真实的拦截。
+ */
+async function runSecurityProbe() {
+  const prefs = {
+    preload: path.join(__dirname, 'preload.js'),
+    contextIsolation: true,
+    nodeIntegration: false,
+    // 与外壳保持一致：演示的结论必须适用于真实外壳，不是适用于"更严格的一次性配置"
+    sandbox: false,
+    spellcheck: false,
+  };
+  registerSecurityWindow('probe', prefs);
+
+  const win = new BrowserWindow({
+    width: 480,
+    height: 320,
+    show: false,
+    skipTaskbar: true,
+    webPreferences: prefs,
+  });
+
+  try {
+    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    win.webContents.on('will-navigate', (event) => {
+      event.preventDefault();
+    });
+    await win.loadFile(path.join(__dirname, 'renderer', 'security-probe.html'));
+    const raw = await win.webContents.executeJavaScript(buildProbeScript(), true);
+    const result = describeProbeResult(raw);
+    if (result.ok) {
+      runtime.diagnostics.info('SECURITY_PROBE_PASSED', result.summary);
+    } else {
+      runtime.diagnostics.error('SECURITY_PROBE_FAILED', result.summary, {
+        failed: (result.failed || []).map((item) => item.name),
+      });
+    }
+    // 注意：ok 表示"演示跑完了"，passed 表示"全都挡住了"——两者不能混用，
+    // 否则一个没挡住的注入会看起来像"调用成功"。
+    return {
+      ok: true,
+      passed: result.ok,
+      summary: result.summary,
+      checks: result.checks,
+      failed: result.failed,
+      bridgeKeys: result.bridgeKeys,
+      bridgeFrozen: result.bridgeFrozen,
+      bridgeWriteIgnored: result.bridgeWriteIgnored,
+      ranAt: Date.now(),
+    };
+  } catch (err) {
+    runtime.diagnostics.error('SECURITY_PROBE_ERROR', `注入演示没跑起来：${err.message}`);
+    return { ok: false, error: `注入演示没跑起来：${err.message}` };
+  } finally {
+    if (!win.isDestroyed()) win.destroy();
+  }
+}
+
 function createMainWindow() {
+  const shellPrefs = {
+    preload: path.join(__dirname, 'preload.js'),
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: false,
+    spellcheck: false,
+  };
+  // 登记到外壳防护现值表（清单 C3）
+  registerSecurityWindow('shell', shellPrefs);
+
   const win = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -1870,13 +2061,7 @@ function createMainWindow() {
     backgroundColor: THEME_BG[(runtime.uiStore && runtime.uiStore.get().theme) || 'ink'],
     title: 'Nyx',
     icon: fs.existsSync(TRAY_ICON) ? TRAY_ICON : undefined,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-      spellcheck: false,
-    },
+    webPreferences: shellPrefs,
   });
 
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
@@ -1968,6 +2153,8 @@ function createMainWindow() {
       });
     },
     onChange: pushState,
+    // 每个视图创建时把角色与真实 webPreferences 登记给外壳防护现值表（清单 C3）
+    onSecurityWindow: registerSecurityWindow,
     // 新标签纳入抓包范围，并继承工具箱的 UA / 视口 / 限速设定
     onTabCreated: (tab) => {
       if (runtime.toolbox) runtime.toolbox.syncAll();
@@ -3231,6 +3418,16 @@ function openBookmarkMenu(payload) {
 
   // 窗口高度按条目数估算（标题行 30px + 上下留白），封顶 380px，超出内部滚动
   const height = Math.min(380, Math.max(60, 18 + items.length * 30));
+  const menuPrefs = {
+    preload: path.join(__dirname, 'renderer', 'bm-menu-preload.js'),
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+    spellcheck: false,
+  };
+  // 登记到外壳防护现值表（清单 C3）
+  registerSecurityWindow('bm-menu', menuPrefs);
+
   const win = new BrowserWindow({
     width: 300,
     height,
@@ -3245,13 +3442,7 @@ function openBookmarkMenu(payload) {
     show: false,
     // 窗口出现前的底色跟随主题（CSS 管不到，避免浅色主题下闪深色）
     backgroundColor: THEME_BG[(runtime.uiStore && runtime.uiStore.get().theme) || 'ink'],
-    webPreferences: {
-      preload: path.join(__dirname, 'renderer', 'bm-menu-preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      spellcheck: false,
-    },
+    webPreferences: menuPrefs,
   });
 
   runtime.bookmarkMenuWindow = win;
@@ -3949,6 +4140,16 @@ function showAddressSuggest(geo, items, index) {
     return { ok: true, reused: true };
   }
 
+  const suggestPrefs = {
+    preload: path.join(__dirname, 'renderer', 'addr-suggest-preload.js'),
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+    spellcheck: false,
+  };
+  // 登记到外壳防护现值表（清单 C3）
+  registerSecurityWindow('addr-suggest', suggestPrefs);
+
   const win = new BrowserWindow({
     width,
     height,
@@ -3966,13 +4167,7 @@ function showAddressSuggest(geo, items, index) {
     // 阴影由 CSS 画在透明窗口上，避免系统阴影与圆角面板错位
     hasShadow: false,
     show: false,
-    webPreferences: {
-      preload: path.join(__dirname, 'renderer', 'addr-suggest-preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      spellcheck: false,
-    },
+    webPreferences: suggestPrefs,
   });
 
   runtime.addressSuggestWindow = win;
@@ -4397,6 +4592,16 @@ function openBookmarkFolderMenu(payload) {
     return { ok: true, reused: true };
   }
 
+  const folderPrefs = {
+    preload: path.join(__dirname, 'renderer', 'bm-folder-preload.js'),
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+    spellcheck: false,
+  };
+  // 登记到外壳防护现值表（清单 C3）
+  registerSecurityWindow('bm-folder', folderPrefs);
+
   const win = new BrowserWindow({
     width: BF_WIDTH,
     height,
@@ -4411,13 +4616,7 @@ function openBookmarkFolderMenu(payload) {
     alwaysOnTop: true,
     hasShadow: false,
     show: false,
-    webPreferences: {
-      preload: path.join(__dirname, 'renderer', 'bm-folder-preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      spellcheck: false,
-    },
+    webPreferences: folderPrefs,
   });
 
   runtime.bookmarkFolderWindow = win;
@@ -4643,6 +4842,15 @@ function openDownloads() {
     return { ok: true, reused: true };
   }
 
+  const downloadsPrefs = {
+    preload: path.join(__dirname, 'preload-downloads.js'),
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+  };
+  // 登记到外壳防护现值表（清单 C3）
+  registerSecurityWindow('downloads', downloadsPrefs);
+
   const win = new BrowserWindow({
     width: 720,
     height: 560,
@@ -4651,12 +4859,7 @@ function openDownloads() {
     title: 'Nyx 下载',
     backgroundColor: THEME_BG[(runtime.uiStore && runtime.uiStore.get().theme) || 'ink'],
     autoHideMenuBar: true,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload-downloads.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
+    webPreferences: downloadsPrefs,
   });
 
   runtime.downloadsWindow = win;
@@ -4991,6 +5194,19 @@ function registerSettingsIpc() {
       return { ok: false, error: err && err.message ? err.message : String(err) };
     }
   });
+
+  // 外壳防护现值表（C3）：把「期望值」和这台机器上窗口真正用的值摆在一起比对
+  ipcMain.handle('nyx:security:switches', async () => {
+    try {
+      return await collectSecuritySwitches();
+    } catch (err) {
+      diagnostics.error('SECURITY_SWITCHES_FAILED', `读取外壳防护现值失败：${err.message}`);
+      return { ok: false, error: `读取外壳防护现值失败：${err.message}` };
+    }
+  });
+
+  // 注入演示（C3）：真的在一个同构窗口里尝试 require / 动态求值 / 改写暴露面
+  ipcMain.handle('nyx:security:probe', () => runSecurityProbe());
 
   // 设置中心「启动与主页 / 下载 / 关于与更新」只读信息
   ipcMain.handle('nyx:app:info', () => {

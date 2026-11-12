@@ -1706,6 +1706,62 @@ async function main() {
       JSON.stringify({ inList: listRaw.includes('SECRET123'), inZip: zipText.includes('SECRET123') }),
     );
 
+    /* ---------- G5/G6. 清单 C3：外壳防护现值 + 注入演示 ---------- */
+
+    // G5：诊断分区要能看到每个窗口角色的三个开关、本地页 CSP、暴露面分类，并且一致
+    const swState = await settings.eval(`(async () => {
+      const nav = document.querySelector('.nav-item[data-sec="diagnostics"]');
+      if (nav) nav.click();
+      const refresh = document.getElementById('btn-security-switches-refresh');
+      if (refresh) refresh.click();
+      // 等卡片把数据填出来（角色块出现且徽标有字）
+      for (let i = 0; i < 40; i += 1) {
+        const badge = document.getElementById('security-switches-badge');
+        const roles = document.querySelectorAll('#security-switches-roles .sw-role');
+        if (roles.length >= 3 && badge && badge.textContent.trim()) break;
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      const roles = Array.from(document.querySelectorAll('#security-switches-roles .sw-role'));
+      const csp = Array.from(document.querySelectorAll('#security-switches-csp .sw-csp-item'));
+      return {
+        badge: ((document.getElementById('security-switches-badge') || {}).textContent || '').trim(),
+        roleCount: roles.length,
+        roleNames: roles.map((n) => ((n.querySelector('.sw-role-name') || {}).textContent || '').trim()),
+        roleBad: roles.filter((n) => n.classList.contains('is-bad')).length,
+        cspCount: csp.length,
+        cspBad: csp.filter((n) => n.classList.contains('is-bad')).length,
+        summary: ((document.getElementById('security-switches-summary') || {}).textContent || '').trim(),
+      };
+    })()`);
+    check(
+      '诊断分区能看到每个窗口角色的隔离/Node/沙箱现值，且都符合声明（C3）',
+      !!swState &&
+        swState.badge === '全部一致' &&
+        swState.roleCount >= 3 &&
+        swState.roleBad === 0 &&
+        swState.cspCount >= 5 &&
+        swState.cspBad === 0,
+      JSON.stringify(swState),
+    );
+
+    // G6：点「试一次注入」必须真的跑一遍，并把结果如实写出来（挡住 / 没挡住）
+    await settings.eval("(() => { const b = document.getElementById('btn-security-probe'); if (b) b.click(); })()");
+    let probeOut = null;
+    for (let i = 0; i < 40; i += 1) {
+      probeOut = await settings.eval(`(() => {
+        const out = document.getElementById('security-probe-out');
+        if (!out || out.hidden) return null;
+        return { text: out.textContent || '', ok: out.classList.contains('is-ok'), bad: out.classList.contains('is-bad') };
+      })()`);
+      if (probeOut && probeOut.text && /挡住|没有回传|失败/.test(probeOut.text)) break;
+      await sleep(250);
+    }
+    check(
+      '注入演示真的跑了一遍，并如实报告有没有被挡住（C3）',
+      !!probeOut && probeOut.ok === true && /全部被挡住/.test(probeOut.text) && /冻结/.test(probeOut.text),
+      JSON.stringify(probeOut && { ok: probeOut.ok, bad: probeOut.bad, text: String(probeOut.text).slice(0, 200) }),
+    );
+
     /* ---------- H. 清单 A4：加载失败页（错误码 / 中文原因 / 重试 / 诊断 / 复制） ---------- */
 
     // G2 已经打开了一个必然连不上的地址，这里直接复用它检查失败页

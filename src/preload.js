@@ -108,6 +108,12 @@ contextBridge.exposeInMainWorld('nyx', {
   /** 打开安全公告页（只接受 electron / chromium / node 三个 key，URL 由主进程决定） */
   openSecurityAdvisory: (payload) => ipcRenderer.invoke('nyx:security:advisory', payload || {}),
 
+  /** 外壳防护现值表（C3）：每个窗口角色的隔离/Node/沙箱实测值 + CSP 扫描 + 暴露面分类 */
+  securitySwitches: () => ipcRenderer.invoke('nyx:security:switches'),
+
+  /** 注入演示（C3）：在一次性同构窗口里真去拿 require / 动态求值 / 改写暴露面 */
+  securityProbe: () => ipcRenderer.invoke('nyx:security:probe'),
+
   /** 权限决策轨迹（默认最近 50 条） */
   listPermissionDecisions: (limit) => ipcRenderer.invoke('nyx:permissions:list', limit),
 

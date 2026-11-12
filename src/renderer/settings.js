@@ -311,6 +311,8 @@
     // 诊断（清单 C1）：状态与错误记录随时会变，每次进入都重新拉
     if (section === 'diagnostics') {
       loadDiagnostics();
+      // 外壳防护现值（清单 C3）：跟着诊断一起刷新——它是"现状"，不能缓存
+      loadSecuritySwitches();
     }
   }
 
@@ -484,12 +486,229 @@
     if (emptyEl) emptyEl.hidden = items.length > 0;
   }
 
+  /* ------------------------------------------------------------------ */
+  /* 外壳防护现值（清单 C3）                                              */
+  /* ------------------------------------------------------------------ */
+
+  let securitySwitchesWired = false;
+
+  function wireSecuritySwitches() {
+    if (securitySwitchesWired) return;
+    securitySwitchesWired = true;
+
+    const refresh = byId('btn-security-switches-refresh');
+    if (refresh) refresh.addEventListener('click', () => loadSecuritySwitches());
+
+    const probeBtn = byId('btn-security-probe');
+    if (probeBtn) probeBtn.addEventListener('click', () => runSecurityProbe());
+  }
+
+  /** 一个窗口角色一行区块：三项开关 + 为什么这么设 */
+  function buildSecurityRoleBlock(role) {
+    const box = document.createElement('div');
+    box.className = `sw-role${role.ok ? '' : ' is-bad'}`;
+
+    const head = document.createElement('div');
+    head.className = 'sw-role-head';
+
+    const name = document.createElement('span');
+    name.className = 'sw-role-name';
+    name.textContent = role.label || role.role;
+    head.appendChild(name);
+
+    if (role.preload) {
+      const pre = document.createElement('span');
+      pre.className = 'sw-role-preload';
+      pre.textContent = role.preload;
+      head.appendChild(pre);
+    }
+
+    const tag = document.createElement('span');
+    tag.className = 'sw-role-tag';
+    tag.textContent = role.ok ? '与声明一致' : role.note || '与声明不一致';
+    head.appendChild(tag);
+    box.appendChild(head);
+
+    const addLine = (keyText, valueText, bad) => {
+      const line = document.createElement('div');
+      line.className = `sw-row${bad ? ' is-bad' : ''}`;
+      const key = document.createElement('span');
+      key.className = 'sw-row-key';
+      key.textContent = keyText;
+      const value = document.createElement('span');
+      value.className = 'sw-row-value';
+      value.textContent = valueText;
+      line.appendChild(key);
+      line.appendChild(value);
+      box.appendChild(line);
+    };
+
+    for (const row of role.rows || []) {
+      const state = row.actual ? '开' : '关';
+      if (row.match) {
+        // 一致时刻意说明"是不是靠默认值成立"：靠默认值不算错，但值得提醒
+        addLine(row.label, row.declared ? state : `${state}（没显式写，走默认值）`, false);
+      } else {
+        addLine(row.label, `${state} —— ${row.note}`, true);
+      }
+    }
+
+    if (role.why) addLine('为什么这样', role.why, false);
+    return box;
+  }
+
+  /** 一个本地页面的 CSP 一行 */
+  function buildCspBlock(item) {
+    const row = document.createElement('div');
+    row.className = `diag-item sw-csp-item${item.ok ? '' : ' is-bad'}`;
+
+    const file = document.createElement('span');
+    file.className = 'diag-time';
+    file.textContent = item.file;
+    file.title = item.file;
+
+    const level = document.createElement('span');
+    level.className = 'diag-level';
+    level.textContent = item.ok ? '可以' : item.found ? '偏宽' : '缺失';
+
+    const body = document.createElement('span');
+    body.className = 'diag-body';
+    body.textContent = item.ok
+      ? '来源限制正常'
+      : (item.warnings || []).join('；') || '需要检查';
+
+    row.appendChild(file);
+    row.appendChild(level);
+    row.appendChild(body);
+    return row;
+  }
+
+  async function loadSecuritySwitches() {
+    wireSecuritySwitches();
+
+    const badgeEl = byId('security-switches-badge');
+    const summaryEl = byId('security-switches-summary');
+    const rolesEl = byId('security-switches-roles');
+    const cspEl = byId('security-switches-csp');
+
+    let data = null;
+    try {
+      data = await window.nyx.securitySwitches();
+    } catch (err) {
+      if (badgeEl) {
+        badgeEl.textContent = '读取失败';
+        badgeEl.classList.add('is-bad');
+      }
+      if (summaryEl) renderKvGrid(summaryEl, [['错误', err.message]]);
+      return;
+    }
+
+    if (!data || data.error) {
+      if (badgeEl) {
+        badgeEl.textContent = '读取失败';
+        badgeEl.classList.add('is-bad');
+      }
+      if (summaryEl) renderKvGrid(summaryEl, [['错误', (data && data.error) || '未知原因']]);
+      return;
+    }
+
+    const summary = data.summary || {};
+    if (badgeEl) {
+      badgeEl.textContent = data.ok ? '全部一致' : '有差异';
+      badgeEl.classList.toggle('is-bad', !data.ok);
+    }
+
+    if (summaryEl) {
+      const notCreated = (data.notCreated || []).length;
+      renderKvGrid(summaryEl, [
+        ['已核对窗口', `${summary.windowCount || 0} 个${notCreated ? `（另有 ${notCreated} 个本次启动未创建，没验到）` : ''}`],
+        ['开关项', `${summary.rowCount || 0} 项，其中 ${summary.badCount || 0} 项与声明不一致`],
+        ['本地页面 CSP', `${summary.cspFiles || 0} 个，其中 ${summary.cspBadCount || 0} 个需要处理`],
+        [
+          'preload 暴露面',
+          summary.preloadKeys
+            ? `${summary.preloadKeys} 个方法，其中 ${summary.highRiskKeys || 0} 个能写文件 / 开目录 / 重启`
+            : '没读到（窗口未就绪）',
+        ],
+      ]);
+    }
+
+    if (rolesEl) {
+      rolesEl.textContent = '';
+      const roles = data.roles || [];
+      if (!roles.length) {
+        rolesEl.appendChild(hintLine('这一轮没有核对到任何窗口。'));
+      } else {
+        for (const role of roles) rolesEl.appendChild(buildSecurityRoleBlock(role));
+      }
+      for (const item of data.notCreated || []) {
+        rolesEl.appendChild(hintLine(`${item.label}：本次启动还没创建过，没验到（不是通过）。`));
+      }
+    }
+
+    if (cspEl) {
+      cspEl.textContent = '';
+      const rows = data.csp || [];
+      if (!rows.length) cspEl.appendChild(hintLine('没有扫到本地页面。'));
+      else for (const item of rows) cspEl.appendChild(buildCspBlock(item));
+    }
+  }
+
+  /**
+   * 注入演示（C3）：真的去尝试，然后把每一条的真实结果列出来。
+   * 不显示"通过/失败"两个字的总结——用户要看到哪一条挡、哪一条没挡。
+   */
+  async function runSecurityProbe() {
+    const btn = byId('btn-security-probe');
+    const out = byId('security-probe-out');
+    if (!btn || !out) return;
+
+    btn.disabled = true;
+    out.hidden = false;
+    out.className = 'sw-probe-out';
+    out.textContent = '正在临时窗口里尝试注入…';
+
+    try {
+      const result = await window.nyx.securityProbe();
+      if (!result || result.ok !== true) {
+        out.classList.add('is-bad');
+        out.textContent = `演示没能完成：${(result && (result.error || result.summary)) || '未知原因'}`;
+        setStatus('注入演示没能跑起来，原因见下方', true);
+        return;
+      }
+
+      const lines = [result.summary || '', ''];
+      for (const check of result.checks || []) {
+        lines.push(`${check.blocked ? '挡住  ' : '没挡住'}  ${check.name} —— ${check.detail}`);
+      }
+      if (result.bridgeKeys && result.bridgeKeys.length) {
+        lines.push('');
+        lines.push(
+          `暴露面 ${result.bridgeKeys.length} 个方法；改写它${
+            result.bridgeWriteIgnored ? '无效（冻结代理）' : '竟然生效了'
+          }`,
+        );
+      }
+
+      const passed = Boolean(result.passed);
+      out.classList.add(passed ? 'is-ok' : 'is-bad');
+      out.textContent = lines.join('\n');
+      setStatus(passed ? '注入演示：全部挡住' : '注入演示：有没挡住的，详情见下方', !passed);
+      if (passed) await loadSecuritySwitches();
+    } catch (err) {
+      out.classList.add('is-bad');
+      out.textContent = `演示没能完成：${err.message}`;
+      setStatus('注入演示没能跑起来，原因见下方', true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
   navEl.addEventListener('click', (event) => {
     const btn = event.target.closest('.nav-item');
     if (!btn) return;
     activate(btn.dataset.sec);
   });
-
   /* ------------------------------------------------------------------ */
   /* 外观：顶栏元素显隐（真实影响主窗口）                                 */
   /* ------------------------------------------------------------------ */

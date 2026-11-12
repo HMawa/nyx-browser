@@ -394,6 +394,116 @@
   word-break: break-all;
 }
 
+/* 外壳防护现值表（清单 C3）：一个窗口一行，行内三项开关用固定宽度对齐，
+   对得上就不吭声，对不上用危险色把「哪一项、期望什么、实际什么」直接写出来 */
+.sw-role-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0 14px;
+}
+
+.sw-role {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--bg-code) 55%, transparent);
+}
+
+.sw-role.is-bad {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+}
+
+.sw-role-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.sw-role-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.sw-role-preload {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: 10px;
+  color: var(--text-faint);
+  word-break: break-all;
+}
+
+.sw-role-tag {
+  margin-left: auto;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.sw-role.is-bad .sw-role-tag {
+  color: var(--danger-soft);
+}
+
+.sw-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.sw-row-key {
+  color: var(--text-dim);
+}
+
+.sw-row-value {
+  color: var(--text-main);
+  word-break: break-word;
+}
+
+.sw-row.is-bad .sw-row-value {
+  color: var(--danger-soft);
+}
+
+.sw-csp-item {
+  /* 文件名比时间戳长，单独放宽第一列；三列语义与 .diag-item 一致 */
+  grid-template-columns: minmax(150px, 220px) 48px minmax(0, 1fr);
+}
+
+.sw-csp-item.is-bad .diag-level {
+  color: var(--danger-soft);
+}
+
+/* 注入演示的结果：等宽、可选中，方便直接把原文贴出来 */
+.sw-probe-out {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  background: var(--bg-code);
+  color: var(--text-dim);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.sw-probe-out.is-bad {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  color: var(--danger-soft);
+}
+
+.sw-probe-out.is-ok {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--text-main);
+}
+
 /* 置顶导入 / 导出行（v1.15.0）：按钮与说明文字同一行时垂直居中，说明不挤压按钮 */
 #pinned-io-row {
   align-items: center;

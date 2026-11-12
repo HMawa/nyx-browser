@@ -762,6 +762,29 @@
           </header>
 
           <div class="sec-scroll">
+            <!-- 外壳防护现值（清单 C3）：期望值写在代码里，这里显示这台机器上的实测值 -->
+            <section class="info-card">
+              <div class="info-head">
+                <h3>外壳防护现值</h3>
+                <span class="badge" id="security-switches-badge">—</span>
+              </div>
+              <div class="info-body">
+                <p class="hint" id="security-switches-hint">
+                  每一项都是创建窗口时真正传进去的值，不是文档里的承诺。下面还能点「试一次注入」，
+                  在一个和外壳同构的临时窗口里真的去拿 Node 能力、动态求值、改写暴露面，看它挡不挡得住。
+                </p>
+                <div class="kv-grid" id="security-switches-summary"></div>
+                <div class="sw-role-list" id="security-switches-roles"></div>
+                <p class="hint" id="security-switches-csp-title">本地页面 CSP</p>
+                <div class="diag-list" id="security-switches-csp"></div>
+                <div class="sec-actions">
+                  <button type="button" class="btn" id="btn-security-switches-refresh">刷新</button>
+                  <button type="button" class="btn btn-primary" id="btn-security-probe">试一次注入</button>
+                </div>
+                <pre class="sw-probe-out" id="security-probe-out" hidden></pre>
+              </div>
+            </section>
+
             <section class="info-card">
               <div class="info-head">
                 <h3>运行状态</h3>

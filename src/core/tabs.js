@@ -142,6 +142,12 @@ class TabManager {
     this.onLoadFailure = options.onLoadFailure || (() => {});
     this.onChange = options.onChange || (() => {});
     this.onTabCreated = options.onTabCreated || (() => {});
+    /**
+     * 窗口登记回调（清单 C3）：每建一个视图就把「角色 + 实际 webPreferences」报给主进程，
+     * 供设置里的「外壳防护」现值表当场比对期望值。传空则不做登记（单测/无界面场景）。
+     * @type {(role: string, prefs: object) => void}
+     */
+    this.onSecurityWindow = options.onSecurityWindow || (() => {});
 
     /**
      * 工具箱右侧抽屉占用宽度（px）。
@@ -192,19 +198,21 @@ class TabManager {
 
     const mode = this.getMode();
 
-    const view = new WebContentsView({
-      webPreferences: {
-        session: this.resolveSession(),
-        preload: TAB_PRELOAD,
-        // 模式参数随视图创建注入：preload 必须"在页面脚本之前"就知道自己是
-        // 哪种模式，否则加固只能事后补救（补不了已发生的泄漏）。
-        additionalArguments: this.getPreloadArgs(mode),
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-        spellcheck: false,
-      },
-    });
+    const webPreferences = {
+      session: this.resolveSession(),
+      preload: TAB_PRELOAD,
+      // 模式参数随视图创建注入：preload 必须"在页面脚本之前"就知道自己是
+      // 哪种模式，否则加固只能事后补救（补不了已发生的泄漏）。
+      additionalArguments: this.getPreloadArgs(mode),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      spellcheck: false,
+    };
+    // 登记到外壳防护现值表（清单 C3）：远端内容窗口必须沙箱 + 隔离 + 无 Node 能力
+    this.onSecurityWindow('tab', webPreferences);
+
+    const view = new WebContentsView({ webPreferences });
 
     const tab = {
       id: this.seq++,
@@ -283,17 +291,19 @@ class TabManager {
       return { ok: false, error: `标签数已达上限（${this.maxTabs} 个），请先关闭部分标签` };
     }
 
-    const view = new WebContentsView({
-      webPreferences: {
-        // 应用页是本地可信页面，用默认会话即可（换代理会话反而会让本地页面走代理）
-        preload: APP_PRELOAD,
-        contextIsolation: true,
-        nodeIntegration: false,
-        // 与外壳 preload 的要求一致：preload.js 里用到 Node 侧能力，sandbox 必须关
-        sandbox: false,
-        spellcheck: false,
-      },
-    });
+    const appPreferences = {
+      // 应用页是本地可信页面，用默认会话即可（换代理会话反而会让本地页面走代理）
+      preload: APP_PRELOAD,
+      contextIsolation: true,
+      nodeIntegration: false,
+      // 与外壳 preload 的要求一致：preload.js 里用到 Node 侧能力，sandbox 必须关
+      sandbox: false,
+      spellcheck: false,
+    };
+    // 登记到外壳防护现值表（清单 C3）：应用页与外壳同一取舍（sandbox 关），导航只放行 file://
+    this.onSecurityWindow('app-page', appPreferences);
+
+    const view = new WebContentsView({ webPreferences: appPreferences });
 
     const tab = {
       id: this.seq++,
