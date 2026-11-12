@@ -15,6 +15,8 @@
 
 const path = require('node:path');
 const fs = require('node:fs');
+// 设置页要从"窗口"改成"标签"，标签加载本地页面必须给 file:// URL（loadFile 只有 BrowserWindow 有）
+const { pathToFileURL } = require('node:url');
 const crypto = require('node:crypto');
 // Edge Cookie 导入模块：复制 Cookies 库 + ABE/DPAPI 解密 + node:sqlite 读取
 const edgeCookieImport = require('./core/edge-cookie-import');
@@ -202,7 +204,7 @@ const runtime = {
   apiToken: null,
   /** 内置代理编排（订阅管理 + mihomo 内核生命周期） */
   proxyService: null,
-  /** 设置窗口（独立 BrowserWindow；原「代理中心」已整页并入设置） */
+  /** 设置页（v1.17.0 起是主窗口里的一个标签，不再是独立窗口） */
   proxyWindow: null,
   /** 界面偏好（顶栏元素显隐等，落盘于 <userData>/ui-preferences.json） */
   uiStore: null,
@@ -4335,9 +4337,15 @@ function notifyProxyState() {
   syncProxyPort();
 
   if (!runtime.proxyService) return;
-  const win = runtime.proxyWindow;
-  if (win && !win.isDestroyed()) {
-    win.webContents.send('nyx:proxy-state', runtime.proxyService.status());
+  // 设置改成标签页后，状态要推给「设置标签」而不是某个窗口；
+  // 没开着设置就只更新 sessions（打开时会补推一份，不会漏）。
+  const wc = runtime.tabManager ? runtime.tabManager.appPageWebContents('settings') : null;
+  if (wc && !wc.isDestroyed()) {
+    try {
+      wc.send('nyx:proxy-state', runtime.proxyService.status());
+    } catch {
+      /* 页面正在销毁时发送会抛 */
+    }
   }
 }
 
@@ -4361,69 +4369,72 @@ function syncProxyPort() {
 }
 
 /** 打开（或聚焦）设置窗口：独立窗口，不占用标签额度 */
+/**
+ * 打开设置（清单 B4+B5：唯一入口 + 改标签页）。
+ *
+ * 以前设置是独立弹窗（1180×820 的 BrowserWindow）：改完一个配置想看看页面效果得
+ * 来回切窗口，而且工具栏齿轮与菜单项各能开出一份，用户看到的就是「两个设置」。
+ * 现在设置是本窗口里的一个标签：全局单实例（再点齿轮只是切回去），关掉标签就是关设置，
+ * 改配置能直接看到当前页面，不再有弹窗。
+ *
+ * @param {string} [section] 要停留的分区（错误页的「打开诊断」用它直达诊断页）
+ */
 function openSettings(section) {
-  // 要跳的分区（当前只有错误页的「打开诊断」用）：窗口已开时用事件切分区、不重新加载，
-  // 免得把用户已经填了一半的表单冲掉。
   const wantSection = typeof section === 'string' && section ? section : '';
 
-  const existing = runtime.proxyWindow;
-  if (existing && !existing.isDestroyed()) {
-    existing.show();
-    existing.focus();
-    notifyProxyState();
-    if (wantSection) {
-      try {
-        existing.webContents.send('nyx:settings:section', wantSection);
-      } catch {
-        /* 忽略：窗口正在关闭时发送会抛 */
-      }
-    }
-    return { ok: true, reused: true };
+  if (!runtime.tabManager) return { ok: false, error: '窗口未就绪' };
+
+  const settingsUrl = pathToFileURL(path.join(__dirname, 'renderer', 'settings.html')).toString();
+  const opened = runtime.tabManager.createAppPage({
+    url: settingsUrl,
+    title: '设置',
+    kind: 'settings',
+  });
+  if (!opened || opened.ok !== true) {
+    const reason = (opened && opened.error) || '设置页打不开';
+    notifyNotice({ level: 'error', code: 'SETTINGS_OPEN_FAILED', title: '设置打不开', message: reason });
+    diagnostics.error('SETTINGS_OPEN_FAILED', { reason });
+    return { ok: false, error: reason };
   }
 
-  const win = new BrowserWindow({
-    width: 1180,
-    height: 820,
-    minWidth: 960,
-    minHeight: 620,
-    title: 'Nyx 设置',
-    // 同主窗口：窗口出现前的底色跟随主题
-    backgroundColor: THEME_BG[(runtime.uiStore && runtime.uiStore.get().theme) || 'ink'],
-    autoHideMenuBar: true,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-    },
-  });
-
-  runtime.proxyWindow = win;
-  win.setMenuBarVisibility(false);
-
-  // 设置窗口只承载本地页面，不允许窗口内再开新窗口或跳转到远端
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  win.webContents.on('will-navigate', (event, url) => {
-    if (!url.startsWith('file://')) event.preventDefault();
-  });
-
-  win.loadFile(path.join(__dirname, 'renderer', 'settings.html'));
-  win.webContents.once('did-finish-load', () => {
-    notifyProxyState();
-    if (wantSection) {
+  const wc = runtime.tabManager.appPageWebContents('settings');
+  if (wc) {
+    syncProxyPort();
+    // 状态先推一份：设置页首屏要用代理状态，等它自己来问会有一次空窗
+    if (runtime.proxyService) {
       try {
-        win.webContents.send('nyx:settings:section', wantSection);
+        wc.send('nyx:proxy-state', runtime.proxyService.status());
       } catch {
-        /* 忽略 */
+        /* 页面还没就绪时发送会抛，did-finish-load 里还会再推一次 */
       }
     }
-  });
+    if (wantSection) sendSettingsSection(wc, wantSection, opened.reused === true);
+  }
 
-  win.on('closed', () => {
-    runtime.proxyWindow = null;
-  });
+  return { ok: true, reused: opened.reused === true };
+}
 
-  return { ok: true, reused: false };
+/**
+ * 把「要跳到哪个分区」推给设置页。
+ *
+ * 复用已打开的标签时立刻发（页面已经在跑）；新建标签要等 `did-finish-load`，
+ * 否则消息发给一个还没有监听的页面，等于没发——这正是"点打开诊断结果停在默认页"的老毛病。
+ */
+function sendSettingsSection(wc, section, alreadyLoaded) {
+  if (!wc || wc.isDestroyed()) return;
+  const push = () => {
+    if (wc.isDestroyed()) return;
+    try {
+      wc.send('nyx:settings:section', section);
+    } catch {
+      /* 忽略：页面正在销毁 */
+    }
+  };
+  if (alreadyLoaded) {
+    push();
+    return;
+  }
+  wc.once('did-finish-load', push);
 }
 
 /* ------------------------------------------------------------------ */
@@ -4998,10 +5009,8 @@ function registerExtensionsIpc() {
       extra || {},
     );
 
-  /** 对话框父窗口：设置窗口在则挂在它上面，否则挂主窗口 */
+  /** 对话框父窗口：设置已是标签页，统一挂在主窗口上（弹框不会跑到看不见的地方） */
   const parentWindow = () => {
-    const win = runtime.proxyWindow;
-    if (win && !win.isDestroyed()) return win;
     return runtime.mainWindow && !runtime.mainWindow.isDestroyed() ? runtime.mainWindow : undefined;
   };
 
@@ -6230,9 +6239,7 @@ async function panic() {
   }
 
   try {
-    if (runtime.proxyWindow && !runtime.proxyWindow.isDestroyed()) {
-      runtime.proxyWindow.destroy();
-    }
+    // 设置已经是主窗口里的一个标签，随主窗口一起销毁，不需要单独处理
     if (runtime.mainWindow && !runtime.mainWindow.isDestroyed()) {
       runtime.mainWindow.destroy();
     }

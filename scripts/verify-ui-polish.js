@@ -501,9 +501,45 @@ async function main() {
     );
 
     /* ---------- B. 设置中心分区滚动记忆 ---------- */
-    await shell.eval('window.nyx.openSettings()');
+    // B4+B5（v1.17.0）：设置从工具栏齿轮进入，且必须是主窗口里的标签页——
+    // 以前是独立弹窗，改个配置要来回切窗口，齿轮和菜单项还能各开一份。
+    const gearOpen = await shell.eval(`(async () => {
+      const btn = document.getElementById('btn-proxy');
+      if (!btn) return { missing: true };
+      btn.click();
+      await new Promise((r) => setTimeout(r, 900));
+      const snap = await window.nyx.getState();
+      const mine = (snap.tabs || []).filter((t) => String(t.url || '').includes('/settings.html'));
+      return {
+        clicked: true,
+        count: mine.length,
+        active: !!(mine[0] && mine[0].active),
+        gears: document.querySelectorAll('#btn-proxy').length,
+      };
+    })()`);
+    check(
+      '「设置」是主窗口里的标签页而不是独立弹窗，且只在齿轮一处入口（v1.17.0）',
+      !!gearOpen && gearOpen.clicked === true && gearOpen.count === 1 && gearOpen.active === true && gearOpen.gears === 1,
+      JSON.stringify(gearOpen),
+    );
+
     const settingsTarget = await waitTarget((t) => t.url.endsWith('/settings.html'), 20000);
-    check('设置窗口出现', !!settingsTarget, settingsTarget && settingsTarget.url);
+    check('设置页标签出现', !!settingsTarget, settingsTarget && settingsTarget.url);
+
+    // 再点一次设置（菜单项 / 错误页「打开诊断」都走同一条路）只能切回去，不能叠出第二个标签
+    const reopen = await shell.eval(`(async () => {
+      const before = (await window.nyx.getState()).tabs.length;
+      const res = await window.nyx.openSettings();
+      await new Promise((r) => setTimeout(r, 400));
+      const snap = await window.nyx.getState();
+      const mine = (snap.tabs || []).filter((t) => String(t.url || '').includes('/settings.html'));
+      return { before, reused: !!(res && res.reused), after: snap.tabs.length, mine: mine.length };
+    })()`);
+    check(
+      '重复打开设置只切回同一个标签，不会叠出第二个（v1.17.0）',
+      !!reopen && reopen.reused === true && reopen.after === reopen.before && reopen.mine === 1,
+      JSON.stringify(reopen),
+    );
 
     if (settingsTarget) {
       settings = await new Cdp(settingsTarget.webSocketDebuggerUrl).connect();
@@ -1474,7 +1510,22 @@ async function main() {
     check('失败页主按钮/次按钮/文字按钮三者视觉可分（v1.17.0）', distinct, JSON.stringify(a11y));
 
     // 键盘焦点环：只能用真实按键（Input.dispatchKeyEvent）走到按钮上，
-    // 脚本 focus() 不会命中 :focus-visible，测出来的结果是假的
+    // 脚本 focus() 不会命中 :focus-visible，测出来的结果是假的。
+    // 注意：设置现在也是标签页（B5），上一步「打开诊断」会把焦点带到设置标签，
+    // 必须先切回失败页所在的那个标签，否则按键全被设置页吃掉。
+    await shell.eval(`(async () => {
+      const snap = await window.nyx.getState();
+      const list = (snap && snap.tabs) || [];
+      // 要切回的是"那个加载失败、正在显示失败页"的标签，不能随便挑一个普通标签
+      const page = list.find((t) => t.loadError) || list.find((t) => !String(t.url || '').includes('/settings.html'));
+      if (page) await window.nyx.activateTab(page.id);
+      return true;
+    })()`);
+    await sleep(500);
+    // 页面级焦点仿真：设置是标签页之后，切标签会让外壳 webContents 失去窗口级焦点，
+    // 真实按键就进不来（activeElement 一直为空）。CDP 的焦点仿真让页面以为自己在前台，
+    // 这样 Input.dispatchKeyEvent 才有意义，`:focus-visible` 也才会命中。
+    await shell.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {});
     await shell.eval('(() => { const el = document.activeElement; if (el && el.blur) el.blur(); return true; })()');
     let tabbedTo = '';
     for (let i = 0; i < 30; i += 1) {
@@ -1484,7 +1535,8 @@ async function main() {
       if (tabbedTo.startsWith('pe-')) break;
     }
     const focusRing = await shell.eval(`(() => {
-      const el = document.getElementById(${JSON.stringify('pe-retry')}) || document.activeElement;
+      const overlay = document.getElementById('page-error');
+      const el = document.getElementById('${'pe-retry'}') || document.activeElement;
       const cs = getComputedStyle(el);
       return {
         active: document.activeElement ? document.activeElement.id : '',
@@ -1492,6 +1544,9 @@ async function main() {
         outlineStyle: cs.outlineStyle,
         outlineWidth: cs.outlineWidth,
         outlineColor: cs.outlineColor,
+        overlayHidden: !!(overlay && overlay.hidden),
+        overlayDisplay: overlay ? getComputedStyle(overlay).display : 'none',
+        focusables: document.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])').length,
       };
     })()`);
     check(
@@ -1587,6 +1642,21 @@ async function main() {
          ② 主进程的下载记账必须把它标成 completed 且带上落点；
          ③ 下载中心窗口必须能把它列出来（名字/状态/落点都在）；
          ④ 工具栏角标在没有进行中/失败项时必须消失，不能一直挂个数字。 */
+    // 导航前先把一个"普通网页标签"选中：B5 之后设置也占用一个标签，
+    // 若当前停在设置标签，navigate 会被应用页的 will-navigate 拦掉（只允许 file://）。
+    const beforeDownload = await shell.eval(`(async () => {
+      const snap = await window.nyx.getState();
+      const list = (snap && snap.tabs) || [];
+      const page = list.find((t) => !String(t.url || '').includes('/settings.html'));
+      if (page) {
+        await window.nyx.activateTab(page.id);
+        return { activated: page.id };
+      }
+      const created = await window.nyx.createTab('about:blank');
+      await new Promise((r) => setTimeout(r, 500));
+      return { created: created && created.id };
+    })()`);
+    await sleep(400);
     await shell.eval(`window.nyx.navigate(${JSON.stringify(`http://127.0.0.1:${httpPort}/a1-probe.bin`)})`);
     const expectedFile = path.join(downloadDir, 'a1-probe.bin');
     let fileAt = 0;

@@ -756,27 +756,11 @@ async function main() {
     }
 
     /* 7.6 v1.8.0：收藏浮层「最近使用」+ 右键建子文件夹 */
-    // 浮层窗口偶尔会因为主窗口刚经历创建/关闭标签而晚到：调用结果与目标都做一次重试，
+    // 浮层窗口偶尔会因为主窗口刚经历创建/关闭标签而晚到：调用结果与目标都做多次重试，
     // 但仍然断言"必须真的能打开"——不允许因为偶发就把这条弱化成"跳过"。
-    const openFolderMenu = () =>
-      shell.eval(`window.nyx.bookmarksFolderMenu({ x: 340, y: 340, url: 'https://example.com/pricing', title: '示例站 · 价格' })`);
-    let menuOpen = await openFolderMenu();
-    await sleep(700);
-    let recentDom = await evalInTarget(
-      'bm-folder.html',
-      `(() => ({
-        hasRecentHead: !!document.querySelector('.bf-head-recent'),
-        recentRows: document.querySelectorAll('.bf-item-recent').length,
-        firstRecent: (document.querySelector('.bf-item-recent .bf-name') || {}).textContent || '',
-      }))()`,
-    );
-    if (!menuOpen || menuOpen.ok !== true || !recentDom) {
-      // 第二次机会：先把可能残留的浮层关掉再重开
-      await shell.eval('window.nyx.bookmarksFolderClose()');
-      await sleep(400);
-      menuOpen = await openFolderMenu();
-      await sleep(900);
-      recentDom = await evalInTarget(
+    await sleep(600);
+    const readRecentDom = () =>
+      evalInTarget(
         'bm-folder.html',
         `(() => ({
           hasRecentHead: !!document.querySelector('.bf-head-recent'),
@@ -784,6 +768,20 @@ async function main() {
           firstRecent: (document.querySelector('.bf-item-recent .bf-name') || {}).textContent || '',
         }))()`,
       );
+    let menuOpen = null;
+    let recentDom = null;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      if (attempt > 1) {
+        // 重试前先把可能残留/半开的浮层关掉，避免越试越乱
+        await shell.eval('window.nyx.bookmarksFolderClose()');
+        await sleep(400 * attempt);
+      }
+      menuOpen = await shell.eval(
+        `window.nyx.bookmarksFolderMenu({ x: 340, y: 340, url: 'https://example.com/pricing', title: '示例站 · 价格' })`,
+      );
+      await sleep(500 + attempt * 300);
+      recentDom = await readRecentDom();
+      if (menuOpen && menuOpen.ok === true && recentDom && recentDom.recentRows >= 1) break;
     }
     check('「收藏到文件夹」浮层可再次打开', !!menuOpen && menuOpen.ok === true, JSON.stringify(menuOpen));
     check(
@@ -792,18 +790,24 @@ async function main() {
       JSON.stringify(recentDom),
     );
 
-    const subfolder = await evalInTarget(
-      'bm-folder.html',
-      `(async () => {
-        const input = document.getElementById('bf-new-input');
-        input.value = '子文件夹测试';
-        const rows = Array.from(document.querySelectorAll('.bf-item-pick'));
-        const target = rows.find((row) => (row.querySelector('.bf-name') || {}).textContent === '书签文件夹');
-        if (!target) return { missingRow: true };
-        target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-        return { dispatched: true };
-      })()`,
-    );
+    const dispatchSubfolder = () =>
+      evalInTarget(
+        'bm-folder.html',
+        `(async () => {
+          const input = document.getElementById('bf-new-input');
+          input.value = '子文件夹测试';
+          const rows = Array.from(document.querySelectorAll('.bf-item-pick'));
+          const target = rows.find((row) => (row.querySelector('.bf-name') || {}).textContent === '书签文件夹');
+          if (!target) return { missingRow: true };
+          target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+          return { dispatched: true };
+        })()`,
+      );
+    let subfolder = await dispatchSubfolder();
+    for (let attempt = 2; attempt <= 3 && !(subfolder && subfolder.dispatched); attempt += 1) {
+      await sleep(400 * attempt);
+      subfolder = await dispatchSubfolder();
+    }
     check('文件夹行可右键触发建子文件夹', !!subfolder && subfolder.dispatched === true, JSON.stringify(subfolder));
 
     await sleep(800);
@@ -962,12 +966,17 @@ async function main() {
         return true;
       })()`,
     );
-    await sleep(800);
-    const pinnedNav = await shell.eval(`(async () => {
-      const snap = await window.nyx.getState();
-      const tab = (snap.tabs || []).find((item) => item.active);
-      return tab ? tab.url : '';
-    })()`);
+    // 点开置顶项会新建/切换标签，导航完成时间不固定 → 轮询到地址就位为止（最多 8 秒）
+    let pinnedNav = '';
+    for (let attempt = 1; attempt <= 20; attempt += 1) {
+      await sleep(400);
+      pinnedNav = await shell.eval(`(async () => {
+        const snap = await window.nyx.getState();
+        const tab = (snap.tabs || []).find((item) => item.active);
+        return tab ? tab.url : '';
+      })()`);
+      if (String(pinnedNav).includes('example.com/pricing')) break;
+    }
     check(
       '点置顶项直接打开该页面',
       openedPinned === true && String(pinnedNav).includes('example.com/pricing'),

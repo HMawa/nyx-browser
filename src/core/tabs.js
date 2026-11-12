@@ -28,6 +28,14 @@ const WEBRTC_POLICY = 'disable_non_proxied_udp';
 const TAB_PRELOAD = path.join(__dirname, '..', 'preload-tab.js');
 
 /**
+ * 内置应用页（设置）用的预加载脚本：与 UI 外壳同一份，页面里能直接拿到 `window.nyx`。
+ *
+ * 为什么应用页要单独一条路径：标签默认用 `preload-tab.js`，那是"给外部网页用的"
+ * 加固脚本，没有 `window.nyx`；设置页是本地可信页面，必须走外壳 preload 才能调主进程。
+ */
+const APP_PRELOAD = path.join(__dirname, '..', 'preload.js');
+
+/**
  * 把地址栏输入整理成可加载的 URL：
  *   已带协议 → 原样；裸 IP / localhost → http://；像域名 → https://；其余 → 搜索
  */
@@ -227,6 +235,84 @@ class TabManager {
 
     this.activate(tab.id);
     return { ok: true, id: tab.id };
+  }
+
+  /**
+   * 打开一个内置应用页（当前只有设置）。
+   *
+   * 为什么设置要变成标签页（清单 B4+B5）：设置原本是独立弹窗，改个配置得来回切窗口，
+   * 而且工具栏齿轮和菜单项各开一份，用户看到「两个设置」。改成标签后只有一个入口、
+   * 一个实例——再次点齿轮只是切回那个标签，不会叠出第二个设置。
+   *
+   * @param {object} options
+   * @param {string} options.url 本地页面地址（file://）
+   * @param {string} [options.title] 标签标题
+   * @param {string} [options.kind] 应用页类型（用于复用判断，默认 'settings'）
+   */
+  createAppPage(options) {
+    const url = String((options && options.url) || '');
+    if (!url) return { ok: false, error: '应用页地址为空' };
+    const kind = (options && options.kind) || 'settings';
+
+    // 已经开着就只切过去：设置是单实例页面，不允许叠标签
+    const existing = this.tabs.find((tab) => tab.kind === kind);
+    if (existing) {
+      this.activate(existing.id);
+      return { ok: true, id: existing.id, reused: true };
+    }
+
+    if (this.tabs.length >= this.maxTabs) {
+      return { ok: false, error: `标签数已达上限（${this.maxTabs} 个），请先关闭部分标签` };
+    }
+
+    const view = new WebContentsView({
+      webPreferences: {
+        // 应用页是本地可信页面，用默认会话即可（换代理会话反而会让本地页面走代理）
+        preload: APP_PRELOAD,
+        contextIsolation: true,
+        nodeIntegration: false,
+        // 与外壳 preload 的要求一致：preload.js 里用到 Node 侧能力，sandbox 必须关
+        sandbox: false,
+        spellcheck: false,
+      },
+    });
+
+    const tab = {
+      id: this.seq++,
+      view,
+      url,
+      requestedUrl: url,
+      title: (options && options.title) || '设置',
+      loading: false,
+      canGoBack: false,
+      canGoForward: false,
+      loadError: null,
+      kind,
+    };
+
+    this.tabs.push(tab);
+    this.mainWindow.contentView.addChildView(view);
+    this.bindEvents(tab);
+
+    const wc = view.webContents;
+    // 本地页面不允许开新窗口，也不允许被导航到远端
+    wc.setWindowOpenHandler(() => ({ action: 'deny' }));
+    wc.on('will-navigate', (event, targetUrl) => {
+      if (!String(targetUrl).startsWith('file://')) event.preventDefault();
+    });
+    wc.loadURL(url).catch((err) => {
+      console.warn('[Nyx] 应用页加载失败：', err && err.message);
+    });
+
+    this.activate(tab.id);
+    return { ok: true, id: tab.id, reused: false };
+  }
+
+  /** 取某个应用页标签的 webContents（没开着就返回 null） */
+  appPageWebContents(kind = 'settings') {
+    const tab = this.tabs.find((item) => item.kind === kind);
+    if (!tab || !tab.view || tab.view.webContents.isDestroyed()) return null;
+    return tab.view.webContents;
   }
 
   /** 绑定标签生命周期事件 */
