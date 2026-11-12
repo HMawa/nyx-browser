@@ -280,6 +280,8 @@
       }
       // 出站方式是随时可能被别的窗口改的（主进程也会改），每次进分区都重读
       loadPrivacyLink();
+      // 录屏/被远控状态也可能随时变（用户刚开了个会议），每次进分区都重查一次
+      loadScreenWatch();
     }
 
     // 扩展清单按需拉取：装载状态与文件系统耦合，进分区时读一次最新值
@@ -1110,6 +1112,119 @@
     directRadio.addEventListener('change', () => {
       if (directRadio.checked) apply('direct');
     });
+  }
+
+  /* ---------------- 录屏 / 被远控检测（清单 C4） ---------------- */
+
+  let screenWatchWired = false;
+
+  /** 把检测结果渲染到卡片：徽标、结论、命中的程序清单、需要确认时的勾选框 */
+  function renderScreenWatch(payload) {
+    const badge = byId('screen-watch-badge');
+    const status = byId('screen-watch-status');
+    const hitsEl = byId('screen-watch-hits');
+    const note = byId('screen-watch-note');
+    const ackRow = byId('screen-watch-ack-row');
+    const data = payload && typeof payload === 'object' ? payload : {};
+
+    if (!badge || !status) return;
+
+    const level = data.level === 'risk' || data.level === 'unknown' ? data.level : 'none';
+    badge.textContent = level === 'risk' ? '有风险' : level === 'unknown' ? '无法确认' : '未发现';
+    badge.className = `badge ${level === 'none' ? 'ok' : level === 'risk' ? 'bad' : 'warn'}`;
+
+    status.textContent = data.title ? `${data.title}。${data.summary || ''}` : '还没有检测结果';
+    status.className = `hint ${level === 'none' ? 'is-ok' : 'is-warn'}`;
+
+    if (hitsEl) {
+      hitsEl.textContent = '';
+      const hits = Array.isArray(data.hits) ? data.hits : [];
+      hitsEl.hidden = hits.length === 0;
+      for (const hit of hits) {
+        const li = document.createElement('li');
+        const name = document.createElement('span');
+        name.className = 'hit-name';
+        name.textContent = hit.label || hit.name;
+        const cat = document.createElement('span');
+        cat.className = 'hit-cat';
+        cat.textContent = hit.categoryLabel || '';
+        li.append(name, cat);
+        hitsEl.append(li);
+      }
+    }
+
+    if (note) {
+      note.textContent = data.message || '';
+      note.className = 'hint';
+    }
+
+    if (ackRow) {
+      // 只有「无法确认」才需要勾确认：有风险时勾了也不许进（隐私模式不拿"我确认"换安全）
+      const needAck = level === 'unknown';
+      ackRow.hidden = !needAck;
+      const ack = byId('screen-watch-ack');
+      if (ack && !needAck) ack.checked = false;
+    }
+  }
+
+  async function loadScreenWatch() {
+    if (!window.nyx || typeof window.nyx.screenWatch !== 'function') {
+      const status = byId('screen-watch-status');
+      if (status) {
+        status.textContent = '当前内核不支持录屏检测。';
+        status.className = 'hint is-warn';
+      }
+      return;
+    }
+    const status = byId('screen-watch-status');
+    if (status) {
+      status.textContent = '正在检查本机进程…';
+      status.className = 'hint';
+    }
+    try {
+      const res = await window.nyx.screenWatch();
+      renderScreenWatch(res);
+    } catch (err) {
+      if (status) {
+        status.textContent = `检测失败：${err && err.message ? err.message : '未知原因'}`;
+        status.className = 'hint is-warn';
+      }
+    }
+    if (!screenWatchWired) wireScreenWatch();
+  }
+
+  function wireScreenWatch() {
+    screenWatchWired = true;
+    const checkBtn = byId('btn-screen-watch-check');
+    const ack = byId('screen-watch-ack');
+
+    if (checkBtn) {
+      checkBtn.addEventListener('click', async () => {
+        checkBtn.disabled = true;
+        try {
+          await loadScreenWatch();
+          setStatus('已重新检查本机进程');
+        } finally {
+          checkBtn.disabled = false;
+        }
+      });
+    }
+
+    if (ack) {
+      ack.addEventListener('change', async () => {
+        if (!ack.checked) return;
+        try {
+          const res = await window.nyx.screenWatchAck();
+          if (res && res.ok) {
+            setStatus('已记录你的确认：10 分钟内允许进入隐私模式（期间仍会重新检测）');
+          } else {
+            setStatus('没能记录确认，请重试', true);
+          }
+        } catch (err) {
+          setStatus(`没能记录确认：${err && err.message ? err.message : '未知原因'}`, true);
+        }
+      });
+    }
   }
 
   /* ---------------- 图形性能（清单 A5） ---------------- */

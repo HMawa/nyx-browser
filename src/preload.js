@@ -114,6 +114,13 @@ contextBridge.exposeInMainWorld('nyx', {
   /** 注入演示（C3）：在一次性同构窗口里真去拿 require / 动态求值 / 改写暴露面 */
   securityProbe: () => ipcRenderer.invoke('nyx:security:probe'),
 
+  /** 录屏 / 被远控检测（C4）：读本机进程，看有没有录屏 / 远控 / 会议程序在跑 */
+  screenWatch: (payload) => ipcRenderer.invoke('nyx:screen:watch', payload || {}),
+
+  /** 用户对「无法确认是否在录屏」的显式确认（10 分钟内有效） */
+  screenWatchAck: () => ipcRenderer.invoke('nyx:screen:ack'),
+
+
   /** 权限决策轨迹（默认最近 50 条） */
   listPermissionDecisions: (limit) => ipcRenderer.invoke('nyx:permissions:list', limit),
 

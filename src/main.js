@@ -18,6 +18,8 @@ const fs = require('node:fs');
 // 设置页要从"窗口"改成"标签"，标签加载本地页面必须给 file:// URL（loadFile 只有 BrowserWindow 有）
 const { pathToFileURL } = require('node:url');
 const crypto = require('node:crypto');
+// 录屏/远控检测（C4）要读一次进程列表：execFile 起 PowerShell，拿不到就如实报"无法确认"
+const { execFile } = require('node:child_process');
 // Edge Cookie 导入模块：复制 Cookies 库 + ABE/DPAPI 解密 + node:sqlite 读取
 const edgeCookieImport = require('./core/edge-cookie-import');
 // Node 原生 net 模块（等价于 require('net')，显式带 node: 前缀与文件内其他 require 保持一致）。
@@ -93,6 +95,9 @@ const {
   describeProbeResult,
   parseCsp,
 } = require('./core/security-switches');
+
+// 录屏 / 被远控检测（C4）：进程名单判读 + 进隐私模式前的闸门
+const { canEnterPrivate, describeScreenWatch, screenWatchPayload } = require('./core/screen-watch');
 
 /**
  * 验收 / 调试用的隔离用户数据目录（环境变量 NYX_USER_DATA）。
@@ -287,6 +292,15 @@ const runtime = {
    * 传进去的那份对象**，不是另写一份"理想配置"文档。
    */
   securityWindows: new Map(),
+  /**
+   * 最近一次录屏/远控检测结果（清单 C4）：{ at, payload }，5 秒内复用，避免频繁起 PowerShell。
+   */
+  screenWatch: null,
+  /**
+   * 用户对「无法确认是否在录屏」的显式确认时间戳（毫秒）。0 表示没确认过。
+   * 有 10 分钟时效：确认过不等于永久放行。
+   */
+  screenAckAt: 0,
   panicking: false,
   quitting: false,
   /** 渲染层尚未就绪时暂存的提示，待页面加载完成后推送 */
@@ -2040,6 +2054,85 @@ async function runSecurityProbe() {
   }
 }
 
+/* ---------------- 录屏 / 被远控检测（清单 C4） ---------------- */
+
+/**
+ * 读一次本机进程名列表。
+ *
+ * 用 PowerShell 的 Win32_Process 拿 Name（不需要完整路径，也不需要管理员权限）。
+ * 结果用 Base64(UTF8) 回传，避免控制台代码页把进程名里的中文毁掉。
+ * 读不到就返回 `{ state: 'error', error }`——**不能**当成"没有风险"。
+ */
+function queryProcessNames() {
+  return new Promise((resolve) => {
+    const command = [
+      '[Console]::OutputEncoding = [Text.Encoding]::UTF8',
+      '$names = @(Get-CimInstance Win32_Process | Select-Object -ExpandProperty Name)',
+      '$json = ConvertTo-Json -InputObject $names -Compress',
+      '[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))',
+    ].join('\n');
+
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', command],
+      { encoding: 'utf8', timeout: 12000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        if (err) {
+          resolve({ state: 'error', error: `读进程列表失败：${err.message}`, names: [] });
+          return;
+        }
+        const line = String(stdout || '')
+          .split(/\r?\n/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .pop();
+        if (!line) {
+          const detail = String(stderr || '').trim();
+          resolve({ state: 'error', error: detail ? `读进程列表失败：${detail}` : '读进程列表时没有拿到内容', names: [] });
+          return;
+        }
+        try {
+          const parsed = JSON.parse(Buffer.from(line, 'base64').toString('utf8'));
+          const names = Array.isArray(parsed) ? parsed : [parsed];
+          resolve({ state: 'ok', error: '', names: names.map((n) => String(n || '')) });
+        } catch (parseErr) {
+          resolve({ state: 'error', error: `进程列表解析失败：${parseErr.message}`, names: [] });
+        }
+      },
+    );
+  });
+}
+
+/**
+ * 刷新录屏检测结果（带 5 秒缓存，避免每次切模式都起一次 PowerShell）。
+ * @param {{force?: boolean}} [options]
+ */
+async function refreshScreenWatch(options) {
+  const force = Boolean(options && options.force);
+  const cached = runtime.screenWatch;
+  if (!force && cached && Date.now() - cached.at < 5000) return cached.payload;
+
+  const scanned = await queryProcessNames();
+  const payload = screenWatchPayload({
+    state: scanned.state,
+    names: scanned.names,
+    error: scanned.error,
+    checkedAt: Date.now(),
+  });
+  runtime.screenWatch = { at: Date.now(), payload };
+
+  if (payload.level === 'risk') {
+    runtime.diagnostics.warn(
+      'SCREEN_CAPTURE_ACTIVE',
+      `检测到 ${payload.hits.length} 个可能正在录屏/远控的程序：${payload.summary}`,
+      { programs: payload.hits.map((hit) => hit.name) },
+    );
+  } else if (payload.level === 'unknown') {
+    runtime.diagnostics.warn('SCREEN_WATCH_UNKNOWN', payload.summary, {});
+  }
+  return payload;
+}
+
 function createMainWindow() {
   const shellPrefs = {
     preload: path.join(__dirname, 'preload.js'),
@@ -2430,6 +2523,52 @@ async function switchMode(mode) {
 
   // 进入隐私模式前的前置校验；切回普通模式则重探一次链路
   if (next === 'private') {
+    // 清单 C4：进隐私模式前先看一眼「屏幕是不是正被别人看着」。
+    // 顺序有意为之：录屏/被远控在这件事上比出口链路更根本——链路再干净，画面被录也一样泄露。
+    const screenCheck = await refreshScreenWatch({});
+    const screenGate = canEnterPrivate(
+      { level: screenCheck.level },
+      { ack: Boolean(runtime.screenAckAt), ackAt: runtime.screenAckAt },
+    );
+
+    if (!screenGate.ok) {
+      const risky = screenCheck.level === 'risk';
+      const stale = screenGate.reason === 'ack-stale';
+      const notice = {
+        level: 'error',
+        code: risky ? 'SCREEN_CAPTURE_ACTIVE' : 'SCREEN_WATCH_UNCONFIRMED',
+        title: risky ? '检测到录屏 / 远控，已拒绝进入隐私模式' : '无法确认是否在录屏，已暂停切换',
+        message:
+          screenCheck.message +
+          (stale ? '（上一次"确认没有录屏"已经超过 10 分钟，需要重新确认。）' : '') +
+          '（详情可在「设置 → 隐私与安全 → 录屏与被远控检测」里查看。）',
+      };
+      console.warn(`[Nyx] 拒绝进入隐私模式：${notice.title}（${screenGate.reason}）`);
+      diagnostics.warn(notice.code, screenCheck.summary, {
+        level: screenCheck.level,
+        reason: screenGate.reason,
+        programs: (screenCheck.hits || []).map((hit) => hit.name),
+      });
+      modeEventLog.record({
+        type: 'switch',
+        from: current,
+        to: 'private',
+        changed: false,
+        ok: false,
+        code: notice.code,
+        message: screenCheck.summary,
+      });
+      notifyNotice(notice);
+      return {
+        ok: false,
+        code: notice.code,
+        error: notice.message,
+        needAck: screenCheck.level === 'unknown',
+        screenWatch: screenCheck,
+        state: currentSnapshot(),
+      };
+    }
+
     // 清单 B3：用户在设置里显式选择「真实 IP」→ 不探测代理、不拉内核，直接直连进入。
     // 这条路必须留足痕迹（前台提示 + 诊断 + 模式事件），因为此刻隐私模式并不隐藏 IP。
     const wantRealIp = Boolean(runtime.uiStore && runtime.uiStore.get().privacyLink === 'direct');
@@ -5207,6 +5346,14 @@ function registerSettingsIpc() {
 
   // 注入演示（C3）：真的在一个同构窗口里尝试 require / 动态求值 / 改写暴露面
   ipcMain.handle('nyx:security:probe', () => runSecurityProbe());
+
+  // 录屏 / 被远控检测（C4）：手动检查 + 用户对"无法确认"的显式确认
+  ipcMain.handle('nyx:screen:watch', (_event, payload) => refreshScreenWatch({ force: payload && payload.force === true }));
+  ipcMain.handle('nyx:screen:ack', () => {
+    runtime.screenAckAt = Date.now();
+    diagnostics.warn('SCREEN_WATCH_ACKNOWLEDGED', '用户确认当前没有在录屏/被远控，允许进入隐私模式', {});
+    return { ok: true, ackAt: runtime.screenAckAt };
+  });
 
   // 设置中心「启动与主页 / 下载 / 关于与更新」只读信息
   ipcMain.handle('nyx:app:info', () => {

@@ -1326,6 +1326,85 @@ async function main() {
       JSON.stringify({ goodKeys: baselinePanel && baselinePanel.goodKeys, badKey: baselinePanel && baselinePanel.badKey }),
     );
 
+    // F1d：隐私与安全 →「录屏与被远控检测」（C4）：命中就拒绝进隐私模式；
+    // 读不到进程列表要如实说「无法确认」而不是默认放行。这里验渲染与 IPC 契约，
+    // 真去开一个录屏软件不是自动化该做的事（那会污染测试机的桌面）。
+    const screenWatchPanel = await settings.eval(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const byId = (id) => document.getElementById(id);
+      const nav = document.querySelector('.nav-item[data-sec="privacy"]');
+      if (!nav) return { missingNav: true };
+      nav.click();
+      await wait(600);
+      if (!byId('screen-watch-status')) return { missingCard: true };
+
+      // 一次检测要走一次 PowerShell 读进程列表，慢，等它落地（最长 8 秒）
+      let view = null;
+      for (let i = 0; i < 32; i += 1) {
+        const badge = byId('screen-watch-badge');
+        const status = byId('screen-watch-status');
+        const text = status ? status.textContent.trim() : '';
+        if (badge && badge.textContent.trim() !== '—' && text && !text.includes('正在检查')) {
+          view = { badge: badge.textContent.trim(), badgeClass: badge.className, status: text };
+          break;
+        }
+        await wait(250);
+      }
+
+      const res = await window.nyx.screenWatch({ force: true });
+      const ackRow = byId('screen-watch-ack-row');
+      const hits = byId('screen-watch-hits');
+      const cats = res && Array.isArray(res.categories) ? res.categories : [];
+      return {
+        view,
+        level: res && res.level,
+        watched: res && res.watched,
+        hitCount: res && Array.isArray(res.hits) ? res.hits.length : -1,
+        categoryCount: cats.length,
+        categoryTotal: cats.reduce((sum, item) => sum + (item.count || 0), 0),
+        requireAck: res && res.requireAck,
+        canEnter: res && res.canEnterPrivate,
+        ackHidden: ackRow ? ackRow.hidden : null,
+        hitsHidden: hits ? hits.hidden : null,
+        message: res && res.message ? String(res.message).slice(0, 100) : '',
+      };
+    })()`);
+
+    check(
+      '隐私分区给出录屏/被远控的检测结论，并说明扫了多少程序（C4）',
+      !!screenWatchPanel &&
+        !screenWatchPanel.missingNav &&
+        !screenWatchPanel.missingCard &&
+        !!screenWatchPanel.view &&
+        /未发现|有风险|无法确认/.test(screenWatchPanel.view.badge) &&
+        /录屏|远控|无法确认|没有已知/.test(screenWatchPanel.view.status) &&
+        screenWatchPanel.watched >= 15,
+      JSON.stringify({
+        badge: screenWatchPanel && screenWatchPanel.view && screenWatchPanel.view.badge,
+        status: screenWatchPanel && screenWatchPanel.view && screenWatchPanel.view.status,
+        watched: screenWatchPanel && screenWatchPanel.watched,
+      }),
+    );
+
+    check(
+      '检测三态自洽：未发现才放行，有风险连"我确认"也不放行，读不到只有确认框（C4）',
+      !!screenWatchPanel &&
+        ['none', 'risk', 'unknown'].includes(screenWatchPanel.level) &&
+        screenWatchPanel.categoryTotal === Math.max(0, screenWatchPanel.hitCount) &&
+        (screenWatchPanel.level === 'none'
+          ? screenWatchPanel.hitCount === 0 && screenWatchPanel.canEnter === true && screenWatchPanel.ackHidden === true
+          : screenWatchPanel.level === 'risk'
+            ? screenWatchPanel.hitCount > 0 && screenWatchPanel.canEnter === false && screenWatchPanel.ackHidden === true
+            : screenWatchPanel.canEnter === false && screenWatchPanel.requireAck === true && screenWatchPanel.ackHidden === false),
+      JSON.stringify({
+        level: screenWatchPanel && screenWatchPanel.level,
+        hitCount: screenWatchPanel && screenWatchPanel.hitCount,
+        categoryTotal: screenWatchPanel && screenWatchPanel.categoryTotal,
+        canEnter: screenWatchPanel && screenWatchPanel.canEnter,
+        ackHidden: screenWatchPanel && screenWatchPanel.ackHidden,
+      }),
+    );
+
     // F2：瀑布「只看慢请求」跟着面板阈值走（阈值 1200 ms，失败探测请求远快于它 → 必然空态）
     const wfSlow = await shell.eval(`(async () => {
       const wait = (ms) => new Promise((r) => setTimeout(r, ms));

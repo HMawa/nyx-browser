@@ -347,6 +347,23 @@
 
             <section class="info-card">
               <div class="info-head">
+                <h3>录屏与被远控检测</h3>
+                <span class="badge" id="screen-watch-badge">—</span>
+                <div class="info-head-actions">
+                  <button type="button" class="btn btn-mini" id="btn-screen-watch-check">现在检查</button>
+                </div>
+              </div>
+              <p class="hint" id="screen-watch-status" role="status" aria-live="polite"></p>
+              <ul class="screen-hits" id="screen-watch-hits" hidden></ul>
+              <p class="hint" id="screen-watch-note"></p>
+              <label class="ack-row" id="screen-watch-ack-row" hidden>
+                <input type="checkbox" id="screen-watch-ack" />
+                <span>我确认当前没有在录屏、共享屏幕或被远程控制</span>
+              </label>
+            </section>
+
+            <section class="info-card">
+              <div class="info-head">
                 <h3>加固状态</h3>
                 <span class="badge" id="privacy-badge">—</span>
                 <div class="info-head-actions">

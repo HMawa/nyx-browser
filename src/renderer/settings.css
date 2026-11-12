@@ -711,6 +711,45 @@
   color: var(--danger-soft);
 }
 
+/* 录屏 / 被远控检测（C4）：命中的程序清单 */
+.screen-hits {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.screen-hits li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--bg-code) 60%, transparent);
+}
+
+.screen-hits .hit-name {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.screen-hits .hit-cat {
+  font-size: 11px;
+  color: var(--danger-soft);
+}
+
+#screen-watch-status.is-warn {
+  color: var(--danger-soft);
+}
+
+#screen-watch-status.is-ok {
+  color: var(--accent-soft);
+}
+
 /* 图形性能（A5）：三档策略下面的适配器事实与重启提示 */
 .gpu-facts {
   margin-top: 12px;
