@@ -3354,24 +3354,31 @@ async function loadFootprint() {
     if (paths) {
       paths.textContent = `更新源：${updates.path || '—'}\n留档：${archive.path || '—'}`;
     }
-    renderDeltaReport(res.delta || null);
+    renderDeltaReport(res.delta || null, res.deltaFreshness || null);
   }
 
-  /** 把「上次量的差分命中率」画进卡片（没量过就说明怎么量，不假装有数字） */
-  function renderDeltaReport(report) {
+  /**
+   * 把「上次量的差分命中率」画进卡片（没量过就说明怎么量，不假装有数字）。
+   * `freshness` 由主进程算好一并带回来：判定只在一处，界面不自己再判一遍——
+   * 否则"刚量完"和"打开卡片时读到的"会出现两套口径。
+   */
+  function renderDeltaReport(report, freshness) {
     const grid = byId('delta-grid');
     const text = byId('delta-text');
     if (!grid || !text) return;
+    const fresh = freshness || null;
     if (!report) {
       grid.textContent = '';
       text.className = 'hint';
-      text.textContent = '差分命中率还没量过：点下面的「实测一次」，用留档里的上一版和当前版本量一遍。';
+      text.textContent =
+        (fresh && fresh.text) ||
+        '差分命中率还没量过：点下面的「重新量一次」，用留档里的上一版和更新源里的当前版本量一遍。';
       return;
     }
     if (report.ok === false) {
       grid.textContent = '';
       text.className = 'hint is-warn';
-      text.textContent = `上次没量成：${report.error || '未知原因'}`;
+      text.textContent = (fresh && fresh.text) || `上次没量成：${report.error || '未知原因'}`;
       return;
     }
     renderKvGrid(grid, [
@@ -3379,11 +3386,14 @@ async function loadFootprint() {
       ['块大小 / 块数', `${formatBytes(report.blockSize)} · ${report.blocks} 块`],
       ['基线 → 目标', `${(report.base && report.base.version) || '？'} → ${(report.target && report.target.version) || '？'}`],
     ]);
-    text.className = report.level === 'diff' ? 'hint is-ok' : 'hint';
+    // 过期的数字比没有数字更容易误导：这时候整段标成提醒色，而不是继续用"能走差分"的绿
+    const stale = Boolean(fresh && fresh.needsRemeasure);
+    text.className = stale ? 'hint is-warn' : report.level === 'diff' ? 'hint is-ok' : 'hint';
     text.textContent = report.text || '';
     if (report.at) {
       text.textContent += `（${new Date(report.at).toLocaleString('zh-CN')} 实测）`;
     }
+    if (fresh && fresh.text) text.textContent += `\n${fresh.text}`;
   }
 
   const footprintOpen = byId('btn-footprint-open');
@@ -3465,7 +3475,7 @@ async function loadFootprint() {
           setStatus('实测差分命中率失败', true);
           return;
         }
-        renderDeltaReport(res);
+        renderDeltaReport(res, res.freshness || null);
         setStatus(res.ok === false ? '实测差分失败，原因见卡片' : '差分命中率已更新', res.ok === false);
       } finally {
         deltaCheck.disabled = false;

@@ -301,7 +301,7 @@ check(
     const settingsCode = read(path.join(ROOT, 'src', 'renderer', 'settings.js'));
     return /nyx:update:delta-check/.test(mainCode)
       && /measureDeltaHitRate\(\{ blockSize/.test(mainCode)
-      && /delta: readDeltaReport\(\)/.test(mainCode)
+      && /const delta = readDeltaReport\(\)/.test(mainCode)
       && /writeDeltaReport\(report\)/.test(mainCode)
       && /updateDeltaCheck/.test(preloadCode)
       && /id="btn-delta-check"/.test(htmlCode) && /id="delta-text"/.test(htmlCode)
@@ -311,19 +311,54 @@ check(
   'main 的 IPC + 落盘 + footprint 带 delta、preload 方法、html 按钮与文案、settings 的渲染与点击'
 );
 
+check(
+  '过期的差分数字不许当结论：配对变了 / 放太久 / 上次失败 / 没量过，四种都要说"该重新量"',
+  (() => {
+    const now = Date.UTC(2026, 10, 15);
+    const fresh = deltaStats.describeDeltaFreshness(
+      { ok: true, at: now - 2 * 86400000, base: { version: '1.17.5' }, target: { version: '1.17.6' } },
+      { currentVersion: '1.17.6', now }
+    );
+    const stale = deltaStats.describeDeltaFreshness(
+      { ok: true, at: now - 86400000, base: { version: '1.17.4' }, target: { version: '1.17.5' } },
+      { currentVersion: '1.17.6', now }
+    );
+    const aged = deltaStats.describeDeltaFreshness(
+      { ok: true, at: now - 40 * 86400000, base: { version: '1.17.5' }, target: { version: '1.17.6' } },
+      { currentVersion: '1.17.6', now }
+    );
+    const failed = deltaStats.describeDeltaFreshness(
+      { ok: false, code: 'NO_TARGET', error: '更新源里没有当前版本的安装包，量不了差分。', at: now },
+      { currentVersion: '1.17.6', now }
+    );
+    const missing = deltaStats.describeDeltaFreshness(null, { currentVersion: '1.17.6', now });
+    return fresh.level === 'current' && fresh.needsRemeasure === false && /1\.17\.5 → 1\.17\.6/.test(fresh.pair)
+      && stale.level === 'stale' && stale.needsRemeasure === true && /不再|不描述/.test(stale.text) && /1\.17\.6/.test(stale.text)
+      && aged.level === 'aged' && aged.needsRemeasure === true && aged.ageDays >= 40
+      && failed.level === 'failed' && failed.needsRemeasure === true && /量不了差分/.test(failed.text)
+      && missing.level === 'missing' && missing.needsRemeasure === true
+      && [fresh, stale, aged, failed, missing].every((item) => /[\u4e00-\u9fa5]/.test(item.text));
+  })(),
+  'current / stale / aged / failed / missing 五级判定与中文说明'
+);
 
 check(
-  '夜间 e2e：默认只打印计划，要真跑必须显式 --run，注册任务只打印命令不代跑',
+  '过期判定接线：footprint 带 freshness、实测返回也带，界面按 needsRemeasure 标提醒色',
   (() => {
-    const code = read(path.join(ROOT, 'scripts', 'nightly-e2e.js'));
-    return /const options = \{ run: false/.test(code)
-      && /if \(!options\.run\) \{[\s\S]{0,160}没有 --run，按计划什么都没做/.test(code)
-      && /schtasks \/Create \/TN/.test(code)
-      && /我不代跑|要你自己执行/.test(code)
-      && !/spawnSync\(\s*[^)]*schtasks/.test(code);
+    const mainCode = read(path.join(ROOT, 'src', 'main.js'));
+    const settingsCode = read(path.join(ROOT, 'src', 'renderer', 'settings.js'));
+    const htmlCode = read(path.join(ROOT, 'src', 'renderer', 'settings.html'));
+    return /deltaFreshness: describeDeltaFreshness\(delta, \{ currentVersion: version/.test(mainCode)
+      && /freshness: describeDeltaFreshness\(report, \{ currentVersion/.test(mainCode)
+      && /function latestVersionInSource\(\)/.test(mainCode)
+      && /renderDeltaReport\(res\.delta \|\| null, res\.deltaFreshness \|\| null\)/.test(settingsCode)
+      && /renderDeltaReport\(res, res\.freshness \|\| null\)/.test(settingsCode)
+      && /const stale = Boolean\(fresh && fresh\.needsRemeasure\)/.test(settingsCode)
+      && /重新量一次/.test(htmlCode);
   })(),
-  '默认 dry-run + --run 才动 + schtasks 只打印不执行'
+  '两处判定来源 + 界面按 needsRemeasure 换色 + 按钮文案'
 );
+
 
 check(
   '夜间 e2e：先轮换归档再 --cross，结果追加到记录表，失败以非零退出',

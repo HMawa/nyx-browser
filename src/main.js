@@ -23,6 +23,8 @@ const { execFile } = require('node:child_process');
 // Edge Cookie 导入模块：复制 Cookies 库 + ABE/DPAPI 解密 + node:sqlite 读取
 const edgeCookieImport = require('./core/edge-cookie-import');
 const {
+  STALE_DAYS,
+  describeDeltaFreshness,
   normalizeBlockSize,
   normalizeDeltaReport,
   planDeltaMeasure,
@@ -6531,18 +6533,24 @@ function archiveDirPath() {
   return path.join(app.getPath('userData'), 'updates-archive');
 }
 
+/** 更新源里当前发布的版本号（读不出来就空串，别猜） */
+function latestVersionInSource() {
+  try {
+    const latest = JSON.parse(
+      fs.readFileSync(path.join(updatesDirPath(), 'latest.json'), 'utf8').replace(/^\uFEFF/, ''),
+    );
+    return String(latest.version || '');
+  } catch {
+    return '';
+  }
+}
+
 /** 更新源 + 留档的体积快照（设置页「更新源占用」卡片用） */
 function updateFootprint() {
   const updates = measureDir(updatesDirPath());
   const archive = measureDir(archiveDirPath());
-  let version = '';
+  const version = latestVersionInSource();
   let archiveVersions = [];
-  try {
-    const latest = JSON.parse(fs.readFileSync(path.join(updatesDirPath(), 'latest.json'), 'utf8').replace(/^\uFEFF/, ''));
-    version = String(latest.version || '');
-  } catch {
-    version = '';
-  }
   try {
     archiveVersions = fs
       .readdirSync(archiveDirPath(), { withFileTypes: true })
@@ -6552,6 +6560,7 @@ function updateFootprint() {
   } catch {
     archiveVersions = [];
   }
+  const delta = readDeltaReport();
   return {
     ok: true,
     version,
@@ -6560,7 +6569,9 @@ function updateFootprint() {
     archive: { path: archive.path, bytes: archive.bytes, dirs: archive.dirs, files: archive.files },
     total: updates.bytes + archive.bytes,
     // 上次实测的差分命中率：卡片一打开就能看到，不用每次再问人
-    delta: readDeltaReport(),
+    delta,
+    // 这份数字还算不算数：更新源一换版本，旧报告就不再描述下一次更新（静默过期比没数字更误导）
+    deltaFreshness: describeDeltaFreshness(delta, { currentVersion: version, staleDays: STALE_DAYS }),
   };
 }
 
@@ -8132,10 +8143,17 @@ function registerUpdateIpc() {
   /**
    * 差分命中率实测：只在用户点「实测一次」时跑（要读两个约 120 MB 的安装包），
    * 结果落 `<userData>/delta-report.json`，下次打开卡片直接显示上次的数字。
+   * 返回值额外带 `freshness`：刚量完就是 current，但界面统一用同一个判定，
+   * 免得"刚量的"和"打开卡片时读到的"两套口径对不上。
    */
-  ipcMain.handle('nyx:update:delta-check', async (_event, payload) =>
-    measureDeltaHitRate({ blockSize: payload && payload.blockSize }),
-  );
+  ipcMain.handle('nyx:update:delta-check', async (_event, payload) => {
+    const report = await measureDeltaHitRate({ blockSize: payload && payload.blockSize });
+    const currentVersion = latestVersionInSource();
+    return {
+      ...report,
+      freshness: describeDeltaFreshness(report, { currentVersion, staleDays: STALE_DAYS }),
+    };
+  });
 
   /**
    * 夜间安装器 e2e 的最近一次结果（候选③）。

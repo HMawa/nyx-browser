@@ -20,6 +20,10 @@ const MAX_TOTAL_BYTES = 512 * 1024 * 1024;
 const MAX_BLOCKS = 8192;
 const DIFF_GATE = 0.2;
 const GATE_SOURCE = 'server';
+// 这份数字多久算"旧"：安装包可能被重新打过（改一个字符，LZMA 固实流就整体错位），
+// 所以超过这个天数就提醒重量，而不是把旧结论一直挂在卡片上。
+const STALE_DAYS = 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function normalizeBlockSize(raw) {
   const value = Number(raw);
@@ -186,6 +190,76 @@ function normalizeDeltaReport(raw) {
   };
 }
 
+/**
+ * 这份数字还算不算数（纯逻辑）。
+ *
+ * 为什么必须有：`delta-report.json` 是"某一对包"的快照，而更新源随时会换版本。
+ * 卡片照旧把 1.17.5 → 1.17.6 的数字摆在那里，用户会以为它描述的是下一次更新——
+ * 这是"静默过期"，比根本没有数字更容易误导（红线 2：不许静默）。
+ *
+ * level: missing（没量过）/ failed（上次没量成）/ stale（配对已经过时）/ aged（太旧）/ current（可参考）
+ */
+function describeDeltaFreshness(report, options) {
+  const currentVersion = String((options && options.currentVersion) || '').trim();
+  const nowRaw = Number(options && options.now);
+  const now = Number.isFinite(nowRaw) && nowRaw > 0 ? nowRaw : Date.now();
+  const staleDaysRaw = Number(options && options.staleDays);
+  const staleDays = Number.isFinite(staleDaysRaw) && staleDaysRaw > 0 ? staleDaysRaw : STALE_DAYS;
+  const at = Number(report && report.at);
+  const base = report && report.base ? String(report.base.version || '') : '';
+  const target = report && report.target ? String(report.target.version || '') : '';
+  const pair = base || target ? `${base || '？'} → ${target || '？'}` : '';
+
+  if (!report || !Number.isFinite(at) || at <= 0) {
+    return {
+      level: 'missing',
+      needsRemeasure: true,
+      pair: '',
+      ageDays: null,
+      text: '差分命中率还没量过：点「重新量一次」，用留档里的上一版和更新源里的当前版本量一遍。',
+    };
+  }
+  if (report.ok !== true) {
+    return {
+      level: 'failed',
+      needsRemeasure: true,
+      pair: '',
+      ageDays: null,
+      text: `上次没量成：${report.error || '未知原因'}`,
+    };
+  }
+
+  const ageDays = Math.max(0, Math.floor((now - at) / DAY_MS));
+  if (currentVersion && target && target !== currentVersion) {
+    return {
+      level: 'stale',
+      needsRemeasure: true,
+      pair,
+      ageDays,
+      text: `这份数字量的是 ${pair}，而更新源现在是 ${currentVersion}——它不描述下一次更新，点「重新量一次」重新量。`,
+    };
+  }
+  if (ageDays >= staleDays) {
+    return {
+      level: 'aged',
+      needsRemeasure: true,
+      pair,
+      ageDays,
+      text: `${pair} 的数字是 ${ageDays} 天前量的。安装包可能已经被重新打过，建议再量一次（不量也能用，只是别把它当成今天的结论）。`,
+    };
+  }
+  return {
+    level: 'current',
+    needsRemeasure: false,
+    pair,
+    ageDays,
+    text:
+      ageDays === 0
+        ? `${pair} 的数字是今天量的，可以直接参考。`
+        : `${pair} 的数字是 ${ageDays} 天前量的，可以直接参考。`,
+  };
+}
+
 module.exports = {
   BLOCK_SIZES,
   DEFAULT_BLOCK_SIZE,
@@ -194,6 +268,8 @@ module.exports = {
   MAX_TOTAL_BYTES,
   MIN_BLOCK_SIZE,
   MAX_BLOCK_SIZE,
+  STALE_DAYS,
+  describeDeltaFreshness,
   describeDeltaRate,
   formatBytes,
   formatPercent,
