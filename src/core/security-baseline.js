@@ -14,9 +14,9 @@
 
 /** 声明基线：改这里必须同时改 docs/Nyx-安全基线-C2-CVE对照.md 与 package.json */
 const RUNTIME_BASELINE = {
-  electron: '43.7.4',
+  electron: '43.8.10',
   chromium: '150.0.7871.250',
-  node: '24.21.0',
+  node: '24.22.1',
   reviewedAt: '2026-11-14',
 };
 
