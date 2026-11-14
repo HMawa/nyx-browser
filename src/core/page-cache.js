@@ -441,12 +441,35 @@ function decideCacheSite(rawUrl, rawPolicy) {
 const CACHE_SITE_EXPORT_KIND = 'nyx-cache-sites';
 const CACHE_SITE_EXPORT_VERSION = 1;
 
-function exportCacheSites(policy, now) {
+/**
+ * 两份名单各有一个 kind（第五轮 ③）：
+ *   普通模式那份导出的是一份文件，隐私模式那份是另一份。
+ *   导错文件比没有文件更糟——把「只存这些明文正文」的名单导进加密快照那边，
+ *   用户会以为自己的隐私设置生效了，其实一份都没生效。
+ */
+const CACHE_SITE_EXPORT_KINDS = {
+  normal: CACHE_SITE_EXPORT_KIND,
+  private: 'nyx-private-cache-sites',
+};
+
+const CACHE_SITE_SCOPE_LABELS = {
+  normal: '普通模式的站点名单',
+  private: '隐私模式（加密快照）的站点名单',
+};
+
+function scopeOf(options) {
+  const opts = options && typeof options === 'object' ? options : {};
+  return opts.scope === 'private' ? 'private' : 'normal';
+}
+
+function exportCacheSites(policy, now, scope) {
   const safe = normalizeSitePolicy(policy);
   const stamp = Number.isFinite(now) ? now : Date.now();
+  const which = scopeOf({ scope });
   return {
     app: 'nyx',
-    kind: CACHE_SITE_EXPORT_KIND,
+    kind: CACHE_SITE_EXPORT_KINDS[which],
+    scope: which,
     version: CACHE_SITE_EXPORT_VERSION,
     exportedAt: new Date(stamp).toISOString(),
     mode: safe.mode,
@@ -459,6 +482,8 @@ function importCacheSites(rawText, current, options) {
   const opts = options && typeof options === 'object' ? options : {};
   const base = normalizeSitePolicy(current);
   const mode = opts.mode === 'replace' ? 'replace' : 'merge';
+  const which = scopeOf(opts);
+  const expectedKind = CACHE_SITE_EXPORT_KINDS[which];
   const text = typeof rawText === 'string' ? rawText.replace(/^\uFEFF/, '') : '';
 
   let parsed;
@@ -470,9 +495,17 @@ function importCacheSites(rawText, current, options) {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return { ok: false, error: '文件内容不是一份名单（应该是一个对象）。', policy: base };
   }
-  if (parsed.kind !== CACHE_SITE_EXPORT_KIND) {
+  if (parsed.kind !== expectedKind) {
     const what = typeof parsed.kind === 'string' && parsed.kind ? `「${parsed.kind}」` : '（没写）';
-    return { ok: false, error: `这份文件的类型是${what}，不是离线缓存的站点名单。`, policy: base };
+    const hint =
+      parsed.kind === CACHE_SITE_EXPORT_KINDS.private || parsed.kind === CACHE_SITE_EXPORT_KINDS.normal
+        ? '（这是另一份名单，别导错）'
+        : '';
+    return {
+      ok: false,
+      error: `这份文件的类型是${what}${hint}，不是${CACHE_SITE_SCOPE_LABELS[which]}。`,
+      policy: base,
+    };
   }
   if (parsed.allow === undefined && parsed.block === undefined) {
     return { ok: false, error: '文件里既没有 allow 也没有 block 名单。', policy: base };
@@ -544,6 +577,8 @@ module.exports = {
   CACHE_IMAGE_TOTAL_MAX,
   CACHE_LIMIT,
   CACHE_SITE_EXPORT_KIND,
+  CACHE_SITE_EXPORT_KINDS,
+  CACHE_SITE_SCOPE_LABELS,
   CACHE_SITE_EXPORT_VERSION,
   CACHE_SITE_MODES,
   CACHE_TEXT_MAX,

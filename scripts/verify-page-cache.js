@@ -786,6 +786,51 @@ check('44. 界面：隐私模式的名单单独一块，且说清「两份分开
   assert.ok(js.includes("bindList('offline-private-site-block'"), '隐私黑名单要能改');
 });
 
+check('45. 两份名单导出成两种文件：导错文件必须被拒，并说明这是另一份', () => {
+  const policy = { mode: 'allowlist', allow: ['keep.example.com'], block: ['never.example.com'] };
+  const normalFile = cache.exportCacheSites(policy, Date.UTC(2026, 10, 14), 'normal');
+  const privateFile = cache.exportCacheSites(policy, Date.UTC(2026, 10, 14), 'private');
+  assert.equal(normalFile.kind, 'nyx-cache-sites', '普通模式沿用原 kind');
+  assert.equal(privateFile.kind, 'nyx-private-cache-sites', '隐私模式是另一个 kind');
+  assert.equal(privateFile.scope, 'private', '导出文件里要写明是哪一份');
+
+  const wrong = cache.importCacheSites(JSON.stringify(privateFile), { mode: 'all', allow: [], block: [] }, { scope: 'normal' });
+  assert.ok(wrong.ok === false, '把隐私名单导进普通模式必须被拒');
+  assert.ok(/另一份名单/.test(wrong.error), `拒绝时要说明这是另一份：${wrong.error}`);
+
+  const right = cache.importCacheSites(JSON.stringify(privateFile), { mode: 'all', allow: [], block: [] }, { scope: 'private' });
+  assert.ok(right.ok === true, '导到正确的那一份要成功');
+  assert.equal(right.policy.allow.length, 1, '名单内容要真的进来');
+});
+
+check('46. 接线：两份名单各有自己的导出/导入入口与结果行', () => {
+  const main = read('src/main.js');
+  assert.ok(/input\.scope === 'private' \? 'private' : 'normal'/.test(main), '导出要认 scope');
+  assert.ok(/exportCacheSites\(policy, Date\.now\(\), scope\)/.test(main), '导出要把 scope 传下去');
+  assert.ok(/importCacheSites\(text, privateSide \? privateSitePolicy\(\) : cacheSitePolicy\(\), \{/.test(main), '导入要按 scope 选名单');
+  assert.ok(/saveCacheSitePolicy\(result\.policy, scope\)/.test(main), '导入后要存回正确的那一份');
+  assert.ok(main.includes('nyx-private-cache-sites'), '导出文件名要能区分两份');
+
+  const preload = read('src/preload.js');
+  assert.ok(/offlineCacheSitesExport: \(payload\) => ipcRenderer\.invoke\('nyx:offline:sites-export', payload \|\| \{\}\)/.test(preload), 'preload 要透传 scope');
+
+  const html = read('src/renderer/settings.html');
+  for (const id of [
+    'btn-offline-sites-export',
+    'btn-offline-sites-import',
+    'btn-offline-private-sites-export',
+    'btn-offline-private-sites-import',
+    'offline-site-io',
+    'offline-private-site-io',
+  ]) {
+    assert.ok(html.includes(`id="${id}"`), `设置页缺 ${id}`);
+  }
+
+  const js = read('src/renderer/settings.js');
+  assert.ok(/const wireSiteIo = \(scope, prefix, lineId, what\)/.test(js), '两套按钮共用一个接线函数');
+  assert.ok(js.includes("wireSiteIo('private', 'offline-private-sites'"), '隐私那套也要接上');
+});
+
 /* ------------------------------------------------------------------ */
 const failed = checks.filter((item) => !item.ok);
 const total = checks.length;

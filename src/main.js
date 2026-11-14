@@ -7094,36 +7094,45 @@ function registerOfflineCacheIpc() {
    * 同步对话框：一旦返回 Promise 又会重演下载那个坑（窗口销毁、resolve 丢失）。
    * 导出写的是纯 JSON 文本，导入按 kind 校验类型——别把 agent 站点名单当缓存名单导入。
    */
-  ipcMain.handle('nyx:offline:sites-export', () => {
+  ipcMain.handle('nyx:offline:sites-export', (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    const scope = input.scope === 'private' ? 'private' : 'normal';
+    const privateSide = scope === 'private';
     try {
-      const policy = cacheSitePolicy();
+      const policy = privateSide ? privateSitePolicy() : cacheSitePolicy();
       const target = dialog.showSaveDialogSync(runtime.win || undefined, {
-        title: '导出离线缓存的站点名单',
-        defaultPath: path.join(app.getPath('documents'), `nyx-cache-sites-${new Date().toISOString().slice(0, 10)}.json`),
+        title: privateSide ? '导出隐私模式的站点名单' : '导出离线缓存的站点名单',
+        defaultPath: path.join(
+          app.getPath('documents'),
+          `${privateSide ? 'nyx-private-cache-sites' : 'nyx-cache-sites'}-${new Date().toISOString().slice(0, 10)}.json`,
+        ),
         filters: [{ name: 'JSON', extensions: ['json'] }],
       });
       if (!target) return { ok: false, canceled: true, error: '已取消导出。' };
-      const payload = exportCacheSites(policy, Date.now());
-      fs.writeFileSync(target, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+      const body = exportCacheSites(policy, Date.now(), scope);
+      fs.writeFileSync(target, `${JSON.stringify(body, null, 2)}\n`, 'utf8');
       if (runtime.diagnostics) {
         runtime.diagnostics.info('PAGE_CACHE_SITES_EXPORTED', '导出离线缓存站点名单', {
-          allow: payload.allow.length,
-          block: payload.block.length,
+          scope,
+          allow: body.allow.length,
+          block: body.block.length,
         });
       }
-      return { ok: true, path: target, allow: payload.allow.length, block: payload.block.length };
+      return { ok: true, scope, path: target, allow: body.allow.length, block: body.block.length };
     } catch (err) {
       const reason = err && err.message ? err.message : String(err);
-      if (runtime.diagnostics) runtime.diagnostics.error('PAGE_CACHE_SITES_EXPORT_FAILED', '导出离线缓存站点名单失败', { error: reason });
+      if (runtime.diagnostics) runtime.diagnostics.error('PAGE_CACHE_SITES_EXPORT_FAILED', '导出离线缓存站点名单失败', { scope, error: reason });
       return { ok: false, error: `没能导出名单：${reason}` };
     }
   });
 
   ipcMain.handle('nyx:offline:sites-import', (_event, payload) => {
     const input = payload && typeof payload === 'object' ? payload : {};
+    const scope = input.scope === 'private' ? 'private' : 'normal';
+    const privateSide = scope === 'private';
     try {
       const picked = dialog.showOpenDialogSync(runtime.win || undefined, {
-        title: '导入离线缓存的站点名单',
+        title: privateSide ? '导入隐私模式的站点名单' : '导入离线缓存的站点名单',
         properties: ['openFile'],
         filters: [{ name: 'JSON', extensions: ['json'] }],
       });
@@ -7136,17 +7145,24 @@ function registerOfflineCacheIpc() {
         const reason = err && err.message ? err.message : String(err);
         return { ok: false, error: `这个文件读不出来：${reason}` };
       }
-      const result = importCacheSites(text, cacheSitePolicy(), { mode: input.mode === 'replace' ? 'replace' : 'merge' });
+      const result = importCacheSites(text, privateSide ? privateSitePolicy() : cacheSitePolicy(), {
+        mode: input.mode === 'replace' ? 'replace' : 'merge',
+        scope,
+      });
       if (!result.ok) {
         if (runtime.diagnostics) {
-          runtime.diagnostics.warn('PAGE_CACHE_SITES_IMPORT_REJECTED', '导入的缓存站点名单被拒绝', { error: result.error });
+          runtime.diagnostics.warn('PAGE_CACHE_SITES_IMPORT_REJECTED', '导入的缓存站点名单被拒绝', {
+            scope,
+            error: result.error,
+          });
         }
         return { ok: false, error: result.error };
       }
-      const saved = saveCacheSitePolicy(result.policy);
-      if (!saved.ok) return { ok: false, error: saved.error, ...cacheSitePolicy() };
+      const saved = saveCacheSitePolicy(result.policy, scope);
+      if (!saved.ok) return { ok: false, error: saved.error, scope };
       if (runtime.diagnostics) {
         runtime.diagnostics.info('PAGE_CACHE_SITES_IMPORTED', '导入离线缓存站点名单', {
+          scope,
           added: result.added,
           duplicates: result.duplicates,
           rejected: result.rejectedCount,

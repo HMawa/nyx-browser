@@ -1410,64 +1410,71 @@
     bindList('offline-private-site-allow', 'allow', '隐私模式「只存」名单', 'private');
     bindList('offline-private-site-block', 'block', '隐私模式「永不存」名单', 'private');
 
-    // 名单搬走 / 搬回来（候选⑤）
-    const setIo = (text, bad) => {
-      const line = byId('offline-site-io');
-      if (!line) return;
-      line.textContent = text || '';
-      line.className = bad ? 'hint is-warn' : 'hint';
+    // 名单搬走 / 搬回来（候选⑤ + 第五轮 ③：普通模式与隐私模式各一份，别导错）
+    const wireSiteIo = (scope, prefix, lineId, what) => {
+      const line = byId(lineId);
+      const setIo = (text, bad) => {
+        if (!line) return;
+        line.textContent = text || '';
+        line.className = bad ? 'hint is-warn' : 'hint';
+      };
+      const payload = (extra) => ({ scope, ...(extra || {}) });
+
+      const exportBtn = byId(`btn-${prefix}-export`);
+      if (exportBtn && !exportBtn.dataset.wired) {
+        exportBtn.dataset.wired = '1';
+        exportBtn.addEventListener('click', async () => {
+          if (!window.nyx || typeof window.nyx.offlineCacheSitesExport !== 'function') {
+            setIo('当前内核不支持导出站点名单。', true);
+            return;
+          }
+          exportBtn.disabled = true;
+          try {
+            const res = await window.nyx.offlineCacheSitesExport(payload());
+            if (!res || res.ok === false) {
+              setIo((res && res.canceled ? '' : `没能导出${what}：`) + ((res && res.error) || '未知原因'), !(res && res.canceled));
+              return;
+            }
+            setIo(`已导出${what}：${res.path}（只存 ${res.allow} 个 / 永不存 ${res.block} 个）`, false);
+          } catch (err) {
+            setIo(`没能导出${what}：${err && err.message ? err.message : '未知原因'}`, true);
+          } finally {
+            exportBtn.disabled = false;
+          }
+        });
+      }
+
+      const importBtn = byId(`btn-${prefix}-import`);
+      if (importBtn && !importBtn.dataset.wired) {
+        importBtn.dataset.wired = '1';
+        importBtn.addEventListener('click', async () => {
+          if (!window.nyx || typeof window.nyx.offlineCacheSitesImport !== 'function') {
+            setIo('当前内核不支持导入站点名单。', true);
+            return;
+          }
+          importBtn.disabled = true;
+          try {
+            const res = await window.nyx.offlineCacheSitesImport(payload({ mode: 'merge' }));
+            if (!res || res.ok === false) {
+              setIo((res && res.canceled ? '' : `没能导入${what}：`) + ((res && res.error) || '未知原因'), !(res && res.canceled));
+              return;
+            }
+            renderCacheSites(res);
+            const info = res.imported || {};
+            setIo(
+              `${info.summary || '导入完成。'}${info.rejectedCount ? `（跳过的条目：${(info.rejected || []).join('、')}）` : ''}`,
+              false,
+            );
+          } catch (err) {
+            setIo(`没能导入${what}：${err && err.message ? err.message : '未知原因'}`, true);
+          } finally {
+            importBtn.disabled = false;
+          }
+        });
+      }
     };
-
-    const exportBtn = byId('btn-offline-sites-export');
-    if (exportBtn) {
-      exportBtn.addEventListener('click', async () => {
-        if (!window.nyx || typeof window.nyx.offlineCacheSitesExport !== 'function') {
-          setIo('当前内核不支持导出站点名单。', true);
-          return;
-        }
-        exportBtn.disabled = true;
-        try {
-          const res = await window.nyx.offlineCacheSitesExport();
-          if (!res || res.ok === false) {
-            setIo((res && res.canceled ? '' : '没能导出名单：') + ((res && res.error) || '未知原因'), !(res && res.canceled));
-            return;
-          }
-          setIo(`已导出：${res.path}（只缓存 ${res.allow} 个 / 永不缓存 ${res.block} 个）`, false);
-        } catch (err) {
-          setIo(`没能导出名单：${err && err.message ? err.message : '未知原因'}`, true);
-        } finally {
-          exportBtn.disabled = false;
-        }
-      });
-    }
-
-    const importBtn = byId('btn-offline-sites-import');
-    if (importBtn) {
-      importBtn.addEventListener('click', async () => {
-        if (!window.nyx || typeof window.nyx.offlineCacheSitesImport !== 'function') {
-          setIo('当前内核不支持导入站点名单。', true);
-          return;
-        }
-        importBtn.disabled = true;
-        try {
-          const res = await window.nyx.offlineCacheSitesImport({ mode: 'merge' });
-          if (!res || res.ok === false) {
-            setIo((res && res.canceled ? '' : '没能导入名单：') + ((res && res.error) || '未知原因'), !(res && res.canceled));
-            return;
-          }
-          renderCacheSites(res);
-          const info = res.imported || {};
-          setIo(
-            `${info.summary || '导入完成。'}${info.rejectedCount ? `（跳过的条目：${(info.rejected || []).join('、')}）` : ''}`,
-            false,
-          );
-        } catch (err) {
-          setIo(`没能导入名单：${err && err.message ? err.message : '未知原因'}`, true);
-        } finally {
-          importBtn.disabled = false;
-        }
-      });
-    }
+    wireSiteIo('normal', 'offline-sites', 'offline-site-io', '离线缓存的站点名单');
+    wireSiteIo('private', 'offline-private-sites', 'offline-private-site-io', '隐私模式的站点名单');
   }
 
   function setOfflineStatus(text, bad) {
