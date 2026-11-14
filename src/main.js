@@ -175,6 +175,13 @@ const {
 // 安全基线（C2）：声明版本 vs 运行时版本，设置页可见 + 回归可卡
 const { ADVISORY_SOURCES, securityBaselinePayload } = require('./core/security-baseline');
 
+// 安装包签名状态（第五轮 ②）：把 Get-AuthenticodeSignature 的四个字段翻成中文结论
+const {
+  describeSignature: describePackageSignature,
+  describeSignatureFacts: describePackageSignatureFacts,
+  parseSignaturePayload: parsePackageSignaturePayload,
+} = require('./core/signing-status');
+
 // 外壳防护现值表（C3）：每个窗口角色的期望开关值 + CSP 审计 + preload 暴露面分类
 const {
   WINDOW_ROLES: SECURITY_WINDOW_ROLES,
@@ -464,6 +471,9 @@ const runtime = {
   agentSettingHistory: [],
   /** agent 改设置的成功记录（key / 新值 / 旧值 / 时间），用于「撤销上一次」 */
   agentSettingUndo: [],
+  // 安装包签名状态缓存（第五轮 ②）：读一次 exe 的 Authenticode 签名要起 PowerShell，
+  // 十分钟内直接复用上一次结果，避免用户反复点「重新检查」把进程列表刷满
+  signingStatus: null,
   /** agent 会话空闲计时器（清单 G）：没有新动作时用来恢复"标签可以休眠" */
   agentSessionTimer: null,
   /** 下载中心窗口（独立 BrowserWindow） */
@@ -5932,8 +5942,99 @@ function applyStartupPrefs() {
   runtime.tabManager.defaultUrl = resolveNewTabUrl();
 }
 
+const SIGNING_STATUS_CACHE_MS = 10 * 60 * 1000;
+
+/**
+ * 读本进程 exe 的 Authenticode 签名（第五轮 ②：证书到期提醒进界面）。
+ *
+ * 为什么读的是 `process.execPath` 而不是项目里的 .cer：
+ *   用户装的这个可执行文件到底有没有签名、证书有没有过期，只能问它自己；
+ *   读仓库里那份 cer 只能证明「我们签过某个包」，证明不了「你现在跑的这个包是签过的」。
+ * 读不出来时返回 unknown 并带上原因，绝不假装有效。
+ */
+function readSigningStatus(options = {}) {
+  const force = Boolean(options && options.force);
+  const cached = runtime.signingStatus;
+  if (!force && cached && Date.now() - cached.at < SIGNING_STATUS_CACHE_MS) {
+    return Promise.resolve({ ...cached.value, cached: true });
+  }
+
+  const target = process.execPath;
+  const script = [
+    '$s = Get-AuthenticodeSignature -LiteralPath $env:NYX_SIGN_TARGET',
+    '$cert = $s.SignerCertificate',
+    '$o = [ordered]@{ Status = [string]$s.Status; Subject = ""; Thumbprint = ""; NotAfter = "" }',
+    'if ($cert -ne $null) {',
+    '  $o.Subject = [string]$cert.Subject',
+    '  $o.Thumbprint = [string]$cert.Thumbprint',
+    '  $o.NotAfter = $cert.NotAfter.ToString("o")',
+    '}',
+    '$o | ConvertTo-Json -Compress',
+  ].join('\n');
+
+  return new Promise((resolve) => {
+    const finish = (payload) => {
+      const value = {
+        ok: true,
+        executable: target,
+        packaged: app.isPackaged,
+        at: Date.now(),
+        ...payload,
+      };
+      runtime.signingStatus = { at: value.at, value };
+      resolve(value);
+    };
+
+    try {
+      execFile(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command', script],
+        { windowsHide: true, timeout: 15000, env: { ...process.env, NYX_SIGN_TARGET: target } },
+        (err, stdout, stderr) => {
+          if (err) {
+            const reason = (stderr && String(stderr).trim()) || (err && err.message ? err.message : '未知错误');
+            diagnostics.warn('SIGNING_STATUS_READ_FAILED', '读不出安装包签名状态', { error: reason });
+            finish({
+              ok: false,
+              level: 'unknown',
+              label: '读不出签名',
+              error: `没能读到这个可执行文件的签名：${reason}`,
+              facts: [],
+            });
+            return;
+          }
+          const parsed = parsePackageSignaturePayload(stdout);
+          if (!parsed.ok) {
+            diagnostics.warn('SIGNING_STATUS_PARSE_FAILED', '签名信息解析失败', { error: parsed.error });
+            finish({ ok: false, level: 'unknown', label: '读不出签名', error: parsed.error, facts: [] });
+            return;
+          }
+          const described = describePackageSignature(parsed.value);
+          finish({ ...described, facts: describePackageSignatureFacts(described) });
+        },
+      );
+    } catch (err) {
+      diagnostics.error('SIGNING_STATUS_SPAWN_FAILED', '起不来读签名的子进程', {
+        error: err && err.message,
+      });
+      finish({
+        ok: false,
+        level: 'unknown',
+        label: '读不出签名',
+        error: `没能起 PowerShell 读签名：${err && err.message ? err.message : String(err)}`,
+        facts: [],
+      });
+    }
+  });
+}
+
 /** 设置中心 IPC：界面偏好读写、应用与运行时信息 */
 function registerSettingsIpc() {
+  // 安装包签名状态（第五轮 ②）：读自身 exe 的签名与证书有效期，如实翻译
+  ipcMain.handle('nyx:signing:status', (_event, payload) =>
+    readSigningStatus({ force: Boolean(payload && payload.force) }),
+  );
+
   ipcMain.handle('nyx:ui:prefs', () => ({ ok: true, ui: currentUiPrefs() }));
 
   ipcMain.handle('nyx:ui:prefs-set', (_event, payload) => {

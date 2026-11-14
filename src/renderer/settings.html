@@ -1269,6 +1269,28 @@
               </div>
             </section>
 
+            <!-- 安装包签名（第五轮 ②）：自身 exe 的签名状态与证书有效期 -->
+            <section class="info-card">
+              <div class="info-head">
+                <h3>安装包签名</h3>
+                <span class="badge" id="signing-badge">—</span>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  这里读的是正在运行的这一个可执行文件的签名，不是仓库里的证书文件：
+                  只有它才能说明「你现在跑的这个包是不是签过的、证书有没有过期」。
+                  自签名能证明文件没被改过，但不能免掉系统的陌生发布者提示。
+                  证书快到期时这里会提前提醒，重新签名见仓库内
+                  <code>docs/Nyx-代码签名说明.md</code>。
+                </p>
+                <div class="kv-grid" id="signing-grid"></div>
+                <p class="hint" id="signing-summary" role="status" aria-live="polite">读取中…</p>
+                <div class="sec-actions">
+                  <button type="button" class="btn btn-mini" id="btn-signing-recheck">重新检查</button>
+                </div>
+              </div>
+            </section>
+
             <section class="info-card">
               <div class="info-head">
                 <h3>关于 Nyx</h3>

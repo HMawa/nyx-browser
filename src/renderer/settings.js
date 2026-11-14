@@ -317,6 +317,8 @@
       loadFootprint();
       // 安全基线（C2）：运行时版本每次进来的真相，必须实时比对而不是缓存
       loadSecurityBaseline();
+      // 安装包签名（第五轮 ②）：exe 的签名与证书有效期，内核侧有十分钟缓存
+      loadSigningStatus();
     }
 
     // 诊断（清单 C1）：状态与错误记录随时会变，每次进入都重新拉
@@ -3029,6 +3031,77 @@ async function loadSecurityBaseline() {
   if (summary) {
     summary.textContent = res.summary || (res.ok ? '运行时与安全基线一致' : '运行时与安全基线不一致');
     summary.className = res.ok ? 'hint' : 'hint is-warn';
+  }
+}
+
+/**
+ * 安装包签名（第五轮 ②）：把 exe 的签名状态、主体、指纹、证书到期日摆出来。
+ * 判级与中文说法全在主进程（src/core/signing-status.js），界面只负责显示，
+ * 免得同一套规则在两边各写一遍、哪天改成两套说法。
+ */
+async function loadSigningStatus(force) {
+  const grid = byId('signing-grid');
+  const badge = byId('signing-badge');
+  const summary = byId('signing-summary');
+  const btn = byId('btn-signing-recheck');
+  if (!grid) return;
+
+  if (btn && !btn.dataset.wired) {
+    btn.dataset.wired = '1';
+    btn.addEventListener('click', () => {
+      btn.disabled = true;
+      loadSigningStatus(true).finally(() => {
+        btn.disabled = false;
+      });
+    });
+  }
+
+  if (typeof window.nyx.signingStatus !== 'function') {
+    if (badge) badge.textContent = '不支持';
+    grid.textContent = '';
+    if (summary) summary.textContent = '当前内核不支持读取签名状态。';
+    return;
+  }
+
+  const res = await window.nyx.signingStatus({ force: Boolean(force) }).catch((err) => ({
+    ok: false,
+    error: err && err.message ? err.message : String(err),
+  }));
+
+  // 这里的语义：`ok:false` 有两种情况——"读不出来"（level=unknown）
+  // 和"读出来了，但没签名/签名过期"（level=unsigned/expired）。后者是个确定的答案，
+  // 不能当成读取失败，否则界面会对着一个未签名的包说"读不出签名"。
+  const level = res && typeof res.level === 'string' ? res.level : '';
+  if (!res || level === '' || level === 'unknown') {
+    if (badge) {
+      badge.textContent = '读不出';
+      badge.className = 'badge bad';
+    }
+    renderKvGrid(grid, [['结论', (res && res.label) || '读不出签名']]);
+    if (summary) {
+      summary.textContent = (res && res.error) || '读不出这个可执行文件的签名。';
+      summary.className = 'hint is-warn';
+    }
+    return;
+  }
+
+  const facts = Array.isArray(res.facts) ? res.facts : [];
+  renderKvGrid(grid, [
+    ...facts.map((item) => [item.label, item.value]),
+    ['文件', res.executable || '—'],
+    ['运行形态', res.packaged ? '安装版' : '开发运行（不是安装包）'],
+  ]);
+
+  if (badge) {
+    const good = res.level === 'valid';
+    const warn = res.level === 'expiring';
+    badge.textContent = res.label || '未知';
+    badge.className = `badge ${good ? 'ok' : warn ? 'warn' : 'bad'}`;
+  }
+  if (summary) {
+    summary.textContent = res.message || '';
+    const bad = res.level !== 'valid' && res.level !== 'expiring';
+    summary.className = bad ? 'hint is-warn' : 'hint';
   }
 }
 

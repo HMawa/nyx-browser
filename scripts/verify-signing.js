@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * 代码签名回归（项数同步到 scripts/verify-all.js）。
@@ -406,6 +406,99 @@ if (process.argv.includes('--no-artifact')) {
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// 安装包签名状态进界面（第五轮 ②）：判定规则与界面接线
+// ---------------------------------------------------------------------------
+
+const signingStatus = require('../src/core/signing-status');
+const BASE_NOW = Date.UTC(2026, 10, 14);
+
+const farValid = signingStatus.describeSignature(
+  { status: 'Valid', subject: 'CN=Nyx Self-Signed', thumbprint: 'ABC', notAfter: '2031-11-14T00:00:00.0000000+08:00' },
+  { now: BASE_NOW },
+);
+check(
+  '有效签名且离到期还早 → 判为有效并给出剩余天数',
+  farValid.ok === true && farValid.level === 'valid' && farValid.daysLeft > 1500,
+  `level=${farValid.level}｜daysLeft=${farValid.daysLeft}`,
+);
+
+const soonValid = signingStatus.describeSignature(
+  { status: 'Valid', notAfter: '2026-11-24T00:00:00.0000000+08:00' },
+  { now: BASE_NOW },
+);
+check(
+  '签名有效但证书 30 天内到期 → 提醒（不是失败）',
+  soonValid.ok === true && soonValid.level === 'expiring' && soonValid.daysLeft === 10 && /重新签/.test(soonValid.message),
+  `level=${soonValid.level}｜daysLeft=${soonValid.daysLeft}`,
+);
+
+const expiredSig = signingStatus.describeSignature(
+  { status: 'Valid', notAfter: '2026-11-11T00:00:00.0000000+08:00' },
+  { now: BASE_NOW },
+);
+check(
+  '证书已过期 → 判为不可信并说明过期几天',
+  expiredSig.ok === false && expiredSig.level === 'expired' && /过期 3 天/.test(expiredSig.message),
+  `level=${expiredSig.level}｜${expiredSig.message.slice(0, 24)}`,
+);
+
+const unsignedSig = signingStatus.describeSignature({ status: 'NotSigned' });
+const suspicious = signingStatus.describeSignature({ status: 'HashMismatch' });
+check(
+  '「没签名」和「签名不可信」分开说，后者要提示重新下载',
+  unsignedSig.level === 'unsigned' && unsignedSig.suspicious === false && suspicious.level === 'unknown'
+    && suspicious.suspicious === true && /重新下载/.test(suspicious.message),
+  `unsigned=${unsignedSig.level}｜suspicious=${suspicious.level}/${suspicious.suspicious}`,
+);
+
+const noDate = signingStatus.describeSignature({ status: 'Valid', notAfter: '' });
+check(
+  '读不到有效期时不许当作「还没过期」',
+  noDate.ok === false && noDate.level === 'unknown' && /读不到/.test(noDate.message),
+  `level=${noDate.level}`,
+);
+
+const parsedOk = signingStatus.parseSignaturePayload(
+  '\uFEFF[{"Status":"Valid","Subject":"CN=x","Thumbprint":"T","NotAfter":"2031-11-14T00:00:00.0000000+08:00"}]',
+);
+const parsedBad = signingStatus.parseSignaturePayload('not json');
+const parsedEmpty = signingStatus.parseSignaturePayload('');
+check(
+  'PowerShell 输出解析：能吃掉 BOM 与数组包装，坏输入给中文原因',
+  parsedOk.ok === true && parsedOk.value.status === 'Valid' && parsedOk.value.thumbprint === 'T'
+    && parsedBad.ok === false && /JSON/.test(parsedBad.error)
+    && parsedEmpty.ok === false && /没读到/.test(parsedEmpty.error),
+  `ok=${parsedOk.ok}｜bad=${parsedBad.ok}｜empty=${parsedEmpty.ok}`,
+);
+
+const facts = signingStatus.describeSignatureFacts(farValid);
+check(
+  '界面事实表五段齐全，缺项写「—」',
+  Array.isArray(facts) && facts.length === 5 && facts[0].label === '签名状态'
+    && /2031-11-1\d/.test(facts[4].value)
+    && signingStatus.describeSignatureFacts({}).every((item) => item.value === '—'),
+  `facts=${facts.length}`,
+);
+
+const mainSrc = read('src/main.js');
+const preloadSrc = read('src/preload.js');
+const htmlSrc = read('src/renderer/settings.html');
+const settingsSrc = read('src/renderer/settings.js');
+check(
+  '接线：内核读自身 exe 的签名，界面只显示不重算',
+  /ipcMain\.handle\('nyx:signing:status'/.test(mainSrc)
+    && /function readSigningStatus\(/.test(mainSrc)
+    && /process\.execPath/.test(mainSrc)
+    && /SIGNING_STATUS_CACHE_MS = 10 \* 60 \* 1000/.test(mainSrc)
+    && /Get-AuthenticodeSignature -LiteralPath \$env:NYX_SIGN_TARGET/.test(mainSrc)
+    && /signingStatus: \(payload\) => ipcRenderer\.invoke\('nyx:signing:status'/.test(preloadSrc)
+    && /async function loadSigningStatus\(force\)/.test(settingsSrc)
+    && /id="signing-badge"/.test(htmlSrc) && /id="signing-grid"/.test(htmlSrc)
+    && /id="signing-summary"/.test(htmlSrc) && /id="btn-signing-recheck"/.test(htmlSrc),
+  'main/preload/settings 四处都在',
+);
 
 const failed = checks.filter((item) => !item.ok);
 console.log('');

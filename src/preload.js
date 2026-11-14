@@ -108,6 +108,9 @@ contextBridge.exposeInMainWorld('nyx', {
   /** 打开安全公告页（只接受 electron / chromium / node 三个 key，URL 由主进程决定） */
   openSecurityAdvisory: (payload) => ipcRenderer.invoke('nyx:security:advisory', payload || {}),
 
+  /** 安装包签名状态（第五轮 ②）：读当前 exe 的签名与证书有效期，force 跳过十分钟缓存 */
+  signingStatus: (payload) => ipcRenderer.invoke('nyx:signing:status', payload || {}),
+
   /** 外壳防护现值表（C3）：每个窗口角色的隔离/Node/沙箱实测值 + CSP 扫描 + 暴露面分类 */
   securitySwitches: () => ipcRenderer.invoke('nyx:security:switches'),
 
