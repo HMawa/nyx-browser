@@ -4,7 +4,7 @@
 
 - **双模式**：`persist:nyx-normal`（持久） / `nyx-private`（纯内存，退出即清）
 - **内置内核**：mihomo（Clash Meta）以独立进程运行，只监听 `127.0.0.1`，安装时按 SHA256 校验下载
-- **本地接口**：HTTP（`127.0.0.1`，需 `X-Nyx-Token`）+ MCP stdio，8 个浏览器操作工具
+- **本地接口**：HTTP（`127.0.0.1`，需 `X-Nyx-Token`）+ MCP stdio，9 个浏览器操作工具；所有动作走同一条通道，带站点授权、动作留痕与急停
 - **无遥测**：不含统计、崩溃上报、远程日志；没有自建服务器
 - 技术栈：Electron 43 / Node.js / 原生 HTML+CSS+JS，无前端框架
 
@@ -232,13 +232,16 @@ Nyx 启动后在 `127.0.0.1` 上开一个 HTTP 服务，供本机脚本或 AI �
 | type | 参数 | 说明 |
 | --- | --- | --- |
 | `navigate` | `url` | 当前标签打开网址 |
-| `screenshot` | — | 页面截图 |
-| `click` | `selector`、`index?` | 点击元素（同选择器多命中时可指定序号） |
-| `type` | `selector`、`text`、`clear?`、`submit?` | 输入文本 |
+| `readPage` | `maxText?`、`maxElements?` | **首选**：读结构化页面（标题、正文摘要、可交互元素与稳定 id），不返回图像 |
+| `screenshot` | — | 页面截图（仅人工辅助，别用它让 agent 猜页面） |
+| `click` | `elementId?`、`selector?`、`index?` | 点元素：优先用 `readPage` 给出的稳定 id，元素不存在会明确报 `ELEMENT_NOT_FOUND` |
+| `type` | `elementId?`、`selector?`、`text`、`clear?`、`submit?` | 输入文本（**每次都要人工确认**，密码类输入内容不落审计） |
 | `executeJS` | `code` | 在页面上下文执行脚本 |
 | `extractText` | `selector?`、`maxLength?` | 提取文本 |
 | `state` | — | 读取状态 |
 | `riskLog` | `limit?`、`onlyBlocked?` | 读取请求风险日志 |
+
+所有动作都经过同一条通道（`src/core/agent-dispatch.js`）：先按站点授权判定 → 需要确认就挂起等人在桌面端点一下 → 写审计 → 执行 → 回写结果。命中屏蔽名单或全局关闭时直接拒绝；`click` / `type` / 下载这类动作的确认**不因白名单而豁免**。
 
 ```powershell
 $token = Get-Content "$env:APPDATA\Nyx\api-token.txt" -Raw
@@ -257,13 +260,25 @@ Invoke-RestMethod "http://127.0.0.1:$port/mode/switch" -Method Post `
 | 工具 | 参数 |
 | --- | --- |
 | `nyx_navigate` | `url` |
-| `nyx_screenshot` | —（返回 PNG 图像内容） |
-| `nyx_click` | `selector`、`index?` |
-| `nyx_type` | `selector`、`text`、`clear?`、`submit?` |
+| `nyx_read_page` | `maxText?`、`maxElements?`（**首选**：结构化页面，含稳定元素 id） |
+| `nyx_screenshot` | —（返回 PNG，仅人工辅助） |
+| `nyx_click` | `elementId?`、`selector?`、`index?` |
+| `nyx_type` | `elementId?`、`selector?`、`text`、`clear?`、`submit?` |
 | `nyx_execute_js` | `code` |
 | `nyx_extract_text` | `selector?`、`maxLength?` |
 | `nyx_state` | — |
 | `nyx_risk_log` | `limit?`、`onlyBlocked?` |
+
+### Agent 访问控制
+
+浏览器交给 agent 之后，四件事都落在同一条通道上（都在「设置 → Agent 访问」里可见可改）：
+
+- **站点三层授权**：白名单进站免问、屏蔽名单直接拒绝、未命中且全局开启时逐站问一次（可勾「这次会话信任」）；**屏蔽永远优先**，两侧冲突时拒绝赢。
+- **动作留痕**：每个动作（含下载、输入）都记一条 JSON Lines（`<userData>/agent-audit.jsonl`），可筛选、可导出 CSV/JSON；输入内容只记长度与首尾两字。
+- **急停是真刹车**：工具栏常驻按钮 + 全局热键 `Ctrl+Alt+X`，立即中断在途动作、拒绝后续，`Ctrl+J` 之外的会话标记为 stopped。诚实边界：已发出的单条 `executeJavaScript` 无法在内核里中途掐断，保证的是「不再派发下一条」。
+- **接入模式**：默认内置（MCP 走 Nyx 自己的接口，审计完整）；切「外部接入（CDP）」需要两步确认且不允许关掉提示，因为它让第三方进程直接驱动浏览器——审计只剩「经过浏览器的部分」，且**必须重启**才生效（CDP 端口只能在进程启动时打开）。
+
+页面摘要（侧栏「≡」）默认关闭，**纯抽取式**：只从页面原文挑句子，再把抓包结论（域名、请求数、失败数、主要接口）一起给，**不调用任何生成式接口**；「页面显示成功、接口其实 500」是最容易被骗的地方。
 
 MCP 客户端配置示例（把路径换成你自己的仓库位置）：
 
