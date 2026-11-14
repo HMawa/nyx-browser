@@ -70,6 +70,14 @@ const {
   sanitizePolicy: sanitizeSitePolicy,
 } = require('./core/agent-sites');
 const {
+  SETTING_DISCLAIMER,
+  SETTING_KEYS,
+  SETTING_LOCKED,
+  SETTING_SCHEMA,
+  describeSettingsSchema,
+  planSettingChange: planAgentSettingChange,
+} = require('./core/agent-settings');
+const {
   AGENT_DEBUG_PORT_FILE,
   DEFAULT_AGENT_MODE,
   agentModePayload,
@@ -3877,6 +3885,7 @@ function registerIpc() {
   registerAgentSitesIpc();
   registerAgentModeIpc();
   registerDigestIpc();
+  registerAgentSettingsIpc();
 
   registerUpdateIpc();
 
@@ -8329,6 +8338,129 @@ function registerAgentAuditIpc() {
 }
 
 /**
+ * 让 agent 改设置（用户第 6 项）。
+ *
+ * 边界写死在这里，而不是靠"界面别点"：
+ *   - 只有 `src/core/agent-settings.js` 的白名单键能被改（锁死的键连问都不许）；
+ *   - 判定走 `planSettingChange`（限流 / 需确认 / 无变化都有中文原因），这里只落盘；
+ *   - 每次成功都记一条诊断，界面上也有对应的说明卡与免责。
+ */
+function agentSettingsSnapshot() {
+  const ui = runtime.uiStore ? runtime.uiStore.get() : {};
+  const current = {};
+  for (const key of SETTING_KEYS) current[key] = ui[key];
+  const schema = describeSettingsSchema();
+  return {
+    ...schema,
+    current,
+    // 界面上"哪些键是锁死的"要和判定用的是同一份表
+    lockedKeys: Object.keys(SETTING_LOCKED),
+    disclaimer: SETTING_DISCLAIMER,
+  };
+}
+
+async function applyAgentSetting(params) {
+  const input = params && typeof params === 'object' ? params : {};
+  const key = typeof input.key === 'string' ? input.key.trim() : '';
+  const ui = runtime.uiStore ? runtime.uiStore.get() : {};
+  const history = Array.isArray(runtime.agentSettingHistory) ? runtime.agentSettingHistory : [];
+  const now = Date.now();
+  runtime.agentSettingHistory = history.filter((stamp) => now - stamp < 60 * 1000);
+
+  const plan = planAgentSettingChange(
+    { key, value: input.value, confirm: input.confirm === true },
+    { current: ui[key], history: runtime.agentSettingHistory, now },
+  );
+
+  if (!plan.ok) {
+    if (plan.code !== 'RATE_LIMITED') {
+      diagnostics.warn('AGENT_SETTINGS_REJECTED', `agent 改设置被拒：${key || '（没给键）'}`, {
+        code: plan.code,
+        key,
+      });
+    }
+    return {
+      ok: false,
+      code: plan.code,
+      error: plan.error || plan.message,
+      disclaimer: SETTING_DISCLAIMER,
+      locked: plan.locked === true,
+      needsConfirm: plan.code === 'NEED_CONFIRM',
+    };
+  }
+
+  if (plan.code === 'NO_CHANGE') {
+    return {
+      ok: true,
+      code: 'NO_CHANGE',
+      key,
+      value: plan.value,
+      message: plan.message,
+      disclaimer: SETTING_DISCLAIMER,
+    };
+  }
+
+  if (!runtime.uiStore) {
+    return { ok: false, code: 'STORE_UNAVAILABLE', error: '设置存储还没就绪，这次没有改。', disclaimer: SETTING_DISCLAIMER };
+  }
+
+  // 关掉离线缓存时要把已存的正文一起清掉——和界面上手动关掉是同一条路径，
+  // 免得"agent 关掉了但旧快照还躺在磁盘上"。
+  if (key === 'offlineCacheEnabled' && plan.value === false) {
+    clearPageCache('agent-disabled');
+  }
+
+  const saved = runtime.uiStore.set(key, plan.value);
+  if (!saved || saved.ok === false) {
+    const reason = (saved && saved.error) || '写入失败';
+    diagnostics.error('AGENT_SETTINGS_SAVE_FAILED', `agent 改设置没能保存：${key}`, { key, reason });
+    return { ok: false, code: 'SAVE_FAILED', error: `没能保存 ${key}：${reason}`, disclaimer: SETTING_DISCLAIMER };
+  }
+
+  runtime.agentSettingHistory.push(now);
+
+  // 标签休眠改完要立刻生效，否则用户会以为"改了没反应"
+  if (key === 'tabSleepMinutes' && runtime.tabManager && typeof runtime.tabManager.setSleepAfterMs === 'function') {
+    try {
+      runtime.tabManager.setSleepAfterMs(sleepMinutesToMs(plan.value));
+    } catch (err) {
+      console.warn('[Nyx] 应用标签休眠设置失败：', err && err.message);
+    }
+  }
+
+  diagnostics.info('AGENT_SETTINGS_CHANGED', `agent 改了设置：${key}`, {
+    key,
+    value: plan.value,
+    summary: plan.summary,
+  });
+  if (typeof pushAgentStatus === 'function') pushAgentStatus();
+  if (typeof notifyNotice === 'function') {
+    notifyNotice({
+      level: 'info',
+      code: 'AGENT_SETTINGS_CHANGED',
+      title: '有个 agent 改了你的设置',
+      message: `${plan.summary}。改了什么可以在「设置 → Agent 访问 → 动作留痕」里看到。`,
+    });
+  }
+
+  return {
+    ok: true,
+    key,
+    value: plan.value,
+    summary: plan.summary,
+    message: plan.message,
+    disclaimer: SETTING_DISCLAIMER,
+    confirmRequired: plan.confirmRequired === true,
+  };
+}
+
+function registerAgentSettingsIpc() {
+  // 只读：界面把"agent 能改哪些键、为什么要确认、哪些键锁死"如实列出来。
+  // 真正的修改只走 agent 动作通道（dispatch → 人工确认 → 留痕），界面不给旁路。
+  ipcMain.handle('nyx:agent:settings', () => agentSettingsSnapshot());
+}
+
+/**
  * 站点三层授权的 IPC（清单 E）。
  * 设置页只提交"要加/要删哪一条"，判定规则全在 `src/core/agent-sites.js` 里，
  * 免得界面和主进程各写一套匹配逻辑、最后两边说法不一致。
@@ -8781,6 +8913,10 @@ async function startLocalApi() {
     // 标签管理器未就绪时的状态兜底里也要有出站链路，否则 /state 会出现"时有时无"的字段
     getNetwork: () => networkSnapshot(),
     getRiskLog,
+    // 改设置（用户第 6 项）：读 schema 与写改动都走 agent-settings.js 的规则，
+    // 这里只负责"把结论落到 uiStore 上"，不做任何额外放行
+    getSettings: () => agentSettingsSnapshot(),
+    applySetting: (params) => applyAgentSetting(params),
   });
 
   // 所有 agent 动作唯一入口：权限判定 → 人工确认 → 留痕 → 执行 → 回写结果

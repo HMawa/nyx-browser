@@ -40,6 +40,8 @@ const ACTION_TYPES = [
   'extractText',
   'state',
   'riskLog',
+  // 改设置：不碰页面，但同样必须在动作名单里，否则通道/执行器两份名单不一致
+  'settings',
 ];
 
 /** 页面内点击脚本：对目标元素派发完整鼠标事件序列 */
@@ -118,7 +120,7 @@ function buildExtractScript(selector) {
   })()`;
 }
 
-function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog }) {
+function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog, getSettings, applySetting }) {
   /** 取当前激活标签的 webContents */
   function activeWebContents() {
     const manager = getTabManager();
@@ -173,6 +175,24 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog }) 
 
       if (type === 'riskLog') {
         return wrap({ ok: true, log: getRiskLog({ limit: params.limit || 100, onlyBlocked: !!params.onlyBlocked }) });
+      }
+
+      // ---- 改设置：不碰页面，所以放在"必须要有活动标签"之前 ----
+      // 读 schema 与写改动都交给主进程注入的两个函数，判定规则在 src/core/agent-settings.js
+      if (type === 'settings') {
+        if (aborted()) return interrupted();
+        if (params.apply === true || params.key) {
+          if (typeof applySetting !== 'function') {
+            return wrap({ ok: false, error: '当前内核不支持由 agent 改设置' });
+          }
+          const applied = await applySetting(params);
+          return wrap(applied);
+        }
+        if (typeof getSettings !== 'function') {
+          return wrap({ ok: false, error: '当前内核不支持读取设置选项' });
+        }
+        const schema = getSettings();
+        return wrap({ ok: true, ...schema });
       }
 
       const wc = activeWebContents();

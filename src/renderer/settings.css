@@ -754,6 +754,56 @@
   color: var(--danger-soft);
 }
 
+/* 让 agent 改设置（用户第 6 项）：两列并排，窄屏自动落成上下两段 */
+.agent-setting-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  margin: 10px 0;
+}
+
+@media (max-width: 720px) {
+  .agent-setting-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.agent-setting-cols h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.agent-setting-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-setting-list li {
+  display: block;
+  padding: 6px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--bg-input) 65%, transparent);
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.agent-setting-list .site-host {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.warn-text {
+  color: var(--danger-soft);
+}
+
 .agent-site-list .site-remove {
   flex: none;
   padding: 2px 6px;

@@ -1,11 +1,11 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把二十二个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把二十三个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
- *  2. scripts/verify-ui-polish.js（界面体验，115 项）
+ *  2. scripts/verify-ui-polish.js（界面体验，116 项）
  *  3. scripts/verify-link-guard.js（出站链路守卫，14 项；纯 Node，不启动 Electron）
  *  4. scripts/verify-downloads.js（下载链路，16 项；纯 Node，不启动 Electron）
  *  5. scripts/verify-gpu-policy.js（图形性能策略，14 项；纯 Node，不启动 Electron）
@@ -24,7 +24,9 @@
  * 18. scripts/verify-page-cache.js（离线页面缓存、快照块结构、隐私加密与站点名单，34 项；纯 Node，不启动 Electron）
  * 19. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
  * 20. scripts/verify-runtime-compat.js（运行时兼容：剪贴板异步化与版本三处一致，9 项；纯 Node，不启动 Electron）
- * 21. scripts/verify-release-gate.js（发版门禁与安装器 e2e 接线，13 项；纯 Node，不跑安装包）
+ * 21. scripts/verify-release-gate.js（发版门禁与安装器 e2e 接线，16 项；纯 Node，不跑安装包）
+ * 22. scripts/verify-signing.js（安装包签名与打包接线，12 项；不看签名包时只跑静态守卫）
+ * 23. scripts/verify-agent-settings.js（agent 改设置：白名单 / 锁死 / 确认 / 限流，12 项；纯 Node）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -65,7 +67,7 @@ const STEPS = [
   {
     label: '界面体验回归',
     script: 'verify-ui-polish.js',
-    items: '115 项',
+    items: '116 项',
     timeoutMs: 360000,
   },
   {
@@ -183,6 +185,12 @@ const STEPS = [
     timeoutMs: 60000,
     /** 没打签名包时只跑静态守卫（脚本自己会打印「跳过真实签名检查」） */
     args: ['--no-artifact'],
+  },
+  {
+    label: 'agent 改设置回归',
+    script: 'verify-agent-settings.js',
+    items: '12 项',
+    timeoutMs: 60000,
   },
   {
     label: '打包产物冒烟',

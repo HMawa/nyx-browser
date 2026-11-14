@@ -250,6 +250,26 @@ async function main() {
     async ({ limit, onlyBlocked }) => (await invoke({ type: 'riskLog', params: { limit, onlyBlocked } })()),
   );
 
+  defineTool(
+    server,
+    'nyx_settings',
+    {
+      title: '设置（读 / 改）',
+      description:
+        '不传 key 时返回可改设置清单（含免责与限流规则）；传 key + value 时改一项设置。'
+        + '每次修改都要用户在 Nyx 里点一次确认，并写进动作留痕。'
+        + '隐私与安全相关的键（模式、出站方式、站点授权、接入模式、私密快照）不在可改范围内。'
+        + '要确认才能生效的键需要再带 confirm:true。',
+      inputSchema: {
+        key: z.string().optional().describe('要改的键，如 theme / tabSleepMinutes；不传则只读清单'),
+        value: z.union([z.string(), z.number(), z.boolean()]).optional().describe('新值'),
+        confirm: z.boolean().optional().describe('对需要确认的键，必须显式传 true'),
+      },
+    },
+    async ({ key, value, confirm }) =>
+      (await invoke({ type: 'settings', params: { key, value, confirm } }))(),
+  );
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error(`[Nyx-MCP] 已启动，转发目标：${runtime.baseUrl}`);

@@ -1049,6 +1049,34 @@
 
             <section class="info-card">
               <div class="info-head">
+                <h3>让 agent 改设置</h3>
+                <span class="badge" id="agent-settings-badge">—</span>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  外部 agent 可以通过本地接口改<strong>一小部分</strong>设置，每次都要你在确认框里点一次，
+                  改了什么会写进下面的「动作留痕」。这个接口<strong>改不了隐私与安全相关的键</strong>——
+                  那些只能在设置里由你自己改。
+                </p>
+                <div class="agent-setting-cols">
+                  <div>
+                    <h4>agent 能改（要确认才生效）</h4>
+                    <ul class="agent-setting-list" id="agent-settings-keys"></ul>
+                  </div>
+                  <div>
+                    <h4>agent 连问都不许改</h4>
+                    <ul class="agent-setting-list" id="agent-settings-locked"></ul>
+                  </div>
+                </div>
+                <p class="hint warn-text" id="agent-settings-disclaimer">
+                  这个接口只改本机上 Nyx 的偏好设置，每次修改都会写进 agent 动作留痕。
+                </p>
+                <p class="hint" id="agent-settings-status" role="status" aria-live="polite"></p>
+              </div>
+            </section>
+
+            <section class="info-card">
+              <div class="info-head">
                 <h3>紧急停止</h3>
                 <span class="badge" id="agent-badge">—</span>
               </div>

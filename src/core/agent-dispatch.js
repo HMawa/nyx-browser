@@ -28,6 +28,7 @@ const DISPATCH_TYPES = [
   'extractText',
   'state',
   'riskLog',
+  'settings',
 ];
 
 /** 不是由 dispatch 发起、但同样必须出现在审计面上的动作（下载由页面/系统触发） */
@@ -72,6 +73,10 @@ const CONFIRM_RULES = {
   download: {
     required: true,
     why: '下载会把文件写到本机磁盘，必须人工确认后才落盘',
+  },
+  settings: {
+    required: true,
+    why: '改设置会影响你之后所有的浏览行为（读写落盘、摘要开关等），必须人工确认后才生效',
   },
 };
 
@@ -166,6 +171,15 @@ function redactParams(type, params) {
         limit: Number.isFinite(source.limit) ? source.limit : 100,
         onlyBlocked: source.onlyBlocked === true,
       };
+    case 'settings':
+      // 只留"改了哪个键、改成什么"——值可能很长，但对审计来说够用
+      return {
+        key: typeof source.key === 'string' ? source.key.slice(0, 60) : '',
+        value: typeof source.value === 'string' || typeof source.value === 'number' || typeof source.value === 'boolean'
+          ? source.value
+          : undefined,
+        confirm: source.confirm === true,
+      };
     case 'download':
       return {
         filename: typeof source.filename === 'string' ? source.filename.slice(0, 120) : '',
@@ -181,6 +195,8 @@ function redactParams(type, params) {
 /** 留痕里“目标”一栏：稳定元素 id 优先，其次选择器，最后网址 */
 function describeTarget(type, params) {
   const source = params && typeof params === 'object' ? params : {};
+  // 改设置的目标是"哪个键"，没有页面元素可指
+  if (type === 'settings') return typeof source.key === 'string' ? source.key.slice(0, 60) : '（未指定键）';
   if (typeof source.elementId === 'string' && source.elementId) return source.elementId.slice(0, 40);
   if (typeof source.selector === 'string' && source.selector) return source.selector.slice(0, 200);
   if (typeof source.url === 'string' && source.url) return redactUrl(source.url);

@@ -158,6 +158,8 @@ contextBridge.exposeInMainWorld('nyx', {
   // agent 接入模式（清单 A）：切换要两次确认，第二次还得勾风险；改完要重启才生效。
   agentMode: () => ipcRenderer.invoke('nyx:agent:mode'),
   agentModeSet: (payload) => ipcRenderer.invoke('nyx:agent:mode-set', payload || {}),
+  // agent 改设置（用户第 6 项）：只读 schema；修改只能走 agent 动作通道（带人工确认与留痕）
+  agentSettings: () => ipcRenderer.invoke('nyx:agent:settings'),
   // 页面摘要（清单 F）：纯抽取式，默认关；关着时 run 会回一个明确原因
   digestGet: () => ipcRenderer.invoke('nyx:digest:get'),
   digestSet: (payload) => ipcRenderer.invoke('nyx:digest:set', payload || {}),

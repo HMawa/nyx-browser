@@ -91,3 +91,5 @@ ai-upscaled.png
 temp-package*.json
 package_20*.json
 10000_words.txt
+
+dist-sign/

@@ -3944,6 +3944,81 @@ async function loadFootprint() {
     loadAgentSites();
     loadAgentMode();
     loadDigestSetting();
+    loadAgentSettings();
+  }
+
+  /**
+   * 让 agent 改设置（用户第 6 项）——这里只展示"哪些键能改 / 哪些锁死 / 免责"。
+   * 修改入口只有 agent 动作通道（带人工确认与留痕），界面刻意不给旁路。
+   */
+  async function loadAgentSettings() {
+    const badge = byId('agent-settings-badge');
+    const keysList = byId('agent-settings-keys');
+    const lockedList = byId('agent-settings-locked');
+    const disclaimer = byId('agent-settings-disclaimer');
+    const status = byId('agent-settings-status');
+    if (!window.nyx.agentSettings) {
+      if (status) {
+        status.textContent = '当前内核不支持由 agent 改设置。';
+        status.className = 'hint is-warn';
+      }
+      return;
+    }
+    try {
+      const payload = await window.nyx.agentSettings();
+      if (!payload || payload.ok === false) {
+        if (status) {
+          status.textContent = `读取可改设置失败：${(payload && payload.error) || '没有返回原因'}`;
+          status.className = 'hint is-warn';
+        }
+        return;
+      }
+      const keys = Array.isArray(payload.keys) ? payload.keys : [];
+      const locked = Array.isArray(payload.locked) ? payload.locked : [];
+      if (badge) {
+        badge.textContent = `${keys.length} 个键可改`;
+        badge.className = 'badge ok';
+      }
+      if (keysList) {
+        keysList.innerHTML = '';
+        for (const item of keys) {
+          const li = document.createElement('li');
+          const name = document.createElement('span');
+          name.className = 'site-host';
+          name.textContent = item.key;
+          const desc = document.createElement('span');
+          desc.textContent = item.needsConfirm ? `　${item.label}（要确认）` : `　${item.label}`;
+          li.append(name, desc);
+          keysList.append(li);
+        }
+      }
+      if (lockedList) {
+        lockedList.innerHTML = '';
+        for (const item of locked) {
+          const li = document.createElement('li');
+          const name = document.createElement('span');
+          name.className = 'site-host';
+          name.textContent = item.key;
+          const desc = document.createElement('span');
+          desc.textContent = `　${item.why}`;
+          li.append(name, desc);
+          lockedList.append(li);
+        }
+      }
+      if (disclaimer && typeof payload.disclaimer === 'string' && payload.disclaimer) {
+        disclaimer.textContent = payload.disclaimer;
+      }
+      if (status) {
+        status.textContent = `一分钟内最多改 ${(payload.rateLimit && payload.rateLimit.max) || 10} 次；改完会立刻生效。`;
+        status.className = 'hint';
+      }
+      return payload;
+    } catch (err) {
+      if (status) {
+        status.textContent = `读取可改设置失败：${err && err.message ? err.message : err}`;
+        status.className = 'hint is-warn';
+      }
+    }
   }
 
   // 主界面加载失败页（A4）的「打开诊断」会要求设置窗口直接落到「诊断」分区

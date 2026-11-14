@@ -3393,11 +3393,62 @@ async function main() {
       }
     }
 
-    check('主窗口无未捕获脚本异常', shellErrors.length === 0, shellErrors.slice(0, 3).join(' | '));
+    // 让 agent 改设置（用户第 6 项）：设置页如实列出"能改 / 锁死 / 免责"
+    if (settings) {
+      try {
+        const card = await settings.eval(`(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          // 卡片在「Agent 访问」分区里，先进分区让脚本执行
+          document.querySelector('[data-sec="agent"]')?.click();
+          await wait(400);
+          const api = window.nyx.agentSettings ? await window.nyx.agentSettings() : null;
+          const keyRows = document.querySelectorAll('#agent-settings-keys li').length;
+          const lockedRows = document.querySelectorAll('#agent-settings-locked li').length;
+          const lockedText = (document.getElementById('agent-settings-locked') || {}).textContent || '';
+          const keysText = (document.getElementById('agent-settings-keys') || {}).textContent || '';
+          const disclaimer = (document.getElementById('agent-settings-disclaimer') || {}).textContent || '';
+          const badge = (document.getElementById('agent-settings-badge') || {}).textContent || '';
+          return {
+            ok: Boolean(api && api.ok !== false),
+            apiKeys: api && Array.isArray(api.keys) ? api.keys.length : 0,
+            apiLocked: api && Array.isArray(api.locked) ? api.locked.length : 0,
+            apiDisclaimer: api && typeof api.disclaimer === 'string' ? api.disclaimer.length : 0,
+            keyRows,
+            lockedRows,
+            lockedHasPrivacy: /privacyLink/.test(lockedText),
+            lockedHasMode: /(^|[^a-zA-Z])mode([^a-zA-Z]|$)/.test(lockedText),
+            keysHasTheme: /theme/.test(keysText),
+            disclaimer,
+            badge,
+          };
+        })()`);
+        check(
+          '设置页把「agent 能改什么 / 什么都改不了」讲清楚，并且和内核返回的一致（第 6 项）',
+          card
+            && card.ok
+            && card.apiKeys >= 5
+            && card.keyRows === card.apiKeys
+            && card.lockedRows === card.apiLocked
+            && card.lockedHasPrivacy
+            && card.lockedHasMode
+            && card.keysHasTheme
+            && card.apiDisclaimer > 20
+            && /留痕/.test(card.disclaimer)
+            && /键/.test(card.badge),
+          JSON.stringify(card),
+        );
+      } catch (err) {
+        check('agent 改设置卡片端到端检查未中断', false, err && err.message);
+      }
+    }
+
+
     if (settings) {
       const settingsErrors = settings.exceptions();
       check('设置窗口无未捕获脚本异常', settingsErrors.length === 0, settingsErrors.slice(0, 3).join(' | '));
     }
+
+    check('主窗口无未捕获脚本异常', shellErrors.length === 0, shellErrors.slice(0, 3).join(' | '));
   } catch (err) {
     check('验证流程未中断', false, err && err.message);
   } finally {
