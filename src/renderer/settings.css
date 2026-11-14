@@ -801,6 +801,11 @@
   margin-left: auto;
 }
 
+/* 自定义模板多一个「删除」：紧挨着「并进名单」，不再往右推 */
+.template-head .btn + .btn {
+  margin-left: 6px;
+}
+
 .template-row .hint {
   margin: 4px 0 0;
 }

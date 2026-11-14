@@ -316,6 +316,11 @@ contextBridge.exposeInMainWorld('nyx', {
   offlineCachePrivateTemplates: () => ipcRenderer.invoke('nyx:offline:private-templates'),
   offlineCachePrivateTemplateApply: (payload) =>
     ipcRenderer.invoke('nyx:offline:private-template-apply', payload || {}),
+  // 自己攒的模板：把当前名单存成模板 / 删掉一个（模板本身可搬走，名单不受影响）
+  offlineCachePrivateTemplateSave: (payload) =>
+    ipcRenderer.invoke('nyx:offline:private-template-save', payload || {}),
+  offlineCachePrivateTemplateRemove: (payload) =>
+    ipcRenderer.invoke('nyx:offline:private-template-remove', payload || {}),
   offlineCacheSitesExport: (payload) => ipcRenderer.invoke('nyx:offline:sites-export', payload || {}),
   offlineCacheSitesImport: (payload) => ipcRenderer.invoke('nyx:offline:sites-import', payload || {}),
 

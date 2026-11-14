@@ -110,14 +110,17 @@ const {
 } = require('./core/page-digest');
 const {
   CACHE_SITE_MODES,
+  addCustomTemplate,
   applySiteTemplate,
   decideCacheSite,
   describeSiteTemplates,
   exportCacheSites,
   importCacheSites,
+  normalizeCustomTemplates,
   normalizeSiteList,
   normalizeSitePolicy,
   normalizeSiteText,
+  removeCustomTemplate,
 } = require('./core/page-cache');
 const {
   PRIVATE_CACHE_LIMIT,
@@ -1242,6 +1245,52 @@ function saveCacheSitePolicy(policy, scope) {
     }
   }
   return { ok: true, ...next };
+}
+
+/**
+ * 自定义模板（第八轮 ⑤）：自己攒的那份名单存成模板，换机器还能一键套。
+ *
+ * 单独一个文件、单独一份数据，不塞进 ui-preferences.json：
+ * 模板是"可搬走的清单"，偏好是"这台机器的状态"，混在一起以后导出会很尴尬。
+ */
+function customTemplatePath() {
+  return userDataFile('cache-site-templates.json');
+}
+
+function readCustomTemplates() {
+  const file = customTemplatePath();
+  let raw = '';
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw.replace(/^\uFEFF/, ''));
+    return normalizeCustomTemplates(parsed && parsed.templates);
+  } catch (err) {
+    console.warn('[Nyx] 自定义模板文件读不懂，按空处理：', err && err.message ? err.message : err);
+    if (runtime.diagnostics) {
+      runtime.diagnostics.warn('PRIVATE_CACHE_TEMPLATES_READ_FAILED', '自定义模板文件读不出来，已按空处理', { file });
+    }
+    return [];
+  }
+}
+
+function writeCustomTemplates(templates) {
+  const file = customTemplatePath();
+  const list = normalizeCustomTemplates(templates);
+  try {
+    fs.writeFileSync(file, `${JSON.stringify({ version: 1, templates: list }, null, 2)}\n`, 'utf8');
+    return { ok: true, count: list.length };
+  } catch (err) {
+    const reason = err && err.message ? err.message : String(err);
+    console.warn('[Nyx] 自定义模板没能写入：', reason);
+    if (runtime.diagnostics) {
+      runtime.diagnostics.error('PRIVATE_CACHE_TEMPLATES_SAVE_FAILED', '自定义模板没能写入磁盘', { file, error: reason });
+    }
+    return { ok: false, error: `没能写到磁盘上：${reason}` };
+  }
 }
 
 /** 隐私模式的加密快照：读 / 写 / 查，全部绕开明文文件 */
@@ -7286,16 +7335,20 @@ function registerOfflineCacheIpc() {
    *   2. 套上模板会同时把模式切到「只存名单里的」，所以返回体要把 added / skipped 分开，
    *      界面必须逐项显示加了哪些，不能只弹一句「已应用」。
    */
-  ipcMain.handle('nyx:offline:private-templates', () => ({
-    ok: true,
-    templates: describeSiteTemplates(),
-    current: privateSitePolicy(),
-  }));
+  ipcMain.handle('nyx:offline:private-templates', () => {
+    const custom = readCustomTemplates();
+    return {
+      ok: true,
+      templates: describeSiteTemplates(custom),
+      custom,
+      current: privateSitePolicy(),
+    };
+  });
 
   ipcMain.handle('nyx:offline:private-template-apply', (_event, payload) => {
     const input = payload && typeof payload === 'object' ? payload : {};
     const key = String(input.key || '');
-    const result = applySiteTemplate(privateSitePolicy(), key);
+    const result = applySiteTemplate(privateSitePolicy(), key, readCustomTemplates());
     if (!result.ok) {
       return { ok: false, code: result.code, error: result.error, private: privateSitePolicy() };
     }
@@ -7318,6 +7371,69 @@ function registerOfflineCacheIpc() {
       skipped: result.skipped,
       modeChanged: result.modeChanged,
       message: result.message,
+      private: privateSitePolicy(),
+    };
+  });
+
+  /**
+   * 把自己攒的那份名单存成模板（第八轮 ⑤）。
+   *
+   * 存的是**当前名单快照**，不存模式：模板的意思是"这些站点值得离线留"，
+   * 模式是用户当下的选择，存进去会在套用时把人的选择覆盖掉。
+   */
+  ipcMain.handle('nyx:offline:private-template-save', (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    const result = addCustomTemplate(readCustomTemplates(), privateSitePolicy(), input.name, Date.now());
+    if (!result.ok) {
+      return {
+        ok: false,
+        code: result.code,
+        error: result.error,
+        templates: describeSiteTemplates(result.templates),
+        custom: result.templates,
+        private: privateSitePolicy(),
+      };
+    }
+    const saved = writeCustomTemplates(result.templates);
+    if (!saved.ok) {
+      return { ok: false, error: saved.error, custom: readCustomTemplates(), private: privateSitePolicy() };
+    }
+    if (runtime.diagnostics) {
+      runtime.diagnostics.info('PRIVATE_CACHE_TEMPLATE_SAVED', '把当前名单存成了自定义模板', {
+        template: result.template.key,
+        count: result.template.count,
+      });
+    }
+    return {
+      ok: true,
+      template: result.template,
+      templates: describeSiteTemplates(result.templates),
+      custom: result.templates,
+      message: `已存成模板「${result.template.label}」（${result.template.count} 个站点）。套用时会并进名单，不会替换你手写的那份。`,
+      private: privateSitePolicy(),
+    };
+  });
+
+  ipcMain.handle('nyx:offline:private-template-remove', (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    const result = removeCustomTemplate(readCustomTemplates(), String(input.key || ''));
+    if (!result.ok) {
+      return { ok: false, code: result.code, error: result.error, custom: readCustomTemplates() };
+    }
+    const saved = writeCustomTemplates(result.templates);
+    if (!saved.ok) {
+      return { ok: false, error: saved.error, custom: readCustomTemplates() };
+    }
+    if (runtime.diagnostics) {
+      runtime.diagnostics.info('PRIVATE_CACHE_TEMPLATE_REMOVED', '删掉了一个自定义模板', {
+        key: String(input.key || ''),
+      });
+    }
+    return {
+      ok: true,
+      templates: describeSiteTemplates(result.templates),
+      custom: result.templates,
+      message: '已经删掉这个模板。名单本身没动。',
       private: privateSitePolicy(),
     };
   });

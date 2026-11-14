@@ -1384,6 +1384,7 @@
   async function loadPrivateTemplates() {
     const list = byId('offline-private-template-list');
     if (!list) return;
+    wireTemplateSave();
     if (!window.nyx || typeof window.nyx.offlineCachePrivateTemplates !== 'function') {
       list.textContent = '当前内核不支持套模板。';
       return;
@@ -1407,7 +1408,7 @@
       const head = document.createElement('div');
       head.className = 'template-head';
       const title = document.createElement('strong');
-      title.textContent = template.label;
+      title.textContent = template.custom ? `${template.label}（我的）` : template.label;
       const count = document.createElement('span');
       count.className = 'template-count';
       count.textContent = `${template.count} 个站点`;
@@ -1445,6 +1446,32 @@
         }
       });
       head.append(title, count, apply);
+      if (template.custom) {
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'btn btn-mini';
+        remove.textContent = '删除';
+        remove.setAttribute('aria-label', `删掉模板「${template.label}」（只删模板，不动名单）`);
+        remove.addEventListener('click', async () => {
+          remove.disabled = true;
+          const status = byId('offline-private-template-status');
+          let res = null;
+          try {
+            res = await window.nyx.offlineCachePrivateTemplateRemove({ key: template.key });
+          } catch (err) {
+            res = { ok: false, error: err && err.message ? err.message : '未知原因' };
+          }
+          remove.disabled = false;
+          if (status) {
+            status.className = res && res.ok ? 'hint is-ok' : 'hint is-warn';
+            status.textContent = res && res.ok
+              ? (res.message || '已经删掉这个模板。')
+              : `没能删掉：${(res && res.error) || '主进程没有响应'}`;
+          }
+          if (res && res.ok) await loadPrivateTemplates();
+        });
+        head.append(remove);
+      }
       const summaryText = document.createElement('p');
       summaryText.className = 'hint';
       summaryText.textContent = template.summary;
@@ -1454,6 +1481,46 @@
       row.append(head, summaryText, sites);
       list.append(row);
     }
+  }
+
+  /**
+   * 「存成模板」按钮：把当前隐私名单快照成一个模板。
+   * 只绑一次；存完刷新列表，好让人立刻看到自己那条。
+   */
+  function wireTemplateSave() {
+    const button = byId('btn-offline-private-template-save');
+    if (!button || button.dataset.wired === 'true') return;
+    button.dataset.wired = 'true';
+    button.addEventListener('click', async () => {
+      const status = byId('offline-private-template-status');
+      const input = byId('offline-private-template-name');
+      if (!window.nyx || typeof window.nyx.offlineCachePrivateTemplateSave !== 'function') {
+        if (status) {
+          status.className = 'hint is-warn';
+          status.textContent = '当前内核不支持保存模板。';
+        }
+        return;
+      }
+      const name = input ? input.value.trim() : '';
+      button.disabled = true;
+      let res = null;
+      try {
+        res = await window.nyx.offlineCachePrivateTemplateSave({ name });
+      } catch (err) {
+        res = { ok: false, error: err && err.message ? err.message : '未知原因' };
+      }
+      button.disabled = false;
+      if (status) {
+        status.className = res && res.ok ? 'hint is-ok' : 'hint is-warn';
+        status.textContent = res && res.ok
+          ? (res.message || '已存成模板。')
+          : `没能存成模板：${(res && res.error) || '主进程没有响应'}`;
+      }
+      if (res && res.ok) {
+        if (input) input.value = '';
+        await loadPrivateTemplates();
+      }
+    });
   }
 
   function wireCacheSites() {

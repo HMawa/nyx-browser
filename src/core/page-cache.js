@@ -420,14 +420,123 @@ const SITE_TEMPLATES = [
   },
 ];
 
-function describeSiteTemplates() {
-  return SITE_TEMPLATES.map((item) => ({
+function describeSiteTemplates(extra) {
+  const custom = normalizeCustomTemplates(extra);
+  const list = SITE_TEMPLATES.concat(custom.map((item) => ({
+    key: item.key,
+    label: item.label,
+    summary: item.summary,
+    sites: item.sites,
+  })));
+  return list.map((item) => ({
     key: item.key,
     label: item.label,
     summary: item.summary,
     sites: normalizeSiteList(item.sites),
     count: normalizeSiteList(item.sites).length,
+    custom: custom.some((entry) => entry.key === item.key),
   }));
+}
+
+/**
+ * 自定义模板（第八轮 ⑤）：把自己攒的那份名单存成模板，换机器一键套。
+ *
+ * 为什么只存站点、不存模式：模板的语义是"这些站点值得离线留"，
+ * 模式是用户当前的选择（全部 / 只存名单），存进模板里会在套用时把
+ * 用户当下的选择覆盖掉——而套用这一步已经把模式切到 allowlist 了。
+ */
+const CUSTOM_TEMPLATE_MAX = 30;
+const CUSTOM_TEMPLATE_SITES_MAX = 60;
+
+function normalizeCustomTemplate(raw) {
+  const item = raw && typeof raw === 'object' ? raw : null;
+  if (!item) return null;
+  const label = typeof item.label === 'string' ? item.label.trim().slice(0, 40) : '';
+  if (!label) return null;
+  const sites = normalizeSiteList(item.sites).slice(0, CUSTOM_TEMPLATE_SITES_MAX);
+  if (!sites.length) return null;
+  const createdAt = Number.isFinite(item.createdAt) && item.createdAt > 0 ? item.createdAt : 0;
+  // key 由标签派生，保证同一个名字不会攒出两条；标签改了就是另一条
+  const key = `custom-${label.toLowerCase().replace(/\s+/g, '-')}`;
+  return {
+    key,
+    label,
+    summary: typeof item.summary === 'string' && item.summary
+      ? item.summary.slice(0, 120)
+      : `你自己存的：${sites.length} 个站点。`,
+    sites,
+    createdAt,
+  };
+}
+
+function normalizeCustomTemplates(raw) {
+  const list = Array.isArray(raw) ? raw : [];
+  const seen = new Set();
+  const out = [];
+  for (const entry of list) {
+    const item = normalizeCustomTemplate(entry);
+    if (!item || seen.has(item.key)) continue;
+    seen.add(item.key);
+    out.push(item);
+    if (out.length >= CUSTOM_TEMPLATE_MAX) break;
+  }
+  return out;
+}
+
+/**
+ * 把当前名单快照成一个模板。
+ * 返回 { ok, templates, template, error }：重名直接拒（不覆盖已有的），
+ * 名单为空也拒（存一个空模板，套用时什么都不会发生，只会让人困惑）。
+ */
+function addCustomTemplate(rawTemplates, rawPolicy, name, now) {
+  const templates = normalizeCustomTemplates(rawTemplates);
+  const policy = normalizeSitePolicy(rawPolicy);
+  const label = typeof name === 'string' ? name.trim().slice(0, 40) : '';
+  if (!label) {
+    return { ok: false, code: 'EMPTY_NAME', error: '先给模板起个名字，例如「我们组的文档站」。', templates };
+  }
+  if (!policy.allow.length) {
+    return {
+      ok: false,
+      code: 'EMPTY_LIST',
+      error: '名单还是空的，没有可存的站点。先把要离线留的站点加进名单，再存成模板。',
+      templates,
+    };
+  }
+  const stamp = Number.isFinite(now) && now > 0 ? now : Date.now();
+  const draft = normalizeCustomTemplate({ label, sites: policy.allow, createdAt: stamp });
+  if (!draft) {
+    return { ok: false, code: 'BAD_TEMPLATE', error: '这份名单存不成模板（名字或站点不合法）。', templates };
+  }
+  const existed = templates.find((item) => item.key === draft.key);
+  if (existed) {
+    return {
+      ok: false,
+      code: 'DUPLICATE_NAME',
+      error: `已经有一个叫「${existed.label}」的模板了。换个名字，或者先把旧的删掉。`,
+      templates,
+    };
+  }
+  if (templates.length >= CUSTOM_TEMPLATE_MAX) {
+    return {
+      ok: false,
+      code: 'TOO_MANY_TEMPLATES',
+      error: `自定义模板最多 ${CUSTOM_TEMPLATE_MAX} 个，先删掉几个再存。`,
+      templates,
+    };
+  }
+  const next = templates.concat([draft]);
+  return { ok: true, templates: next, template: { key: draft.key, label: draft.label, count: draft.sites.length } };
+}
+
+function removeCustomTemplate(rawTemplates, key) {
+  const templates = normalizeCustomTemplates(rawTemplates);
+  const target = typeof key === 'string' ? key : '';
+  const next = templates.filter((item) => item.key !== target);
+  if (next.length === templates.length) {
+    return { ok: false, code: 'NOT_FOUND', error: '没有这个模板，可能已经被删掉了。', templates };
+  }
+  return { ok: true, templates: next };
 }
 
 /**
@@ -436,14 +545,17 @@ function describeSiteTemplates() {
  * added 是真正写进去的站点（逐项可显示），skipped 是已经在名单里的——
  * 界面要把这两个数分开说，否则用户会以为"套了模板但没变化"是我们坏了。
  */
-function applySiteTemplate(rawPolicy, key) {
+function applySiteTemplate(rawPolicy, key, extra) {
   const policy = normalizeSitePolicy(rawPolicy);
-  const template = SITE_TEMPLATES.find((item) => item.key === String(key || ''));
+  const wanted = String(key || '');
+  const custom = normalizeCustomTemplates(extra);
+  const template = SITE_TEMPLATES.find((item) => item.key === wanted)
+    || custom.find((item) => item.key === wanted);
   if (!template) {
     return {
       ok: false,
       code: 'UNKNOWN_TEMPLATE',
-      error: `没有叫「${String(key || '')}」的模板。`,
+      error: `没有叫「${wanted}」的模板。`,
       policy,
     };
   }
@@ -672,6 +784,9 @@ module.exports = {
   CACHE_SITE_MODES,
   CACHE_TEXT_MAX,
   CACHE_VERSION,
+  CUSTOM_TEMPLATE_MAX,
+  CUSTOM_TEMPLATE_SITES_MAX,
+  addCustomTemplate,
   attachImageData,
   applySiteTemplate,
   buildCaptureScript,
@@ -687,6 +802,8 @@ module.exports = {
   normalizeSitePolicy,
   normalizeSiteText,
   normalizeSnapshot,
+  normalizeCustomTemplates,
   putSnapshot,
   readCache,
+  removeCustomTemplate,
 };

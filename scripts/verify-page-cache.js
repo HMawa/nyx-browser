@@ -888,7 +888,7 @@ check('51. 接线：模板列表与套用各一个 IPC，界面把站点逐项�
   const js = read('src/renderer/settings.js');
   assert.ok(main.includes("ipcMain.handle('nyx:offline:private-templates'"), '缺模板列表 IPC');
   assert.ok(main.includes("ipcMain.handle('nyx:offline:private-template-apply'"), '缺套用 IPC');
-  assert.ok(/applySiteTemplate\(privateSitePolicy\(\), key\)/.test(main), '套用要走纯函数，不能现写一套');
+  assert.ok(/applySiteTemplate\(privateSitePolicy\(\), key/.test(main), '套用要走纯函数，不能现写一套');
   assert.ok(/saveCacheSitePolicy\(result\.policy, 'private'\)/.test(main), '套完要落进隐私那份名单');
   assert.ok(main.includes('PRIVATE_CACHE_TEMPLATE_APPLIED'), '套用要有诊断记录');
   assert.ok(/offlineCachePrivateTemplateApply/.test(preload), 'preload 缺套用方法');
@@ -897,6 +897,94 @@ check('51. 接线：模板列表与套用各一个 IPC，界面把站点逐项�
   assert.ok(/async function loadPrivateTemplates\(\)/.test(js), '缺渲染函数');
   assert.ok(/\(template\.sites \|\| \[\]\)\.join\('、'\)/.test(js), '站点要逐项列出，不许折成"等 N 个"');
   assert.ok(/await loadPrivateTemplates\(\)/.test(js), '进分区时要加载模板');
+});
+
+check('52. 当前名单能存成自定义模板（存的是名单快照，不存模式）', () => {
+  const policy = cache.normalizeSitePolicy({ mode: 'allowlist', allow: ['a.test', 'b.test'], block: [] });
+  const saved = cache.addCustomTemplate([], policy, '我们组的文档站', 1700000000000);
+  assert.ok(saved.ok === true, '应该能存下来');
+  assert.equal(saved.template.count, 2);
+  assert.equal(saved.templates.length, 1);
+  const entry = saved.templates[0];
+  assert.equal(entry.label, '我们组的文档站');
+  assert.deepEqual(entry.sites, ['a.test', 'b.test'], '存的必须是当前名单快照');
+  assert.equal(Object.prototype.hasOwnProperty.call(entry, 'mode'), false, '模板里不许存模式（会覆盖用户当下的选择）');
+  assert.equal(entry.createdAt, 1700000000000);
+  // 存完之后能被 describeSiteTemplates 合并进来，且标成自定义
+  const list = cache.describeSiteTemplates(saved.templates);
+  assert.equal(list.length, 3 + 1, '内置三组 + 自定义一条');
+  const mine = list.find((item) => item.key === entry.key);
+  assert.ok(mine && mine.custom === true, '自定义模板要带 custom 标记');
+  assert.ok(!list.find((item) => item.key === 'docs').custom, '内置模板不该被标成自定义');
+});
+
+check('53. 重名 / 空名 / 空名单三种情况都拒绝，且给中文原因', () => {
+  const policy = cache.normalizeSitePolicy({ mode: 'allowlist', allow: ['a.test'], block: [] });
+  const first = cache.addCustomTemplate([], policy, '常用', 1);
+  assert.ok(first.ok === true);
+  const dup = cache.addCustomTemplate(first.templates, policy, '常用', 2);
+  assert.ok(dup.ok === false && dup.code === 'DUPLICATE_NAME', '重名要拒');
+  assert.ok(dup.error.includes('已经有一个叫「常用」的模板'), '重名要说清是哪个');
+  const empty = cache.addCustomTemplate([], policy, '   ', 1);
+  assert.ok(empty.ok === false && empty.code === 'EMPTY_NAME');
+  assert.ok(empty.error.includes('起个名字'));
+  const emptyList = cache.addCustomTemplate([], cache.normalizeSitePolicy(null), '空的', 1);
+  assert.ok(emptyList.ok === false && emptyList.code === 'EMPTY_LIST', '名单为空时不该存出一个空模板');
+  assert.ok(emptyList.error.includes('名单还是空的'));
+  // 满了也要拒
+  let many = [];
+  for (let i = 0; i < cache.CUSTOM_TEMPLATE_MAX; i += 1) {
+    const r = cache.addCustomTemplate(many, policy, `模板${i}`, i + 1);
+    assert.ok(r.ok === true, `第 ${i} 个应该能存`);
+    many = r.templates;
+  }
+  const over = cache.addCustomTemplate(many, policy, '再来一个', 99);
+  assert.ok(over.ok === false && over.code === 'TOO_MANY_TEMPLATES', '超过上限要拒');
+});
+
+check('54. 自定义模板能删，删不存在的模板要如实说没这个模板', () => {
+  const policy = cache.normalizeSitePolicy({ mode: 'allowlist', allow: ['a.test'], block: [] });
+  const saved = cache.addCustomTemplate([], policy, '临时', 1);
+  const removed = cache.removeCustomTemplate(saved.templates, saved.template.key);
+  assert.ok(removed.ok === true && removed.templates.length === 0, '删掉之后要真的没了');
+  const missing = cache.removeCustomTemplate(saved.templates, 'custom-不存在');
+  assert.ok(missing.ok === false && missing.code === 'NOT_FOUND');
+  assert.ok(missing.error.includes('没有这个模板'), '删不存在的要说清');
+  // 坏数据不该把整个文件读崩
+  assert.deepEqual(cache.normalizeCustomTemplates([null, {}, { label: 'x' }, 'y']), [], '坏条目全部丢掉');
+  assert.equal(cache.normalizeCustomTemplates([{ label: 'A', sites: ['a.test'] }, { label: 'A', sites: ['b.test'] }]).length, 1, '同名只留一条');
+});
+
+check('55. 自定义模板能被套用，走的是与内置模板同一条路', () => {
+  const policy = cache.normalizeSitePolicy({ mode: 'all', allow: [], block: [] });
+  const saved = cache.addCustomTemplate([], cache.normalizeSitePolicy({ mode: 'allowlist', allow: ['mine.test', 'other.test'], block: [] }), '我的', 1);
+  const applied = cache.applySiteTemplate(policy, saved.template.key, saved.templates);
+  assert.ok(applied.ok === true, '自定义模板要能套用');
+  assert.deepEqual(applied.added, ['mine.test', 'other.test']);
+  assert.equal(applied.policy.mode, 'allowlist', '套用同样要把模式切到只存名单里的');
+  assert.ok(applied.message.includes('我的'), '消息里要带模板名');
+  assert.ok(applied.message.includes('并进名单'), '说法要与内置模板一致');
+  const unknown = cache.applySiteTemplate(policy, 'custom-没有这条', saved.templates);
+  assert.ok(unknown.ok === false && unknown.code === 'UNKNOWN_TEMPLATE', '认不出的自定义 key 也要拒');
+});
+
+check('56. 接线：存模板与删模板各一个 IPC，界面输入框与删除按钮都在', () => {
+  const main = read('src/main.js');
+  const preload = read('src/preload.js');
+  const html = read('src/renderer/settings.html');
+  const js = read('src/renderer/settings.js');
+  assert.ok(main.includes("ipcMain.handle('nyx:offline:private-template-save'"), '缺存模板 IPC');
+  assert.ok(main.includes("ipcMain.handle('nyx:offline:private-template-remove'"), '缺删模板 IPC');
+  assert.ok(/addCustomTemplate\(readCustomTemplates\(\), privateSitePolicy\(\), input\.name/.test(main), '存模板要走纯函数');
+  assert.ok(/writeCustomTemplates\(result\.templates\)/.test(main), '存完要落盘');
+  assert.ok(main.includes('cache-site-templates.json'), '模板要单独一个文件');
+  assert.ok(main.includes('PRIVATE_CACHE_TEMPLATE_SAVED') && main.includes('PRIVATE_CACHE_TEMPLATE_REMOVED'), '两个动作都要留诊断');
+  assert.ok(/offlineCachePrivateTemplateSave/.test(preload) && /offlineCachePrivateTemplateRemove/.test(preload), 'preload 缺两个方法');
+  assert.ok(html.includes('id="offline-private-template-name"'), '设置页缺命名输入框');
+  assert.ok(html.includes('id="btn-offline-private-template-save"'), '设置页缺保存按钮');
+  assert.ok(/function wireTemplateSave\(\)/.test(js), '缺保存按钮的绑定');
+  assert.ok(/template\.custom \? `\$\{template\.label\}（我的）`/.test(js), '自定义模板要有标记');
+  assert.ok(/offlineCachePrivateTemplateRemove\(\{ key: template\.key \}\)/.test(js), '自定义模板要能删');
 });
 
 /* ------------------------------------------------------------------ */
