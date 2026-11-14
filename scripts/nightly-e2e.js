@@ -10,12 +10,15 @@
  *   结果追加进 `docs/安装器e2e夜间记录.md`。
  *
  * 三种用法（默认什么都不做，只打印计划）：
- *   node scripts/nightly-e2e.js             只打印将要执行的步骤
- *   node scripts/nightly-e2e.js --run       真跑：轮换归档 → --cross
- *   node scripts/nightly-e2e.js --register  打印注册夜间任务的命令（不会自动注册）
+ *   node scripts/nightly-e2e.js                      只打印将要执行的步骤
+ *   node scripts/nightly-e2e.js --run                真跑：轮换归档 → --cross
+ *   node scripts/nightly-e2e.js --register           打印注册夜间任务的命令（不会自动注册）
+ *   node scripts/nightly-e2e.js --register --apply   真的注册（要你自己加 --apply，不静默动手）
+ *   node scripts/nightly-e2e.js --status             查一下现在有没有注册、下次什么时候跑
+ *   node scripts/nightly-e2e.js --unregister --apply 真的删掉这个计划任务
  *
  * 刻意不做的事：
- *   - 不静默注册计划任务。`schtasks` 只在 `--register` 时**打印**命令，注册要你自己执行。
+ *   - 不带 `--apply` 绝不注册/删除计划任务：`--register` 只打印命令，动手要你再加一个参数。
  *   - 不吞失败。任何一步失败都以非零退出，并把失败原因写进记录表。
  */
 'use strict';
@@ -23,11 +26,18 @@
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const {
+  DEFAULT_TASK_NAME,
+  buildDeleteArgs,
+  buildRegisterArgs,
+  describeTask,
+  parseQueryOutput,
+} = require('./lib/nightly-plan');
 
 const ROOT = path.resolve(__dirname, '..');
 const RECORD = path.join(ROOT, 'docs', '安装器e2e夜间记录.md');
 const LOG_DIR = path.join(ROOT, 'temp');
-const TASK_NAME = 'Nyx-Installer-E2E-Nightly';
+const TASK_NAME = DEFAULT_TASK_NAME;
 // 状态文件落在应用的 userData 里：设置页读的就是这一个，换台机器/换用户各看各的。
 const USER_DATA =
   process.env.NYX_USER_DATA || path.join(process.env.APPDATA || path.join(process.env.USERPROFILE || ROOT, 'AppData', 'Roaming'), 'Nyx');
@@ -38,15 +48,25 @@ function say(line) {
 }
 
 function readArgs(argv) {
-  const options = { run: false, register: false, keep: null, dryRun: true };
+  const options = { run: false, register: false, unregister: false, status: false, apply: false, elevated: false, keep: null, time: null, dryRun: true };
   for (const raw of argv) {
     if (raw === '--run') {
       options.run = true;
       options.dryRun = false;
     } else if (raw === '--register') {
       options.register = true;
+    } else if (raw === '--unregister') {
+      options.unregister = true;
+    } else if (raw === '--status') {
+      options.status = true;
+    } else if (raw === '--apply') {
+      options.apply = true;
+    } else if (raw === '--elevated') {
+      options.elevated = true;
     } else if (raw.startsWith('--keep=')) {
       options.keep = raw.slice('--keep='.length);
+    } else if (raw.startsWith('--time=')) {
+      options.time = raw.slice('--time='.length);
     } else if (raw === '--help' || raw === '-h') {
       options.help = true;
     } else {
@@ -72,11 +92,63 @@ function plan() {
   return steps;
 }
 
-function registerCommand() {
-  const node = process.execPath;
-  const script = path.join(ROOT, 'scripts', 'nightly-e2e.js');
-  const line = `schtasks /Create /TN "${TASK_NAME}" /SC DAILY /ST 03:30 /TR "\\"${node}\\" \\"${script}\\" --run" /RL HIGHEST /F`;
-  return line;
+/**
+ * 注册命令的"给人看的形态"：参数拼法来自 lib/nightly-plan，避免和真正执行的那份走形。
+ */
+function registerCommand(time, elevated) {
+  const built = buildRegisterArgs({
+    node: process.execPath,
+    script: path.join(ROOT, 'scripts', 'nightly-e2e.js'),
+    taskName: TASK_NAME,
+    time,
+    elevated: Boolean(elevated),
+  });
+  if (!built.ok) return `schtasks /Create —— 拼不出来：${built.error}`;
+  // /TR 自己已经带引号了，只给"含空格且还没有引号"的参数补引号，避免出现 ""C:\..."" 这种双重引号
+  const quote = (item) => (item.includes('"') ? item : / /.test(item) ? `"${item}"` : item);
+  return `schtasks ${built.args.map(quote).join(' ')}`;
+}
+
+/**
+ * schtasks 的输出是控制台代码页（中文系统上是 GBK），按 utf8 解会把「找不到」解成乱码，
+ * 于是"任务不存在"被误判成"读不出来"。这里统一按 GBK 解，ASCII 部分两种编码一致，不影响英文系统。
+ */
+function decodeConsole(buffer) {
+  if (!buffer || !buffer.length) return '';
+  try {
+    return new TextDecoder('gbk').decode(buffer);
+  } catch {
+    return Buffer.from(buffer).toString('utf8');
+  }
+}
+
+/** 真跑 schtasks（只在带了 --apply 时才会走到这里） */
+function runSchtasks(args) {
+  if (process.platform !== 'win32') {
+    return { ok: false, error: '计划任务只在 Windows 上有意义。' };
+  }
+  const result = spawnSync('schtasks', args, { encoding: 'buffer', windowsHide: true });
+  const stdout = decodeConsole(result.stdout).trim();
+  const stderr = decodeConsole(result.stderr).trim();
+  if (result.error) return { ok: false, error: `schtasks 起不来：${result.error.message}` };
+  if (result.status !== 0) {
+    return { ok: false, error: `schtasks 退出码 ${result.status}：${stderr || stdout || '没有输出'}` };
+  }
+  return { ok: true, stdout, stderr };
+}
+
+/** 查一次任务状态：读到什么算什么，读不到就如实说读不到 */
+function taskStatus() {
+  if (process.platform !== 'win32') {
+    return { ok: false, registered: false, error: '计划任务只在 Windows 上有意义。' };
+  }
+  const result = spawnSync('schtasks', ['/Query', '/TN', TASK_NAME, '/FO', 'LIST'], {
+    encoding: 'buffer',
+    windowsHide: true,
+  });
+  if (result.error) return { ok: false, registered: false, error: `schtasks 起不来：${result.error.message}` };
+  // schtasks 在"任务不存在"时退出码非 0，但输出里有线索，统一交给 parseQueryOutput 判断
+  return parseQueryOutput(`${decodeConsole(result.stdout)}\n${decodeConsole(result.stderr)}`);
 }
 
 function ensureDir(dir) {
@@ -158,6 +230,14 @@ function appendRecord(row) {
  * 写失败不中断：记录表已经追加过了，状态卡只是"顺手能让用户看见"，不该反过来把跑失败判成失败。
  */
 function writeStatus(row, extra = {}) {
+  // 顺手查一次计划任务：没注册的话"上次通过"是上周的结论，用户会以为它在自动跑
+  const scheduledProbe = taskStatus();
+  const scheduled = {
+    registered: scheduledProbe.ok === true ? scheduledProbe.registered === true : null,
+    nextRun: scheduledProbe.nextRun || '',
+    error: scheduledProbe.ok === true ? '' : scheduledProbe.error || '未知原因',
+    checkedAt: Date.now(),
+  };
   const status = {
     at: extra.at || Date.now(),
     ok: row.ok === true,
@@ -169,6 +249,7 @@ function writeStatus(row, extra = {}) {
     error: row.ok ? '' : row.error || '见日志',
     log: row.note || '',
     task: TASK_NAME,
+    scheduled,
   };
   try {
     ensureDir(path.dirname(STATUS_FILE));
@@ -188,8 +269,10 @@ function main() {
     process.exit(1);
   }
   if (options.help) {
-    console.log('用法：node scripts/nightly-e2e.js [--run] [--register] [--keep=N]');
+    console.log('用法：node scripts/nightly-e2e.js [--run] [--register [--apply [--elevated]]] [--unregister [--apply]] [--status] [--keep=N] [--time=HH:MM]');
     console.log('  不带 --run 只打印计划，什么都不做。');
+    console.log('  --register 只打印命令；真要注册得再加 --apply（不静默改系统）。');
+    console.log('  --elevated 只在注册时用：加 /RL HIGHEST 以最高权限跑，需要管理员终端；默认按当前用户跑。');
     return 0;
   }
   const steps = plan();
@@ -200,9 +283,63 @@ function main() {
     say(`        为什么：${step.why}`);
   }
   if (options.register) {
-    say('注册夜间任务（要你自己执行，我不代跑）：');
-    console.log(`  ${registerCommand()}`);
-    say(`删掉任务：schtasks /Delete /TN "${TASK_NAME}" /F`);
+    const built = buildRegisterArgs({
+      node: process.execPath,
+      script: path.join(ROOT, 'scripts', 'nightly-e2e.js'),
+      taskName: TASK_NAME,
+      time: options.time,
+      elevated: options.elevated,
+    });
+    if (!built.ok) {
+      console.error(`[夜间 e2e] ${built.error}`);
+      return 1;
+    }
+    say(`计划：每天 ${built.time} 跑一次（任务名 ${built.taskName}，权限：${built.elevated ? '最高（需要管理员）' : '当前用户'}）`);
+    if (!options.apply) {
+      say('注册夜间任务（要你自己执行，或者加 --apply 让我现在注册）：');
+      console.log(`  ${registerCommand(options.time, options.elevated)}`);
+      say(`删掉任务：schtasks /Delete /TN "${TASK_NAME}" /F（或者 node scripts/nightly-e2e.js --unregister --apply）`);
+    } else {
+      say('按 --apply 真的注册（失败会原样报出 schtasks 的错误）：');
+      const created = runSchtasks(built.args);
+      if (!created.ok) {
+        console.error(`[夜间 e2e] 注册失败：${created.error}`);
+        if (/拒绝访问|Access is denied/i.test(created.error)) {
+          console.error('[夜间 e2e] 这是权限问题：默认按当前用户注册不需要管理员。若你在受限账户里，或这台机器的任务计划被策略锁住，就要开一个管理员终端再跑一次。');
+        }
+        return 1;
+      }
+      const after = taskStatus();
+      const verdict = describeTask(after, { taskName: TASK_NAME });
+      say(`注册结果：${verdict.text}`);
+      if (!after.registered) {
+        console.error('[夜间 e2e] schtasks 说建好了，但查不到这个任务——不当作注册成功。');
+        return 1;
+      }
+    }
+  }
+  if (options.unregister) {
+    if (!options.apply) {
+      say('删除计划任务要你自己执行（或者加 --apply）：');
+      console.log(`  schtasks /Delete /TN "${TASK_NAME}" /F`);
+    } else {
+      const removed = runSchtasks(buildDeleteArgs({ taskName: TASK_NAME }).args);
+      if (!removed.ok) {
+        console.error(`[夜间 e2e] 删除失败：${removed.error}`);
+        return 1;
+      }
+      const after = taskStatus();
+      say(`删除结果：${describeTask(after, { taskName: TASK_NAME }).text}`);
+      if (after.ok === true && after.registered) {
+        console.error('[夜间 e2e] schtasks 说删了，但还能查到——不当作删除成功。');
+        return 1;
+      }
+    }
+  }
+  if (options.status) {
+    const now = taskStatus();
+    say(describeTask(now, { taskName: TASK_NAME }).text);
+    if (now.ok !== true) return 1;
   }
   if (!options.run) {
     say('没有 --run，按计划什么都没做。要真跑加 --run。');

@@ -21,11 +21,26 @@ function pickNumber(value) {
   return Number.isFinite(number) && number >= 0 ? Math.round(number) : null;
 }
 
+/**
+ * 计划任务这一栏的说法（注册 / 没注册 / 上次没查出来，三件事分开）。
+ * 为什么要写进状态文件：任务没注册时夜间 e2e 根本不会跑，卡片却可能显示"上次通过"——
+ * 那是上周留下的结论，用户会以为它在自动跑。
+ */
+function describeScheduled(scheduled) {
+  if (!scheduled || typeof scheduled !== 'object') return '上次跑的时候没查（状态文件里没有这一项）';
+  if (scheduled.registered === true) {
+    return scheduled.nextRun ? `已注册，下次 ${scheduled.nextRun}` : '已注册（系统没给下次运行时间）';
+  }
+  if (scheduled.registered === false) return '没注册——夜间 e2e 不会自己跑';
+  return `上次没查出来：${scheduled.error || '原因没记下来'}`;
+}
+
 /** 归一夜间 e2e 状态：没有可信的 at 一律返回 null（`{}` 不算"跑过"） */
 function normalizeNightlyStatus(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const at = Number(raw.at);
   if (!Number.isFinite(at) || at <= 0) return null;
+  const scheduledRaw = raw.scheduled && typeof raw.scheduled === 'object' ? raw.scheduled : null;
   return {
     at: Math.round(at),
     ok: raw.ok === true,
@@ -37,6 +52,14 @@ function normalizeNightlyStatus(raw) {
     error: typeof raw.error === 'string' ? raw.error.slice(0, 200) : '',
     log: typeof raw.log === 'string' ? raw.log.slice(0, 200) : '',
     task: typeof raw.task === 'string' ? raw.task.slice(0, 120) : '',
+    scheduled: scheduledRaw
+      ? {
+          registered:
+            scheduledRaw.registered === true ? true : scheduledRaw.registered === false ? false : null,
+          nextRun: typeof scheduledRaw.nextRun === 'string' ? scheduledRaw.nextRun.slice(0, 64) : '',
+          error: typeof scheduledRaw.error === 'string' ? scheduledRaw.error.slice(0, 200) : '',
+        }
+      : null,
   };
 }
 
@@ -100,6 +123,7 @@ function describeNightlyStatus(raw, options = {}) {
     { label: '结果', value: status.ok ? '通过' : `失败：${status.error || '见日志'}` },
     { label: '升级基线', value: status.baseline || '没读到' },
     { label: '断言', value: counts },
+    { label: '计划任务', value: describeScheduled(status.scheduled) },
     { label: '日志', value: status.log || '—' },
   ];
   return {
@@ -116,6 +140,7 @@ function describeNightlyStatus(raw, options = {}) {
 module.exports = {
   STALE_HOURS,
   describeNightlyStatus,
+  describeScheduled,
   formatTime,
   normalizeNightlyStatus,
 };

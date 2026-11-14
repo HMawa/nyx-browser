@@ -361,6 +361,99 @@ check(
 
 
 check(
+  '夜间 e2e：默认只打印计划，要真跑必须显式 --run，注册任务不带 --apply 只打印命令',
+  (() => {
+    const code = read(path.join(ROOT, 'scripts', 'nightly-e2e.js'));
+    return /const options = \{ run: false, register: false/.test(code)
+      && /if \(!options\.run\) \{[\s\S]{0,200}没有 --run，按计划什么都没做/.test(code)
+      && /schtasks \/Create/.test(code)
+      && /if \(!options\.apply\) \{/.test(code)
+      && /我不代跑|要你自己执行|或者加 --apply/.test(code)
+      && !/spawnSync\(\s*[^)]*schtasks[\s\S]{0,80}\/Create/.test(code);
+  })(),
+  '默认 dry-run + --run 才动 + 注册要再加 --apply（print 分支里没有真调用）'
+);
+
+check(
+  '夜间 e2e 计划任务：参数拼法可断言（带引号的 /TR、每天固定时间、默认不提权），时间写错回默认',
+  (() => {
+    const plan = require(path.join(ROOT, 'scripts', 'lib', 'nightly-plan.js'));
+    const built = plan.buildRegisterArgs({ node: 'C:\\Program Files\\nodejs\\node.exe', script: 'D:\\Nyx-src\\scripts\\nightly-e2e.js', time: '03:30' });
+    const elevated = plan.buildRegisterArgs({ node: 'n.exe', script: 's.js', elevated: true });
+    const bad = plan.buildRegisterArgs({ node: 'n.exe', script: 's.js', time: '25:99' });
+    const missing = plan.buildRegisterArgs({ node: '', script: 's.js' });
+    const del = plan.buildDeleteArgs({});
+    return built.ok === true
+      // 默认不提权：加 /RL HIGHEST 会让普通用户直接拿到「拒绝访问」，注册这件事就变成少数人才能做
+      && !built.args.includes('/RL') && !built.args.includes('HIGHEST')
+      && elevated.elevated === true && elevated.args.includes('/RL') && elevated.args.includes('HIGHEST')
+      && elevated.args[elevated.args.length - 1] === '/F'
+      && built.args.includes('/SC') && built.args.includes('DAILY')
+      && built.args.includes('/ST') && built.args.includes('03:30')
+      && built.tr === '"C:\\Program Files\\nodejs\\node.exe" "D:\\Nyx-src\\scripts\\nightly-e2e.js" --run'
+      && /^".*node\.exe" /.test(built.tr)
+      && bad.ok === true && bad.time === plan.DEFAULT_TIME
+      && missing.ok === false && /完整路径/.test(missing.error)
+      && del.ok === true && del.args.join(' ') === '/Delete /TN Nyx-Installer-E2E-Nightly /F';
+  })(),
+  '参数数组 + /TR 自己带引号 + 默认不提权（--elevated 才加 /RL HIGHEST）+ 时间越界回默认 + 缺路径明确拒绝 + 删除参数'
+);
+
+check(
+  '夜间 e2e 计划任务：查询输出能分出「没注册 / 读不出来 / 已注册带下次时间」三种，不乱猜',
+  (() => {
+    const plan = require(path.join(ROOT, 'scripts', 'lib', 'nightly-plan.js'));
+    const off = plan.parseQueryOutput('\n错误: 系统找不到指定的文件。\n');
+    const broken = plan.parseQueryOutput('');
+    const brokenEn = plan.parseQueryOutput('ERROR: Something else failed\n');
+    const on = plan.parseQueryOutput(
+      'TaskName:                             \\Nyx-Installer-E2E-Nightly\nNext Run Time:                        2026-11-16 3:30:00\nStatus:                               Ready\n'
+    );
+    const onZh = plan.parseQueryOutput('任务名:                               \\Nyx-Installer-E2E-Nightly\n下次运行时间:                         2026-11-16 3:30:00\n状态:                                就绪\n');
+    const sayOff = plan.describeTask(off, {});
+    const sayBroken = plan.describeTask(broken, {});
+    const sayOn = plan.describeTask(on, {});
+    return off.ok === true && off.registered === false
+      && broken.ok === false && /没有输出/.test(broken.error)
+      && brokenEn.ok === false && /报错/.test(brokenEn.error)
+      && on.ok === true && on.registered === true && on.nextRun === '2026-11-16 3:30:00'
+      && onZh.ok === true && onZh.registered === true
+      && sayOff.level === 'off' && /--register --apply/.test(sayOff.text)
+      && sayBroken.level === 'unknown' && /不等于没注册/.test(sayBroken.text)
+      && sayOn.level === 'on' && /下次运行：2026-11-16 3:30:00/.test(sayOn.text);
+  })(),
+  '四种输出 → 三种说法；「读不出来」不许当「没注册」'
+);
+
+check(
+  '夜间 e2e 计划任务：状态文件带上注册状态，卡片能把「没注册」和「上次通过」分开说',
+  (() => {
+    const script = read(path.join(ROOT, 'scripts', 'nightly-e2e.js'));
+    const status = require(path.join(ROOT, 'src', 'core', 'nightly-status.js'));
+    const withOn = status.describeNightlyStatus(
+      { at: Date.UTC(2026, 10, 15), ok: true, total: 57, passed: 56, failed: 0, skipped: 1, scheduled: { registered: true, nextRun: '2026-11-16 3:30:00' } },
+      { now: Date.UTC(2026, 10, 15) + 3600000 }
+    );
+    const withOff = status.describeNightlyStatus(
+      { at: Date.UTC(2026, 10, 15), ok: true, scheduled: { registered: false } },
+      { now: Date.UTC(2026, 10, 15) + 3600000 }
+    );
+    const withNull = status.describeNightlyStatus(
+      { at: Date.UTC(2026, 10, 15), ok: true, scheduled: { registered: null, error: '查不到' } },
+      { now: Date.UTC(2026, 10, 15) + 3600000 }
+    );
+    const rowOf = (payload) => (payload.rows.find((row) => row.label === '计划任务') || {}).value || '';
+    return /const scheduledProbe = taskStatus\(\)/.test(script)
+      && /scheduled,\n  \}/.test(script)
+      && /已注册，下次 2026-11-16 3:30:00/.test(rowOf(withOn))
+      && /没注册/.test(rowOf(withOff))
+      && /上次没查出来：查不到/.test(rowOf(withNull))
+      && /TextDecoder\('gbk'\)/.test(script);
+  })(),
+  'writeStatus 查一次注册状态 → 卡片「计划任务」一行三态；schtasks 输出按 GBK 解'
+);
+
+check(
   '夜间 e2e：先轮换归档再 --cross，结果追加到记录表，失败以非零退出',
   (() => {
     const code = read(path.join(ROOT, 'scripts', 'nightly-e2e.js'));
