@@ -7406,7 +7406,10 @@ function registerOfflineCacheIpc() {
   ipcMain.handle('nyx:offline:private-template-apply', (_event, payload) => {
     const input = payload && typeof payload === 'object' ? payload : {};
     const key = String(input.key || '');
-    const result = applySiteTemplate(privateSitePolicy(), key, readCustomTemplates());
+    // 默认合并；只有用户明确点「用它替换名单」才 replace（换掉别人手写的名单不能是默认行为）
+    const switchMode = String(input.mode || 'merge') === 'replace';
+    const custom = readCustomTemplates();
+    const result = applySiteTemplate(privateSitePolicy(), key, custom, { mode: switchMode ? 'replace' : 'merge' });
     if (!result.ok) {
       return { ok: false, code: result.code, error: result.error, private: privateSitePolicy() };
     }
@@ -7414,24 +7417,56 @@ function registerOfflineCacheIpc() {
     if (!saved.ok) {
       return { ok: false, error: saved.error, private: privateSitePolicy() };
     }
+    // 可选：同一份模板顺手套到普通模式的名单上（候选③）。两份名单本来是分开的，
+    // 所以这里单独报结果——普通那份失败不该把隐私那份说成失败，反之亦然。
+    let normal = null;
+    if (input.alsoNormal === true) {
+      const normalPolicy = cacheSitePolicy();
+      const applied = applySiteTemplate(normalPolicy, key, custom, { mode: switchMode ? 'replace' : 'merge' });
+      if (!applied.ok) {
+        normal = { ok: false, error: applied.error };
+      } else {
+        const savedNormal = saveCacheSitePolicy(applied.policy, 'normal');
+        normal = savedNormal.ok
+          ? { ok: true, added: applied.added.length, dropped: (applied.dropped || []).length, policy: applied.policy }
+          : { ok: false, error: savedNormal.error };
+        if (runtime.diagnostics) {
+          runtime.diagnostics.info('CACHE_TEMPLATE_APPLIED_NORMAL', '普通模式名单也套用了同一份模板', {
+            template: result.template.key,
+            ok: normal.ok,
+            added: applied.added.length,
+          });
+        }
+      }
+    }
     // 名单改完要说清「现在到底生效没有」——快照关着或加密不可用时，改了也不会有任何效果
     const effective = privateSiteEffective();
     if (runtime.diagnostics) {
       runtime.diagnostics.info('PRIVATE_CACHE_TEMPLATE_APPLIED', '隐私模式名单套用了模板', {
         template: result.template.key,
+        action: result.action,
         added: result.added.length,
         skipped: result.skipped.length,
+        dropped: (result.dropped || []).length,
         modeChanged: result.modeChanged,
         effective: effective.active,
       });
     }
+    const normalNote = normal
+      ? normal.ok
+        ? `\n普通模式的名单也按同一份模板处理了（加了 ${normal.added} 个${normal.dropped ? `，换掉 ${normal.dropped} 个` : ''}）。`
+        : `\n普通模式的名单没改成：${normal.error}`
+      : '';
     return {
       ok: true,
       template: result.template,
+      action: result.action,
       added: result.added,
       skipped: result.skipped,
+      dropped: result.dropped || [],
       modeChanged: result.modeChanged,
-      message: effective.active ? result.message : `${result.message}\n${effective.note}`,
+      normal,
+      message: `${effective.active ? result.message : `${result.message}\n${effective.note}`}${normalNote}`,
       effective,
       private: privateSitePolicy(),
     };

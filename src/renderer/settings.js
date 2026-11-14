@@ -1424,6 +1424,39 @@
       const count = document.createElement('span');
       count.className = 'template-count';
       count.textContent = `${template.count} 个站点`;
+      // 两种语义分开给两颗按钮：并进（默认）与替换（第九轮 ⑤）。替换会覆盖手写名单，
+      // 所以它就明写成「替换名单」，不藏在同一个按钮的弹窗里。
+      const runApply = async (mode) => {
+        const status = byId('offline-private-template-status');
+        const alsoNormalBox = byId('offline-private-template-also-normal');
+        const alsoNormal = Boolean(alsoNormalBox && alsoNormalBox.checked);
+        const applied = await window.nyx
+          .offlineCachePrivateTemplateApply({ key: template.key, mode, alsoNormal })
+          .catch(() => null);
+        if (!applied || applied.ok === false) {
+          if (status) {
+            status.className = 'hint is-warn';
+            status.textContent = `没有套上：${(applied && applied.error) || '主进程没有响应'}`;
+          }
+          setOfflineStatus('套模板失败', true);
+          return;
+        }
+        if (status) {
+          const added = Array.isArray(applied.added) ? applied.added : [];
+          const skipped = Array.isArray(applied.skipped) ? applied.skipped : [];
+          const dropped = Array.isArray(applied.dropped) ? applied.dropped : [];
+          const normal = applied.normal;
+          status.className = 'hint is-ok';
+          status.textContent =
+            `${applied.message}` +
+            (added.length ? `\n新加：${added.join('、')}` : '') +
+            (skipped.length ? `\n本来就在：${skipped.join('、')}` : '') +
+            (dropped.length ? `\n被换掉：${dropped.join('、')}` : '') +
+            (normal && normal.ok === false ? `\n普通模式的名单没改成：${normal.error}` : '');
+        }
+        renderCacheSites({ ok: true, mode: applied.private ? applied.private.mode : 'allowlist', allow: applied.private ? applied.private.allow : [], block: applied.private ? applied.private.block : [], private: applied.private });
+        setOfflineStatus(mode === 'replace' ? '隐私模式名单已按模板切换' : '模板已并入隐私模式名单');
+      };
       const apply = document.createElement('button');
       apply.type = 'button';
       apply.className = 'btn btn-mini';
@@ -1432,32 +1465,26 @@
       apply.addEventListener('click', async () => {
         apply.disabled = true;
         try {
-          const applied = await window.nyx.offlineCachePrivateTemplateApply({ key: template.key }).catch(() => null);
-          const status = byId('offline-private-template-status');
-          if (!applied || applied.ok === false) {
-            if (status) {
-              status.className = 'hint is-warn';
-              status.textContent = `没有套上：${(applied && applied.error) || '主进程没有响应'}`;
-            }
-            setOfflineStatus('套模板失败', true);
-            return;
-          }
-          if (status) {
-            const added = Array.isArray(applied.added) ? applied.added : [];
-            const skipped = Array.isArray(applied.skipped) ? applied.skipped : [];
-            status.className = 'hint is-ok';
-            status.textContent =
-              `${applied.message}` +
-              (added.length ? `\n新加：${added.join('、')}` : '') +
-              (skipped.length ? `\n本来就在：${skipped.join('、')}` : '');
-          }
-          renderCacheSites({ ok: true, mode: applied.private ? applied.private.mode : 'allowlist', allow: applied.private ? applied.private.allow : [], block: applied.private ? applied.private.block : [], private: applied.private });
-          setOfflineStatus('模板已并入隐私模式名单');
+          await runApply('merge');
         } finally {
           apply.disabled = false;
         }
       });
-      head.append(title, count, apply);
+      const switchBtn = document.createElement('button');
+      switchBtn.type = 'button';
+      switchBtn.className = 'btn btn-mini';
+      switchBtn.textContent = '替换名单';
+      switchBtn.title = '把这份名单整个换成模板里的站点（屏蔽名单不动，换掉了哪几条会列在下面）';
+      switchBtn.setAttribute('aria-label', `用「${template.label}」替换隐私模式名单（现在手写的那些会被换掉）`);
+      switchBtn.addEventListener('click', async () => {
+        switchBtn.disabled = true;
+        try {
+          await runApply('replace');
+        } finally {
+          switchBtn.disabled = false;
+        }
+      });
+      head.append(title, count, apply, switchBtn);
       if (template.custom) {
         const remove = document.createElement('button');
         remove.type = 'button';

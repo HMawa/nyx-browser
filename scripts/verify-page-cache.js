@@ -1074,7 +1074,7 @@ check('63. 隐私名单「现在到底生效没有」要能判定出来（关着
   assert.ok(/privateEffective: privateSiteEffective\(\)/.test(main), '站点名单接口要带上生效状态');
   assert.ok(/effective: privateSiteEffective\(\)/.test(main), '模板接口要带上生效状态');
   // 套用模板时，若名单不生效，message 里必须补上原因（否则界面只会说"已并入"）
-  assert.ok(/message: effective\.active \? result\.message : `\$\{result\.message\}\\n\$\{effective\.note\}`/.test(main), '套用时要把"不生效"的原因写进返回文案');
+  assert.ok(/effective\.active \? result\.message :/.test(main) && /effective\.note/.test(main), '套用时要把"不生效"的原因写进返回文案');
   assert.ok(/effective,\n\s+private: privateSitePolicy\(\),/.test(main), '套用结果要带回 effective');
 });
 
@@ -1088,6 +1088,53 @@ check('64. 设置页把「名单不生效」当场说出来，不留到用户自
 });
 
 /* ------------------------------------------------------------------ */
+check('65. 模板默认「并进」，只有明确要求才「替换」：替换会报出被换掉的站点，屏蔽名单不受影响（第九轮 ⑤）', () => {
+  const cache = require('../src/core/page-cache.js');
+  const base = cache.normalizeSitePolicy({ mode: 'blocklist', allow: ['keep.test', 'old.test'], block: ['blocked.test'] });
+
+  const merged = cache.applySiteTemplate(base, 'docs', [], { mode: 'merge' });
+  assert.ok(merged.ok === true && merged.action === 'merge', '默认应当是合并');
+  assert.ok(merged.policy.allow.includes('keep.test'), '合并要把手写的站点留着');
+  assert.ok(merged.policy.allow.includes('old.test'), '合并要把手写的站点留着（第二条）');
+  assert.ok(merged.policy.allow.length > 2, '合并后应当比原来更多');
+  assert.deepStrictEqual(merged.dropped, [], '合并不该有被换掉的站点');
+  assert.strictEqual(merged.policy.mode, 'allowlist', '套模板后模式要切到只存名单里的');
+
+  const replaced = cache.applySiteTemplate(base, 'docs', [], { mode: 'replace' });
+  assert.ok(replaced.ok === true && replaced.action === 'replace', 'replace 要如实标成替换');
+  assert.ok(replaced.dropped.includes('keep.test') && replaced.dropped.includes('old.test'), '被换掉的站点要逐条报出来');
+  assert.ok(!replaced.policy.allow.includes('keep.test'), '替换后手写名单不该还在');
+  assert.deepStrictEqual([...replaced.policy.block], ['blocked.test'], '替换名单不许动屏蔽名单');
+  assert.ok(/被换掉了/.test(replaced.message), '替换要在文案里说清换掉了几个');
+
+  // 不存在的模板、以及"没给 mode"时的默认值，两种边界都要钉住
+  const unknown = cache.applySiteTemplate(base, '没有这个模板', [], { mode: 'replace' });
+  assert.ok(unknown.ok === false && unknown.code === 'UNKNOWN_TEMPLATE', '未知模板要明确拒绝');
+  const noOption = cache.applySiteTemplate(base, 'docs', []);
+  assert.ok(noOption.ok === true && noOption.action === 'merge', '不传 options 时必须是合并（向后兼容）');
+});
+
+check('66. 模板可以同时套到普通模式那份名单上，两份结果分开报（第九轮 ③）', () => {
+  const main = read('src/main.js');
+  assert.ok(/const switchMode = String\(input\.mode \|\| 'merge'\) === 'replace';/.test(main), 'IPC 要认 mode，默认 merge');
+  assert.ok(/input\.alsoNormal === true/.test(main), '要认 alsoNormal');
+  assert.ok(/const normalPolicy = cacheSitePolicy\(\);/.test(main), '普通模式那份名单用 cacheSitePolicy()');
+  assert.ok(/saveCacheSitePolicy\(applied\.policy, 'normal'\)/.test(main), '普通那份要独立落盘');
+  assert.ok(/CACHE_TEMPLATE_APPLIED_NORMAL/.test(main), '普通那份的结果要留痕');
+  assert.ok(/normalNote/.test(main), '两份结果要在文案里分开说');
+  assert.ok(/普通模式的名单没改成/.test(main), '普通那份失败必须如实说，不能吞掉');
+});
+
+check('67. 设置页给模板两颗按钮（并进 / 替换）和一个「同时也套到普通模式」的勾选', () => {
+  const html = read('src/renderer/settings.html');
+  const js = read('src/renderer/settings.js');
+  assert.ok(/id="offline-private-template-also-normal"/.test(html), '要有 alsoNormal 勾选框');
+  assert.ok(/替换名单/.test(html) && /替换名单/.test(js), '要有「替换名单」按钮与说明');
+  assert.ok(/offlineCachePrivateTemplateApply\(\{ key: template\.key, mode, alsoNormal \}\)/.test(js), '调用要带上 mode 与 alsoNormal');
+  assert.ok(/await runApply\('merge'\)/.test(js) && /await runApply\('replace'\)/.test(js), '两颗按钮要分别走合并与替换');
+  assert.ok(/被换掉：/.test(js), '替换后要列出被换掉的站点');
+});
+
 const failed = checks.filter((item) => !item.ok);
 const total = checks.length;
 console.log('');

@@ -461,10 +461,15 @@
                 <div class="info-sub" id="offline-private-template-block">
                   <h4>「只存这些」模板</h4>
                   <p class="hint">
-                    套模板只会把站点**并进**现有名单，不会替换你手写的那份；套上之后模式会切成「只存名单里的」，
-                    加了哪几条、哪几条本来就在，下面会逐条列出来。
+                    每个模板有两颗按钮：「并进名单」是把你手写的名单留着、只把模板里的站点加进来；
+                    「替换名单」是整份换成模板里的（会告诉你换掉了哪几条）。两种都会把模式切成「只存名单里的」，
+                    屏蔽名单都不动。加了哪几条、哪几条本来就在、哪几条被换掉，下面会逐条列出来。
                   </p>
                   <div class="template-list" id="offline-private-template-list"></div>
+                  <label class="ack-row">
+                    <input type="checkbox" id="offline-private-template-also-normal" />
+                    <span>同一份模板也套到普通模式的名单上（两份名单本来是分开的，勾上才会一起改）</span>
+                  </label>
                   <div class="agent-site-tools">
                     <input type="text" id="offline-private-template-name" maxlength="40" spellcheck="false" placeholder="给这份名单起个名字，例如「我们组的文档站」" />
                     <button type="button" class="btn btn-mini" id="btn-offline-private-template-save" title="把当前名单快照成一个模板（不存模式，不会覆盖你现在的选择）">

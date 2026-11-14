@@ -545,10 +545,18 @@ function removeCustomTemplate(rawTemplates, key) {
  * added 是真正写进去的站点（逐项可显示），skipped 是已经在名单里的——
  * 界面要把这两个数分开说，否则用户会以为"套了模板但没变化"是我们坏了。
  */
-function applySiteTemplate(rawPolicy, key, extra) {
+/**
+ * 套用一个模板到名单上。
+ *
+ * 两种语义，**默认是 merge**（只并进现有名单），replace 只有用户明确点了
+ * 「用它替换名单」才走——把"换掉别人手写的名单"做成默认行为是不负责任的。
+ * 无论哪种，屏蔽名单都原样保留：那是"绝对不许"的一层，不该因为切模板就失效。
+ */
+function applySiteTemplate(rawPolicy, key, extra, options) {
   const policy = normalizeSitePolicy(rawPolicy);
   const wanted = String(key || '');
   const custom = normalizeCustomTemplates(extra);
+  const switchMode = String((options && options.mode) || 'merge') === 'replace';
   const template = SITE_TEMPLATES.find((item) => item.key === wanted)
     || custom.find((item) => item.key === wanted);
   if (!template) {
@@ -560,6 +568,29 @@ function applySiteTemplate(rawPolicy, key, extra) {
     };
   }
   const sites = normalizeSiteList(template.sites);
+  if (switchMode) {
+    const kept = policy.allow.filter((site) => sites.includes(site));
+    const dropped = policy.allow.filter((site) => !sites.includes(site));
+    const next = normalizeSitePolicy({
+      mode: 'allowlist',
+      allow: sites,
+      block: policy.block,
+    });
+    const message = dropped.length
+      ? `已按「${template.label}」切换名单：现在是 ${sites.length} 个站点，原来那 ${dropped.length} 个不在模板里的站点被换掉了（屏蔽名单没动），模式已切到「只存名单里的」。`
+      : `已按「${template.label}」切换名单：现在是 ${sites.length} 个站点${kept.length ? `（其中 ${kept.length} 个原来就有）` : ''}（屏蔽名单没动），模式已切到「只存名单里的」。`;
+    return {
+      ok: true,
+      policy: next,
+      template: { key: template.key, label: template.label },
+      action: 'replace',
+      added: sites,
+      skipped: kept,
+      dropped,
+      modeChanged: policy.mode !== 'allowlist',
+      message,
+    };
+  }
   const existing = new Set(policy.allow);
   const added = [];
   const skipped = [];
@@ -584,8 +615,10 @@ function applySiteTemplate(rawPolicy, key, extra) {
     ok: true,
     policy: next,
     template: { key: template.key, label: template.label },
+    action: 'merge',
     added,
     skipped,
+    dropped: [],
     modeChanged: policy.mode !== 'allowlist',
     message,
   };
