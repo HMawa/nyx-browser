@@ -662,6 +662,43 @@ function installerE2eGate(setupPath, version) {
 }
 
 /**
+ * 发版后顺手量一次差分命中率，写进 <userData>\delta-report.json。
+ *
+ * 为什么要自动量：这道数字以前只有人工点「实测一次」才会有，而结论几乎总是 0 命中
+ * （安装包是固实压缩的）。把它固定成发版的一个副作用，设置页里那三行永远是最新一次发布的真实数字，
+ * 不用再靠人问「差分到底有没有用」。
+ *
+ * 只告警不中断：发布本身已经完成（包已进更新源），量差分失败不该把一次成功的发布判成失败。
+ */
+function autoMeasureDelta(setupPath) {
+  const scriptPath = path.join(__dirname, 'measure-delta-report.js');
+  if (!fs.existsSync(scriptPath)) {
+    return { ok: false, text: `找不到 ${scriptPath}` };
+  }
+  console.log('');
+  info('顺手量一次差分命中率（写进设置页「更新源占用」卡片）');
+  const result = spawnSync(process.execPath, [scriptPath, `--target=${setupPath}`], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  const output = `${result.stdout || ''}${result.stderr || ''}`;
+  const summary = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('[差分实测]'))
+    .map((line) => line.replace('[差分实测]', '').trim());
+  if (result.status !== 0) {
+    console.warn(`  差分实测没量成（exit ${result.status === null ? 'null' : result.status}），不影响本次发布。`);
+    if (summary.length) console.warn(`  ${summary.join(' / ')}`);
+    return { ok: false, text: '没量成（不影响发布）' };
+  }
+  const headline = summary.find((line) => line.includes('块 / 命中')) || '已写入 delta-report.json';
+  console.log(`  差分实测：${headline}`);
+  return { ok: true, text: headline };
+}
+
+/**
  * 清理旧留档：保留版本号最大的 keep 份，其余删除。
  * 返回 { kept, removed, freed }，供发版的「发布摘要」引用；清理日志逐条打印。
  */
@@ -1095,6 +1132,10 @@ function releaseDryRun() {
         (olderForDry ? `；要用 ${olderForDry.version} 当升级基线` : '；dist / 留档里没有更旧的安装包，只能测全新安装'),
     );
     console.log(`  预演摘要 ：共 ${actions.length} 个写入/复制动作，合计约 ${humanSize(totalBytes)}；未做任何改动。`);
+    console.log(
+      '  差分实测 ：真实发版会在写完之后顺手量一次，把「命中率 / 块数 / 0 命中就是整包下载」写进设置页' +
+        '（这次预演不量；要跳过就加 --skip-delta）',
+    );
 
     if (json) {
       const report = {
@@ -1201,6 +1242,11 @@ function releaseMode() {
     pruneResult = pruneMode();
   }
 
+  // ===== 顺手量一次差分命中率（写进设置页，候选②）=====
+  // 放在 prune 之后：基线要的是「留档里比当前版本小的最新一版」，先把旧留档清掉，
+  // 量到的才是用户下次真的会拿来差分的那一对包。
+  const delta = hasFlag('skip-delta') ? { ok: null, text: '本次没量（--skip-delta）' } : autoMeasureDelta(setupPath);
+
   info('完成');
   console.log(`  版本号   ：${version}`);
   console.log(`  安装包   ：${setupPath}（${humanSize(size)}）`);
@@ -1240,6 +1286,7 @@ function releaseMode() {
     console.log('                需要时这样跑：');
     console.log(`                  ${e2e.manualCmd}`);
   }
+  console.log(`    差分实测 ：${delta.text}`);
 }
 
 /**
@@ -1855,6 +1902,7 @@ function printUsage() {
   console.log('        --json（配合 --clean-updates，或 --release/--restore 的 --dry-run，stdout 只输出 JSON）');
   console.log('        --out <文件>（配合 --clean-updates，把同一份 JSON 写入文件，目录自动创建）');
   console.log('        --dry-run（全链路预演：release/restore/prune/clean-updates 都只打印、不写不删）');
+  console.log('        --skip-delta（发版后不自动量差分命中率；默认会量一次并写进设置页）');
   console.log('  产物：latest.json + 安装包 + blocks.json');
 }
 

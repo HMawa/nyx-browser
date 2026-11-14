@@ -354,6 +354,61 @@ check(
   'temp 忽略、docs 记录表不被忽略'
 );
 
+check(
+  '差分实测自动化：脚本只做「量一次 + 写报告」，报告落在与主进程同一个文件',
+  (() => {
+    const code = read(path.join(ROOT, 'scripts', 'measure-delta-report.js'));
+    // 复用主进程那套纯逻辑，不许在这里另写一份命中率/闸门规则
+    const reusesCore = /require\(path\.join\(ROOT, 'src\/core\/delta-stats\.js'\)\)/.test(code)
+      && /planDeltaMeasure\(/.test(code)
+      && /summarizeDeltaMeasure\(/.test(code)
+      && /normalizeDeltaReport\(/.test(code)
+      && /describeDeltaRate\(/.test(code);
+    // 报告必须落在 <userData>\delta-report.json —— 设置页读的就是这个文件
+    const sameReport = /path\.join\(USER_DATA, 'delta-report\.json'\)/.test(code) && /function writeReport\(/.test(code);
+    // 只允许写这一个文件：不许顺手改 latest.json / 安装包 / 留档
+    const noSideEffects = !/latest\.json',\s*JSON\.stringify/.test(code)
+      && !/fs\.copyFileSync|fs\.renameSync|fs\.unlinkSync|fs\.rmSync/.test(code);
+    // dry-run 必须什么都不读不写
+    const dryOk = /if \(dryRun\) \{/.test(code) && /什么都没读、什么都没写/.test(code);
+    return reusesCore && sameReport && noSideEffects && dryOk;
+  })(),
+  '复用 delta-stats 纯逻辑、只写 delta-report.json、dry-run 不读不写',
+);
+
+check(
+  '差分实测自动化：发版收尾时真的调了这一步，且在清理留档之后（基线才是下次真用的那一对）',
+  (() => {
+    const code = read(path.join(ROOT, 'scripts', 'make-release.js'));
+    const define = /function autoMeasureDelta\(setupPath\)/.test(code);
+    const spawned = /spawnSync\(process\.execPath, \[scriptPath, `--target=\$\{setupPath\}`\]/.test(code);
+    const called = /const delta = hasFlag\('skip-delta'\) \? [\s\S]{0,120}: autoMeasureDelta\(setupPath\);/.test(code);
+    // 注意：要定位「调用」，不是定义——`function autoMeasureDelta(setupPath)` 也在文件里，会比 prune 更靠前
+    const callAt = code.indexOf(': autoMeasureDelta(setupPath);');
+    const pruneAt = code.indexOf('pruneResult = pruneMode();');
+    const afterPrune = callAt > 0 && pruneAt > 0 && pruneAt < callAt;
+    const escape = /--skip-delta/.test(code) && /差分实测 ：\$\{delta\.text\}/.test(code);
+    // 量不成不许中断发版：只有 console.warn，不许 fail(
+    const warnOnly = /差分实测没量成（exit/.test(code) && !/if \(!delta\.ok\) fail\(/.test(code);
+    return define && spawned && called && afterPrune && escape && warnOnly;
+  })(),
+  'autoMeasureDelta 定义 + 真调用 + 在 prune 之后 + --skip-delta 逃生门 + 只告警不中断',
+);
+
+check(
+  '差分实测自动化：预演不量，但要说清真实发版会量（别让人以为这条被跳过了）',
+  (() => {
+    const code = read(path.join(ROOT, 'scripts', 'make-release.js'));
+    const dryBlockStart = code.indexOf('function releaseDryRun()');
+    const dryBlock = dryBlockStart >= 0 ? code.slice(dryBlockStart, code.indexOf('function releaseMode()')) : '';
+    return /差分实测 ：真实发版会在写完之后顺手量一次/.test(dryBlock)
+      && !/autoMeasureDelta\(/.test(dryBlock)
+      && /--skip-delta/.test(dryBlock);
+  })(),
+  'releaseDryRun 里只打印说明、不调用实测',
+);
+
+
 const failed = checks.filter((item) => !item.ok);
 console.log(`\n[Nyx] 发版门禁接线检查（${checks.length} 项）`);
 for (const item of checks) {
