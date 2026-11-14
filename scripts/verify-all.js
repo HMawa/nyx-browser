@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把十九个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把二十个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
@@ -15,14 +15,15 @@
  *  9. scripts/verify-agent-dispatch.js（agent 统一动作通道，20 项；纯 Node，不启动 Electron）
  * 10. scripts/verify-page-reader.js（页面读取与稳定元素 id，19 项；纯 Node，不启动 Electron）
  * 11. scripts/verify-agent-audit.js（agent 审计面与急停，17 项；纯 Node，不启动 Electron）
- * 12. scripts/verify-agent-sites.js（站点三层授权，30 项；纯 Node，不启动 Electron）
+ * 12. scripts/verify-agent-sites.js（站点三层授权与名单导入导出，34 项；纯 Node，不启动 Electron）
  * 13. scripts/verify-agent-mode.js（agent 接入模式与两步确认，16 项；纯 Node，不启动 Electron）
- * 14. scripts/verify-page-digest.js（页面摘要，17 项；纯 Node，不启动 Electron）
+ * 14. scripts/verify-page-digest.js（页面摘要与拦截统计，20 项；纯 Node，不启动 Electron）
  * 15. scripts/verify-tab-lifecycle.js（标签生命周期判定，18 项；纯 Node，不启动 Electron）
  * 16. scripts/verify-tab-sleep.js（标签休眠与唤醒端到端，10 项）
  * 17. scripts/verify-network-state.js（断网判定与断网横幅，10 项；纯 Node，不启动 Electron）
- * 18. scripts/verify-page-cache.js（离线页面缓存，19 项；纯 Node，不启动 Electron）
+ * 18. scripts/verify-page-cache.js（离线页面缓存与快照块结构，23 项；纯 Node，不启动 Electron）
  * 19. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
+ * 20. scripts/verify-runtime-compat.js（运行时兼容：剪贴板异步化与版本三处一致，6 项；纯 Node，不启动 Electron）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -160,6 +161,12 @@ const STEPS = [
     label: '离线页面缓存',
     script: 'verify-page-cache.js',
     items: '23 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '运行时兼容',
+    script: 'verify-runtime-compat.js',
+    items: '6 项',
     timeoutMs: 60000,
   },
   {

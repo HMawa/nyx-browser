@@ -3372,6 +3372,8 @@ function registerIpc() {
         x: addressSuggestState.geo.x,
         y: addressSuggestState.geo.y,
         width: addressSuggestState.geo.width,
+      }).catch((err) => {
+        console.warn('[Nyx] 置顶后重排建议失败：', err && err.message);
       });
     }
     return result;
@@ -3994,16 +3996,54 @@ function hostOfUrl(url) {
 }
 
 /**
+ * 剪贴板兼容层（Electron 45 起 clipboard 全是异步的）。
+ *
+ * 45 之前 `clipboard.readText()` 直接返回字符串，45 之后返回 Promise，
+ * 而且 `availableFormats()` 整个没了。这一层把差异吃掉：
+ * 调用方要么 `await readClipboardText()`，要么用 `cachedClipboardText()` 拿最近一次的值。
+ * 之所以还要缓存：地址栏建议是同步算的，而剪贴板读取现在是异步的——
+ * 不缓存就只能拿 `[object Promise]` 去匹配，等于剪贴板建议直接消失（这就是升级后第一个被抓到的回归）。
+ */
+const clipboardCache = { text: '', at: 0, reading: null };
+
+async function readClipboardText() {
+  try {
+    const value = clipboard.readText();
+    const text = value && typeof value.then === 'function' ? await value : value;
+    clipboardCache.text = typeof text === 'string' ? text : '';
+    clipboardCache.at = Date.now();
+    return clipboardCache.text;
+  } catch {
+    // 剪贴板被占用 / 无权限：当作空，不影响调用方
+    return '';
+  }
+}
+
+function cachedClipboardText() {
+  return clipboardCache.text;
+}
+
+/** 刷新缓存但做节流：输入时每敲一个字都读一次剪贴板没有意义 */
+async function refreshClipboardCache(minIntervalMs = 250) {
+  if (Date.now() - clipboardCache.at < minIntervalMs) return clipboardCache.text;
+  return readClipboardText();
+}
+
+async function writeClipboardText(text) {
+  const value = clipboard.writeText(String(text == null ? '' : text));
+  if (value && typeof value.then === 'function') await value;
+}
+
+/**
  * 读剪贴板里是否是一条网址（v1.10.0）。
  * 只在普通模式、每次查询时读一次；隐私模式压根不会走到这里（建议被整体禁用）。
  */
-function readClipboardUrl() {
+function cachedClipboardUrl() {
   try {
-    const text = String(clipboard.readText() || '').trim();
+    const text = String(cachedClipboardText() || '').trim();
     if (!text || text.length > 2048) return '';
     return /^https?:\/\/\S+$/i.test(text) ? text : '';
   } catch {
-    // 剪贴板被占用 / 无权限：当作没有，不影响建议本身
     return '';
   }
 }
@@ -4682,10 +4722,12 @@ function annotateSuggestOpenTabs(items) {
 }
 
 /** 处理一次查询：算命中 → 开/更新浮层 → 返回条目数 */
-function queryAddressSuggest(payload) {
+async function queryAddressSuggest(payload) {
   const text = String((payload && payload.text) || '');
   const expandedHost = String((payload && payload.expandedHost) || '').toLowerCase();
-  const items = addressSuggestMatches(text, { expandedHost, clipboard: readClipboardUrl() });
+  // 剪贴板读取在 Electron 45 是异步的，所以这里必须先刷一次缓存再算命中
+  await refreshClipboardCache();
+  const items = addressSuggestMatches(text, { expandedHost, clipboard: cachedClipboardUrl() });
   // v1.7.0：标出"这个地址已经开在某个标签里了"
   annotateSuggestOpenTabs(items);
 
@@ -5376,10 +5418,14 @@ function registerDownloadsIpc() {
   });
 
   // 复制下载地址
-  ipcMain.handle('nyx:downloads:copy-url', (_event, payload) => {
+  ipcMain.handle('nyx:downloads:copy-url', async (_event, payload) => {
     const url = payload && typeof payload.url === 'string' ? payload.url : '';
     if (!url) return { ok: false, error: '这条记录没有地址' };
-    clipboard.writeText(url);
+    try {
+      await writeClipboardText(url);
+    } catch (err) {
+      return { ok: false, error: `写入剪贴板失败：${err && err.message}` };
+    }
     return { ok: true };
   });
 
@@ -6243,17 +6289,19 @@ function registerErrorPageIpc() {
     return openSettings('diagnostics');
   });
 
-  ipcMain.handle('nyx:error:copy', (_event, payload) => {
+  ipcMain.handle('nyx:error:copy', async (_event, payload) => {
     const text = String((payload && payload.text) || '').trim();
     if (!text) return { ok: false, error: '没有可复制的详情' };
     try {
-      clipboard.writeText(text);
+      await writeClipboardText(text);
       // 写完立刻回读校对：`writeText` 不抛异常并不等于真写进去了（会话被锁、
       // 剪贴板被别的程序独占时它会安静地什么都不做）。回读对不上就如实报错，
       // 不让界面显示一句假的「已复制」。
+      // Electron 45 起 readText() 返回 Promise，必须 await 才拿到字符串，
+      // 否则这里拿到的是 [object Promise]，`.includes` 直接抛（升级后第二个被抓到的回归）。
       let readback = '';
       try {
-        readback = clipboard.readText() || '';
+        readback = (await readClipboardText()) || '';
       } catch {
         readback = '';
       }
@@ -6797,10 +6845,14 @@ function registerToolboxIpc() {
     return saveScreenshot(shot.base64, shot.fullPage);
   });
 
-  ipcMain.handle('nyx:tb:copy', (_event, payload) => {
+  ipcMain.handle('nyx:tb:copy', async (_event, payload) => {
     const text = payload && payload.text != null ? String(payload.text) : '';
     if (!text) return { ok: false, error: '没有可复制的内容' };
-    clipboard.writeText(text.slice(0, 512 * 1024));
+    try {
+      await writeClipboardText(text.slice(0, 512 * 1024));
+    } catch (err) {
+      return { ok: false, error: `写入剪贴板失败：${err && err.message}` };
+    }
     return { ok: true, length: text.length };
   });
 
@@ -6947,10 +6999,10 @@ function registerUpdateIpc() {
   });
 
   /** 把清理命令放进剪贴板：命令是文档里验证过的那一条，避免用户手抄出错 */
-  ipcMain.handle('nyx:update:copy-clean-command', () => {
+  ipcMain.handle('nyx:update:copy-clean-command', async () => {
     const command = updateCleanCommand();
     try {
-      clipboard.writeText(command);
+      await writeClipboardText(command);
     } catch (err) {
       return { ok: false, error: `写入剪贴板失败：${err.message}`, command };
     }
@@ -8139,13 +8191,13 @@ function registerDigestIpc() {
   });
 
   // 复制走主进程：写完回读校对，和失败页「复制详情」保持一致（剪贴板被占用时不许假装成功）
-  ipcMain.handle('nyx:digest:copy', (_event, payload) => {
+  ipcMain.handle('nyx:digest:copy', async (_event, payload) => {
     const input = payload && typeof payload === 'object' ? payload : {};
     const text = typeof input.text === 'string' ? input.text : '';
     if (!text) return { ok: false, error: '没有可复制的内容' };
     try {
-      clipboard.writeText(text);
-      const readback = clipboard.readText();
+      await writeClipboardText(text);
+      const readback = await readClipboardText();
       const head = text.split('\n')[0].slice(0, 40);
       if (!readback || (head && !readback.includes(head))) {
         return { ok: false, error: '系统剪贴板当前不可用（可能被其它程序占用），摘要没能复制' };
