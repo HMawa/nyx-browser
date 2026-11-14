@@ -29,10 +29,11 @@
 
 ## 2. 固定事实（2026-11-12 基线）
 
-- 版本：`package.json` = **1.17.1**；产物 `dist/Nyx-Setup-1.17.1.exe`（118,852,044 字节，sha256 `3a8a9c4161d4d5464eb0ef45feda2e0217bda7564cc397e05bd7bc3c14ae067c`），`dist/win-unpacked` = 1.17.1；本机安装版在 `%LOCALAPPDATA%\Programs\Nyx`（1.17.1）。
-- 运行时：Electron 43.7.4 / Chromium 150 / Node 24；Windows。
+- 版本：`package.json` = **1.17.2**；产物 `dist/Nyx-Setup-1.17.2.exe`（118,516,372 字节，sha256 `c17386b7c80061f98d8c0d0b3da4abed4a26a2065ef12e07f2bb3d433ea1037c`），`dist/win-unpacked` = 1.17.2；本机安装版在 `%LOCALAPPDATA%\Programs\Nyx`（1.17.2）。
+- 运行时：Electron 43.8.10 / Chromium 150.0.7871.250 / Node 24.22.1；Windows。
 - 运行时依赖只有两个：`@modelcontextprotocol/sdk`、`zod`（MCP server 用）。
-- 回归基线（本轮实测，全绿）：`npm run verify` = 地址栏建议 **68 项** + 界面体验 **112 项** + 出站链路守卫 **14 项** + 下载链路 **16 项** + 图形性能策略 **14 项** + 安全基线对照 **20 项** + 外壳防护基线 **19 项** + 录屏检测 **14 项** + 动作通道 **20 项** + 页面读取 **19 项** + agent 审计 **17 项** + agent 站点授权 **24 项** + agent 接入模式 **16 项** + 页面摘要 **17 项** + 标签生命周期 **18 项** + 标签休眠 **10 项** + 断网判定 **10 项** + 离线页面缓存 **14 项** + 打包冒烟 **11 项** = **453 项 / 19 个脚本 / 197 秒**。
+- 回归基线（本轮实测，全绿）：`npm run verify` = 地址栏建议 **68 项** + 界面体验 **114 项** + 出站链路守卫 **14 项** + 下载链路 **16 项** + 图形性能策略 **14 项** + 安全基线对照 **20 项** + 外壳防护基线 **19 项** + 录屏检测 **14 项** + 动作通道 **20 项** + 页面读取 **19 项** + agent 审计 **17 项** + agent 站点授权 **30 项** + agent 接入模式 **16 项** + 页面摘要 **17 项** + 标签生命周期 **18 项** + 标签休眠 **10 项** + 断网判定 **10 项** + 离线页面缓存 **19 项** + 打包冒烟 **11 项** = **466 项 / 19 个脚本 / 206 秒**。
+- 安装器 e2e（不进 `npm run verify`）：`scripts/test-installer-e2e.js` 真机跑 全新 → 降级 → 升级 → 修复 → 保留数据卸载 → 完全卸载，**56 项断言**；`make-release.js --with-installer-test` 已把它接进发版门禁（默认不跑，但摘要必打印原因与命令）。
 - 更新源：`%APPDATA%\Nyx\updates`（`latest.json` + 安装包 + `.blocks.json` + `extensions.json`）；留档 `%APPDATA%\Nyx\updates-archive\<版本>`。
 - 安装器：NSIS，`perMachine:false`（装到用户目录），自定义脚本 `build/installer.nsh`、打包后钩子 `build/after-pack.js`。
 - npm 命令必须用 `& 'C:\Program Files\nodejs\npm.cmd' run <script>`（`npm.ps1` 被执行策略拦）。
@@ -80,7 +81,7 @@
 
 ## 6. 验证脚本约定
 
-- 十九个脚本：`verify-address-suggest.js`（地址栏 68）、`verify-ui-polish.js`（界面 112）、`verify-link-guard.js`（出站链路守卫 14，纯 Node 不启动 Electron）、`verify-downloads.js`（下载链路 16，纯 Node 不启动 Electron）、`verify-gpu-policy.js`（图形性能策略 14，纯 Node 不启动 Electron）、`verify-security-baseline.js`（安全基线对照 20，纯 Node 不启动 Electron）、`verify-security-switches.js`（外壳防护基线 19，纯 Node 不启动 Electron）、`verify-screen-watch.js`（录屏 / 被远控检测 14，纯 Node 不启动 Electron）、`verify-agent-dispatch.js`（agent 统一动作通道 20，纯 Node 不启动 Electron）、`verify-page-reader.js`（页面读取与稳定元素 id 19，纯 Node 不启动 Electron）、`verify-agent-audit.js`（agent 动作留痕 17，纯 Node 不启动 Electron）、`verify-agent-sites.js`（agent 站点三层授权 24，纯 Node 不启动 Electron）、`verify-agent-mode.js`（agent 接入模式与两步确认 16，纯 Node 不启动 Electron）、`verify-page-digest.js`（页面摘要 17，纯 Node 不启动 Electron）、`verify-tab-lifecycle.js`（标签生命周期判定 18，纯 Node 不启动 Electron）、`verify-tab-sleep.js`（标签休眠与唤醒端到端 10，真实起实例，`NYX_TAB_SLEEP_MS=1200`）、`verify-network-state.js`（断网判定与断网横幅 10，纯 Node 不启动 Electron）、`verify-page-cache.js`（离线页面缓存 14，纯 Node 不启动 Electron）、`verify-packaged-smoke.js`（包内 11，缺 `dist/win-unpacked` 时跳过）。另有 `bench-transfer.js`（吞吐基线，**不进回归**，测大文件快慢用）、`test-installer-e2e.js`（安装器四条路径真机复验，需管理员权限与两个版本的安装包，**不进回归**）。
+- 十九个脚本：`verify-address-suggest.js`（地址栏 68）、`verify-ui-polish.js`（界面 114）、`verify-link-guard.js`（出站链路守卫 14，纯 Node 不启动 Electron）、`verify-downloads.js`（下载链路 16，纯 Node 不启动 Electron）、`verify-gpu-policy.js`（图形性能策略 14，纯 Node 不启动 Electron）、`verify-security-baseline.js`（安全基线对照 20，纯 Node 不启动 Electron）、`verify-security-switches.js`（外壳防护基线 19，纯 Node 不启动 Electron）、`verify-screen-watch.js`（录屏 / 被远控检测 14，纯 Node 不启动 Electron）、`verify-agent-dispatch.js`（agent 统一动作通道 20，纯 Node 不启动 Electron）、`verify-page-reader.js`（页面读取与稳定元素 id 19，纯 Node 不启动 Electron）、`verify-agent-audit.js`（agent 动作留痕 17，纯 Node 不启动 Electron）、`verify-agent-sites.js`（agent 站点三层授权 + 导入导出 30，纯 Node 不启动 Electron）、`verify-agent-mode.js`（agent 接入模式与两步确认 16，纯 Node 不启动 Electron）、`verify-page-digest.js`（页面摘要 17，纯 Node 不启动 Electron）、`verify-tab-lifecycle.js`（标签生命周期判定 18，纯 Node 不启动 Electron）、`verify-tab-sleep.js`（标签休眠与唤醒端到端 10，真实起实例，`NYX_TAB_SLEEP_MS=1200`）、`verify-network-state.js`（断网判定与断网横幅 10，纯 Node 不启动 Electron）、`verify-page-cache.js`（离线页面缓存与开关 19，纯 Node 不启动 Electron）、`verify-packaged-smoke.js`（包内 11，缺 `dist/win-unpacked` 时跳过）。另有 `bench-transfer.js`（吞吐基线，**不进回归**，测大文件快慢用）、`test-installer-e2e.js`（安装器四条路径真机复验，需管理员权限与两个版本的安装包，**不进回归**，但已接进 `make-release --with-installer-test`）。
 - 环境不满足而无法验证的断言（例如系统剪贴板被别的进程独占时）要**显式记为「跳过」并打印原因**，既不许静默通过，也不许删断言（红线 7）。
 - 新增断言写在对应脚本里，标签复用中文「（vX.Y.Z）」后缀；项数必须同步到 `scripts/verify-all.js` 的 `items` 与注释。
 - CDP 端到端：Node 24 全局 `WebSocket`，`--remote-debugging-port` 用 `pickFreePort()`。
@@ -145,4 +146,13 @@
 - ③ 离线可用第一版 `52c61cd`：`src/core/page-cache.js`（http(s) 正文快照，LRU 50，**隐私模式不落盘**，正文 < 20 字不缓存）+ 失败页「上次读到的内容（N 分钟前抓取）」+ 说明这是缓存快照；新增 `verify-page-cache.js` 14 项 + 界面 2 项。
 - ④ 站点名单 URL 前缀 `d8a06c3`：`agent-sites.js` 规则带 `mode: host|prefix`，prefix 按路径段匹配（`example.com/admin` 不覆盖 `/administrator`）；设置里两处下拉 + 「前缀」标记；`verify-agent-sites.js` 24 项。
 - ⑤ CHANGELOG 验收口径说明（并入 `4d47438`）：断言列是当时的统计口径，改了脚本数会让历史数字看起来"涨了很多"，跨版本请看各自发版记录；历史数字未改。
-- 本批次回归：**19 个脚本 / 453 项 / 197 秒**全绿。离线缓存与 URL 前缀属于 1.17.1 之后的新改动，**未重打安装包**（`dist` 里仍是 1.17.1）。
+- 本批次回归：**19 个脚本 / 453 项 / 197 秒**全绿。离线缓存与 URL 前缀属于 1.17.1 之后的新改动，已随 **1.17.2** 打包。
+
+### 9.3 1.17.2 批次（2026-11-14 夜，五项，已发布）
+
+- 顺序：① 升 Electron → ③ 离线缓存开关 → ④ 名单导入导出 → ⑤ e2e 接门禁 → ② 发 1.17.2，全部完成。
+- 提交：`3ceb7e1`（离线缓存开关 + `UiStore.get()` 真 bug）、`511552e`（名单导入导出 + 全局开关跟文件走）、`6de6da0`（Electron 43.7.4 → 43.8.10 + 安全基线三处）、`e812ce5`（`make-release --with-installer-test`）。
+- 发布：`dist\Nyx-Setup-1.17.2.exe` 118,516,372 字节、sha256 `c17386b7c80061f98d8c0d0b3da4abed4a26a2065ef12e07f2bb3d433ea1037c`；完整性 9/9、冒烟 11/11、安装器 e2e **56/56**、真机安装 1.17.2 启动正常。
+- 文档：`docs/Nyx-1.17.2-发版记录.md`、`docs/CHANGELOG.md`（索引 + 1.17.2 小节）、`README.md`（离线可读/休眠两条特性、名单导入导出与 e2e 门禁）。
+- 本批次回归：**19 个脚本 / 466 项 / 206 秒**全绿。
+- 待办（未开工，等用户决定）：发版之后的新候选、Chromium 150 分支漂移的整条升级（44/45）、离线缓存快照是否要支持图片、站点名单的导出格式版本迁移。
