@@ -54,9 +54,18 @@ const UI_PREF_DEFAULTS = {
   /**
    * 离线阅读缓存（候选③）：默认开启，但用户可以在「隐私与安全」里一键关掉。
    * 关掉时不只是以后不写，还会把已经落盘的正文快照一起清掉——
-   * 隐私模式从来不写（那是硬约束），普通模式则由这个开关说了算。
+   * 普通模式的快照由这个开关说了算；隐私模式的快照另见 privateSnapshotEnabled。
    */
   offlineCacheEnabled: true,
+
+  /**
+   * 隐私模式的加密快照（用户第 2 项）：默认开启。
+   *
+   * 与普通模式刻意分开：普通模式存明文 page-cache.json，隐私模式存
+   * private-cache.json 且整条加密（safeStorage → DPAPI），明面上只有地址哈希与时间。
+   * 关掉之后隐私模式一条都不写；系统密钥不可用时也一条都不写（绝不退化成明文）。
+   */
+  privateSnapshotEnabled: true,
 };
 
 /** 枚举型偏好的合法取值（键 → 允许值）。

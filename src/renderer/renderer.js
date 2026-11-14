@@ -405,9 +405,10 @@ function loadCachedPage(url) {
       if (cachedPageFor !== key) return; // 已经切到别的失败页，丢弃这次结果
       els.peCachedNote.textContent = res.note || '';
       renderCachedBlocks(res);
-      els.peCachedLabel.textContent = res.ageText
-        ? `上次读到的内容（${res.ageText}抓取）`
-        : '上次读到的内容';
+      const when = res.ageText ? `（${res.ageText}抓取` : '';
+      // 隐私模式的快照是加密存的，界面上要说清楚来源，别让人以为是普通缓存
+      const suffix = res.encrypted ? (when ? '，加密快照）' : '（加密快照）') : when ? '）' : '';
+      els.peCachedLabel.textContent = `上次读到的内容${when}${suffix}`;
       els.peCached.hidden = false;
     })
     .catch((err) => {

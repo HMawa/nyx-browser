@@ -1262,6 +1262,38 @@
         ? `当前保存了 ${count} 页正文快照${limit ? `（最多 ${limit} 页，最旧的会被顶掉）` : ''} · 文件：${data.file || '未知'}`
         : `还没有保存任何正文快照${limit ? `（最多保存 ${limit} 页）` : ''} · 文件：${data.file || '未知'}`;
     }
+
+    // 隐私模式那半边（用户第 2 项）：加密是否可用、存了几条、为什么没存，都要说出来
+    const privateBox = byId('offline-private-enabled');
+    const privateEnabled = data.privateEnabled !== false;
+    if (privateBox) {
+      privateBox.checked = privateEnabled;
+      // 系统密钥不可用时这个开关是摆设，直接禁掉并说明原因，别让人以为开了就有
+      const usable = data.privateAvailable !== false;
+      privateBox.disabled = !usable;
+      privateBox.title = usable ? '' : (data.privateReason || '系统密钥不可用，隐私模式的快照不会被保存。');
+    }
+    const privateFacts = byId('offline-private-facts');
+    if (privateFacts) {
+      const info = data.private || {};
+      const privateCount = Number(info.count) || 0;
+      const parts = [];
+      if (data.privateAvailable === false) {
+        parts.push(data.privateReason || '系统密钥不可用，隐私模式的快照不会被保存。');
+      } else if (privateEnabled) {
+        parts.push(
+          privateCount
+            ? `隐私模式已加密保存 ${privateCount} 条快照（最多 ${Number(info.limit) || 0} 条，${Number(info.ttlHours) || 24} 小时后自动作废）`
+            : '隐私模式还没有加密快照（最多 20 条，24 小时后自动作废）',
+        );
+        parts.push(`落点：${data.privateFile || '未知'}`);
+        parts.push('整条加密，明面上只有地址哈希与时间；只有这台机器的这个账户能解开');
+      } else {
+        parts.push('隐私模式不保存快照（关掉了这一项）');
+      }
+      if (data.privateNotice) parts.push(data.privateNotice);
+      privateFacts.textContent = parts.join(' · ');
+    }
   }
 
   function setOfflineStatus(text, bad) {
@@ -1316,6 +1348,36 @@
       });
     }
 
+    const privateBox = byId('offline-private-enabled');
+    if (privateBox) {
+      privateBox.addEventListener('change', async () => {
+        const enabled = privateBox.checked;
+        privateBox.disabled = true;
+        try {
+          const res = await window.nyx.offlineCacheSet({ enabled, private: true });
+          if (!res || res.ok === false) {
+            privateBox.checked = !enabled;
+            setOfflineStatus(`没有改成：${(res && res.error) || '未知原因'}`, true);
+            return;
+          }
+          renderOfflineCache(res);
+          if (!enabled) {
+            setOfflineStatus(
+              `隐私模式不再保存快照${res.privateCleared ? `，并清掉了已存的 ${res.privateCleared} 条加密快照` : ''}。`,
+              false,
+            );
+          } else {
+            setOfflineStatus('隐私模式已开启加密快照：只在这台机器的这个账户下能解开。', false);
+          }
+        } catch (err) {
+          privateBox.checked = !enabled;
+          setOfflineStatus(`没有改成：${err && err.message ? err.message : '未知原因'}`, true);
+        } finally {
+          privateBox.disabled = false;
+        }
+      });
+    }
+
     const clearBtn = byId('btn-offline-clear');
     if (clearBtn) {
       clearBtn.addEventListener('click', async () => {
@@ -1327,7 +1389,13 @@
             return;
           }
           renderOfflineCache(res);
-          setOfflineStatus(res.cleared ? `已清空 ${res.cleared} 页正文快照。` : '本来就是空的，没有可清的。', false);
+          const privateCleared = Number(res && res.privateCleared) || 0;
+          setOfflineStatus(
+            res.cleared || privateCleared
+              ? `已清空 ${res.cleared || 0} 页明文快照${privateCleared ? `，以及 ${privateCleared} 条加密快照` : ''}。`
+              : '本来就是空的，没有可清的。',
+            false,
+          );
         } catch (err) {
           setOfflineStatus(`没有清掉：${err && err.message ? err.message : '未知原因'}`, true);
         } finally {

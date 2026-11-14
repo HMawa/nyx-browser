@@ -213,7 +213,10 @@ check('17. 开关的状态包如实带条目数、上限与文件落点', () => 
   for (const key of ['enabled', 'count', 'limit', 'file', 'note']) {
     assert.ok(new RegExp(`\\b${key}:`).test(main), `状态包里缺少 ${key}`);
   }
-  assert.ok(main.includes('隐私模式从不写入'), '状态包要写明隐私模式的边界');
+  // 隐私模式的口径变了（用户第 2 项）：不再写"从不写入"，而是"整条加密单独存放"。
+  // 两句话只能有一句为真，所以这里同时断言旧说法不许残留。
+  assert.ok(main.includes('隐私模式的快照整条加密'), '状态包要写明隐私模式的快照是加密存的');
+  assert.ok(!main.includes('隐私模式从不写入'), '旧口径（从不写入）已经过时，不许两边都留着');
 });
 
 check('18. 接线：preload 三个方法 + 设置页卡片 + 进分区回读', () => {
@@ -349,6 +352,114 @@ check('23. 接线：失败页有块容器，渲染函数按类型出节点', () 
   for (const cls of ['.pe-cached-quote', '.pe-cached-code', '.pe-cached-caption']) {
     assert.ok(css.includes(cls), `样式里要有 ${cls}`);
   }
+});
+
+/* ---------------- 隐私模式的加密快照（用户第 2 项） ---------------- */
+
+const privateCache = require('../src/core/private-cache');
+
+check('24. 隐私模式的快照只能加密存：系统密钥不可用时一条都不许写', () => {
+  const off = privateCache.pickPrivateStoreMode({ encryptionAvailable: false });
+  assert.equal(off.ok, false, '密钥不可用时不许开启');
+  assert.equal(off.mode, 'off', '密钥不可用时模式必须是 off');
+  assert.ok(/系统密钥/.test(off.reason), '要说清是系统密钥的问题');
+  assert.ok(/不会|不.*保存/.test(off.reason), '要明确说不会保存，不能含糊');
+  const disabled = privateCache.pickPrivateStoreMode({ encryptionAvailable: true, enabled: false });
+  assert.equal(disabled.ok, false, '用户关掉之后也不许写');
+  assert.ok(/关掉/.test(disabled.reason), '关掉时要说清是被关掉的');
+  const on = privateCache.pickPrivateStoreMode({ encryptionAvailable: true });
+  assert.equal(on.mode, 'encrypted', '密钥可用时走加密');
+  assert.ok(/加密/.test(on.reason), '说明里要出现「加密」两个字');
+});
+
+check('25. 一条记录：地址只留哈希、正文太短不存、超长截断', () => {
+  const hash = (text) => `h${text.length}`;
+  const short = privateCache.preparePrivateRecord(
+    { url: 'https://a.test/x', title: 't', blocks: [{ type: 'para', text: '太短' }] },
+    { now: 10, hash },
+  );
+  assert.equal(short.ok, false, '正文不足 20 字不该存');
+  assert.ok(/正文太短/.test(short.reason), '要给中文原因');
+
+  const noUrl = privateCache.preparePrivateRecord({ blocks: [{ type: 'para', text: '足够长的正文内容用来测试。' }] }, { now: 1, hash });
+  assert.equal(noUrl.ok, false, '没有地址不存');
+  assert.ok(/地址/.test(noUrl.reason), '要说是地址的问题');
+
+  const long = 'x'.repeat(privateCache.PRIVATE_CACHE_TEXT_MAX + 500);
+  const ok = privateCache.preparePrivateRecord({ url: 'https://a.test/x', title: 'y'.repeat(500), text: long }, { now: 7, hash });
+  assert.equal(ok.ok, true, '正文够长要能整理成功');
+  assert.equal(ok.record.hash, privateCache.hashUrl('https://a.test/x', hash), '索引只留哈希，不存明文地址');
+  assert.ok(!JSON.stringify(Object.keys(ok.record)).includes('url'), '记录外层不许有明文地址字段');
+  assert.equal(ok.record.payload.text.length, privateCache.PRIVATE_CACHE_TEXT_MAX, '正文要按上限截断');
+  assert.equal(ok.record.payload.title.length, 200, '标题也要截断');
+  assert.ok(ok.record.payload.url.startsWith('https://'), '地址放在要加密的 payload 里');
+});
+
+check('26. 存储归一：坏条目、过期、重复、超上限都按规矩处理', () => {
+  const now = 1_000_000_000;
+  const fresh = now - 1000;
+  const stale = now - privateCache.PRIVATE_CACHE_TTL_MS - 1000;
+  const store = privateCache.normalizePrivateStore(
+    {
+      entries: [
+        { hash: 'a', at: fresh, blob: 'BLOB-A' },
+        { hash: 'a', at: fresh - 10, blob: 'BLOB-A2' },
+        { hash: 'b', at: stale, blob: 'BLOB-B' },
+        { hash: 'c', at: fresh, blob: '' },
+        { nope: true },
+        { hash: 'd', at: fresh, blob: 'BLOB-D' },
+      ],
+    },
+    { now },
+  );
+  const hashes = store.entries.map((item) => item.hash);
+  assert.deepEqual(hashes.slice(0, 2), ['a', 'd'], '最新的在前、重复的只留一条');
+  assert.ok(!hashes.includes('b'), '过期（超过 24 小时）的要丢掉');
+  assert.ok(!hashes.includes('c'), '没有密文的条目不算数');
+  const many = privateCache.normalizePrivateStore(
+    { entries: Array.from({ length: 30 }, (_, i) => ({ hash: `h${i}`, at: fresh - i, blob: 'B' })) },
+    { now },
+  );
+  assert.equal(many.entries.length, privateCache.PRIVATE_CACHE_LIMIT, '最多留 20 条');
+});
+
+check('27. 同地址覆盖而不是堆两条；说明里必须自称加密并说清有效期', () => {
+  const now = 5000;
+  let store = privateCache.normalizePrivateStore(null, { now });
+  store = privateCache.putPrivateEntry(store, { hash: 'a', at: now - 100, blob: 'OLD' }, { now });
+  store = privateCache.putPrivateEntry(store, { hash: 'a', at: now, blob: 'NEW' }, { now });
+  assert.equal(store.entries.length, 1, '同一地址只能一条');
+  assert.equal(store.entries[0].blob, 'NEW', '后写的覆盖前面的');
+
+  const described = privateCache.describePrivateEntry(store.entries[0], { now });
+  assert.equal(described.available, true, '有密文就该可用');
+  assert.equal(described.encrypted, true, '要标明是加密的');
+  assert.ok(/加密/.test(described.note), '说明里要写「加密」');
+  assert.ok(/24 小时/.test(described.note), '说明里要写 24 小时后作废');
+  assert.ok(/这台机器/.test(described.note), '说明里要写只能在这台机器解开');
+  const missing = privateCache.describePrivateEntry(null, { now });
+  assert.equal(missing.available, false, '没有条目要给 available:false');
+  assert.ok(/没有/.test(missing.note), '要说清没有');
+});
+
+check('28. 接线：隐私模式走独立加密文件，明文快照那条路不许漏', () => {
+  const main = read('src/main.js');
+  assert.ok(main.includes("sessions.getMode() === 'private') return savePrivatePageCache("), '隐私模式必须转到加密写入');
+  assert.ok(main.includes('safeStorage.encryptString('), '要用 safeStorage 加密');
+  assert.ok(main.includes('safeStorage.decryptString('), '读取时要解密');
+  assert.ok(main.includes("userDataFile('private-cache.json')"), '加密快照要有自己的文件');
+  assert.ok(/if \(!decision\.ok\)/.test(main), '密钥不可用时必须走拒绝分支');
+  assert.ok(main.includes('PRIVATE_CACHE_SKIPPED'), '没存下来要留诊断，不许静默');
+  assert.ok(main.includes('function clearPrivateCache('), '要能单独清掉加密快照');
+  assert.ok(/sessions\.getMode\(\) === 'private'[\s\S]{0,200}getPrivateCachedPage/.test(main), '失败页取缓存时要区分隐私模式');
+  const store = read('src/core/ui-store.js');
+  assert.ok(store.includes('privateSnapshotEnabled: true'), '隐私快照要有独立开关，默认开');
+  const html = read('src/renderer/settings.html');
+  assert.ok(html.includes('id="offline-private-enabled"'), '设置页要有隐私快照开关');
+  assert.ok(html.includes('id="offline-private-facts"'), '设置页要如实显示条目数与落点');
+  assert.ok(/整条加密/.test(html), '界面上要写明整条加密');
+  const js = read('src/renderer/settings.js');
+  assert.ok(js.includes("privateBox.disabled = !usable"), '密钥不可用时开关要禁掉，别让人以为开了就有');
 });
 
 /* ------------------------------------------------------------------ */

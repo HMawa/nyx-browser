@@ -87,6 +87,16 @@ const {
   summarize: summarizePage,
   summarizeNetwork,
 } = require('./core/page-digest');
+const {
+  PRIVATE_CACHE_LIMIT,
+  describePrivateEntry,
+  findPrivateEntry,
+  normalizePrivateStore,
+  pickPrivateStoreMode,
+  preparePrivateRecord,
+  privateCacheStatus,
+  putPrivateEntry,
+} = require('./core/private-cache');
 const { getRiskLog } = require('./core/risk-guard');
 // 标签生命周期（清单 G）：休眠阈值与 agent 保持唤醒时长
 const {
@@ -384,9 +394,12 @@ const runtime = {
   apiServer: null,
   apiPort: null,
   apiToken: null,
-  /** 离线可用：最近读到的页面正文快照（隐私模式不写） */
+  /** 离线可用：最近读到的页面正文快照（普通模式明文） */
   pageCache: null,
   pageCacheFile: '',
+  /** 隐私模式的加密快照（单独文件，整条加密，用户第 2 项） */
+  privateCache: null,
+  privateCacheFile: '',
   /** 内置代理编排（订阅管理 + mihomo 内核生命周期） */
   proxyService: null,
   /** 设置页（v1.17.0 起是主窗口里的一个标签，不再是独立窗口） */
@@ -1070,13 +1083,19 @@ function initPageCache() {
     console.log(`[Nyx] 离线缓存就绪｜条目：${runtime.pageCache.items.length}｜文件：${file}`);
   }
   runtime.pageCacheFile = file;
+  readPrivateCache();
   return runtime.pageCache;
 }
 
-/** 写一条离线快照（隐私模式、或用户关掉离线缓存时直接返回，不落盘）。 */
+/** 写一条离线快照（或用户关掉离线缓存时直接返回，不落盘）。
+ *
+ * 隐私模式（用户第 2 项）：不再"一律不写"，而是写进**另一个文件**并整条加密
+ * （safeStorage → Windows DPAPI），明面上只留「存过一条」的哈希与时间。
+ * 系统密钥不可用时**绝不退化成明文**，直接拒绝并说清原因。
+ */
 function savePageCache(snapshot) {
-  if (sessions.getMode() === 'private') return false;
   if (runtime.uiStore && runtime.uiStore.get().offlineCacheEnabled === false) return false;
+  if (sessions.getMode() === 'private') return savePrivatePageCache(snapshot);
   const result = putSnapshot(runtime.pageCache, snapshot);
   if (!result.stored) return false;
   runtime.pageCache = result.store;
@@ -1087,6 +1106,159 @@ function savePageCache(snapshot) {
     if (runtime.diagnostics) runtime.diagnostics.warn('PAGE_CACHE_SAVE_FAILED', '离线缓存写盘失败', { error: String(err && err.message ? err.message : err) });
   }
   return true;
+}
+
+/** 隐私模式快照"没存下来"的原因（下一次打开设置时如实显示，不许静默） */
+let pendingPrivateCacheNotice = '';
+
+/** 只清隐私模式那份加密快照（关掉开关时用；普通模式的明文快照不受影响） */
+function clearPrivateCache(reason) {
+  const cleared = Array.isArray(runtime.privateCache && runtime.privateCache.entries)
+    ? runtime.privateCache.entries.length
+    : 0;
+  runtime.privateCache = { v: 1, entries: [] };
+  try {
+    fs.writeFileSync(privateCachePath(), JSON.stringify(runtime.privateCache), 'utf8');
+  } catch (err) {
+    if (runtime.diagnostics) {
+      runtime.diagnostics.error('PRIVATE_CACHE_CLEAR_FAILED', '清空隐私模式快照时没能写入磁盘', {
+        error: String(err && err.message ? err.message : err),
+      });
+    }
+    return { ok: false, cleared, error: `没能清空隐私模式快照：${err && err.message ? err.message : err}` };
+  }
+  if (runtime.diagnostics) runtime.diagnostics.info('PRIVATE_CACHE_CLEARED', { reason, cleared });
+  return { ok: true, cleared };
+}
+
+/** 隐私模式的加密快照：读 / 写 / 查，全部绕开明文文件 */
+function privateCachePath() {
+  return userDataFile('private-cache.json');
+}
+
+function readPrivateCache() {
+  const file = privateCachePath();
+  let raw = '';
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch {
+    raw = '';
+  }
+  let parsed = null;
+  try {
+    parsed = raw ? JSON.parse(raw.replace(/^\uFEFF/, '')) : null;
+  } catch (err) {
+    console.warn('[Nyx] 隐私模式快照文件读不懂，按空处理：', err && err.message ? err.message : err);
+    if (runtime.diagnostics) runtime.diagnostics.warn('PRIVATE_CACHE_READ_FAILED', '隐私模式的快照文件读不出来，已按空处理', { file });
+  }
+  runtime.privateCache = normalizePrivateStore(parsed, { now: Date.now() });
+  runtime.privateCacheFile = file;
+  return runtime.privateCache;
+}
+
+function writePrivateCache(store) {
+  const file = privateCachePath();
+  try {
+    fs.writeFileSync(file, JSON.stringify(store), 'utf8');
+    return true;
+  } catch (err) {
+    console.warn('[Nyx] 隐私模式的快照没能写入磁盘：', err && err.message ? err.message : err);
+    if (runtime.diagnostics) {
+      runtime.diagnostics.error('PRIVATE_CACHE_SAVE_FAILED', '隐私模式的加密快照写盘失败', {
+        error: String(err && err.message ? err.message : err),
+      });
+    }
+    return false;
+  }
+}
+
+function privateCacheDecision() {
+  let encryptionAvailable = false;
+  try {
+    encryptionAvailable = Boolean(safeStorage && safeStorage.isEncryptionAvailable());
+  } catch {
+    encryptionAvailable = false;
+  }
+  const enabled = runtime.uiStore ? runtime.uiStore.get().privateSnapshotEnabled !== false : true;
+  return pickPrivateStoreMode({ encryptionAvailable, enabled });
+}
+
+function savePrivatePageCache(snapshot) {
+  const decision = privateCacheDecision();
+  if (!decision.ok) {
+    if (runtime.diagnostics) {
+      runtime.diagnostics.warn('PRIVATE_CACHE_SKIPPED', '隐私模式的快照没有保存', { reason: decision.reason });
+    }
+    pendingPrivateCacheNotice = decision.reason;
+    return false;
+  }
+  const prepared = preparePrivateRecord(snapshot, { now: Date.now(), hash: privateHash });
+  if (!prepared.ok) return false;
+  let blob = '';
+  try {
+    blob = safeStorage.encryptString(JSON.stringify(prepared.record.payload)).toString('base64');
+  } catch (err) {
+    if (runtime.diagnostics) {
+      runtime.diagnostics.error('PRIVATE_CACHE_ENCRYPT_FAILED', '隐私模式的快照加密失败', {
+        error: String(err && err.message ? err.message : err),
+      });
+    }
+    pendingPrivateCacheNotice = '这条快照没加密成功，所以没有保存。';
+    return false;
+  }
+  const next = putPrivateEntry(runtime.privateCache, { hash: prepared.record.hash, at: prepared.record.at, blob }, { now: Date.now() });
+  runtime.privateCache = { v: next.v, entries: next.entries };
+  const written = writePrivateCache(runtime.privateCache);
+  if (runtime.diagnostics) {
+    runtime.diagnostics.info('PRIVATE_CACHE_SAVED', '隐私模式的快照已加密保存', {
+      entries: runtime.privateCache.entries.length,
+      written,
+      chars: prepared.record.payload.text.length,
+    });
+  }
+  return written;
+}
+
+/** 隐私模式下按地址取回快照：只有能解密才返回内容 */
+function getPrivateCachedPage(url) {
+  const hash = privateHash(String(url || ''));
+  if (!hash) return { available: false, note: '这条地址没有加密快照。', encrypted: true };
+  const entry = findPrivateEntry(runtime.privateCache, hash, { now: Date.now() });
+  if (!entry) return { available: false, note: '这条地址没有加密快照。', encrypted: true };
+  let payload = null;
+  try {
+    payload = JSON.parse(safeStorage.decryptString(Buffer.from(entry.blob, 'base64')));
+  } catch (err) {
+    if (runtime.diagnostics) {
+      runtime.diagnostics.warn('PRIVATE_CACHE_DECRYPT_FAILED', '隐私模式的快照解不开（可能换了账户或系统密钥变了）', {
+        error: String(err && err.message ? err.message : err),
+      });
+    }
+    return {
+      available: false,
+      encrypted: true,
+      note: '这条加密快照解不开了（换了系统账户或密钥变了），可以直接重试页面。',
+    };
+  }
+  const described = describePrivateEntry(entry, { now: Date.now() });
+  const text = typeof payload.text === 'string' ? payload.text : '';
+  return {
+    available: true,
+    encrypted: true,
+    title: payload.title || '',
+    url: payload.url || '',
+    text,
+    chars: text.length,
+    at: described.at,
+    ageText: described.ageText,
+    note: described.note,
+    blocks: Array.isArray(payload.blocks) ? payload.blocks : [],
+    images: [],
+  };
+}
+
+function privateHash(text) {
+  return crypto.createHash('sha256').update(String(text)).digest('hex').slice(0, 32);
 }
 
 /**
@@ -6469,8 +6641,16 @@ function registerErrorPageIpc() {
 
   // 断网时给一份"上次读到什么"——只有真的缓存过才返回内容，
   // 没缓存就返回 available:false + 中文说明，界面据此自己决定说什么。
+  // 隐私模式走另一个加密文件（用户第 2 项），没有可解密的内容就如实说没有。
   ipcMain.handle('nyx:error:cached', (_event, payload) => {
     const url = String((payload && payload.url) || '');
+    if (sessions.getMode() === 'private') {
+      const privatePage = getPrivateCachedPage(url);
+      if (runtime.diagnostics && privatePage.available) {
+        runtime.diagnostics.info('OFFLINE_CACHE_SHOWN', { url: redactUrlForLog(url), chars: privatePage.chars, at: privatePage.at, encrypted: true });
+      }
+      return { ok: true, url, ...privatePage };
+    }
     const snapshot = getSnapshot(runtime.pageCache, url);
     const described = describeCachedPage(snapshot, { now: Date.now() });
     if (runtime.diagnostics && described.available) {
@@ -6487,19 +6667,28 @@ function registerErrorPageIpc() {
  */
 function clearPageCache(reason) {
   runtime.pageCache = { version: CACHE_VERSION, items: [] };
+  // 隐私模式那份也一起清：用户点「清空」时不该只清一半
+  const clearedPrivate = Array.isArray(runtime.privateCache && runtime.privateCache.entries)
+    ? runtime.privateCache.entries.length
+    : 0;
+  runtime.privateCache = { v: 1, entries: [] };
   try {
     fs.writeFileSync(runtime.pageCacheFile, JSON.stringify(runtime.pageCache), 'utf8');
+    fs.writeFileSync(privateCachePath(), JSON.stringify(runtime.privateCache), 'utf8');
   } catch (err) {
     console.warn('[Nyx] 清空离线缓存时写盘失败：', err && err.message ? err.message : err);
     if (runtime.diagnostics) runtime.diagnostics.error('PAGE_CACHE_CLEAR_FAILED', '清空离线缓存时没能写入磁盘', { error: String(err && err.message ? err.message : err) });
     return { ok: false, error: `没能写入 ${runtime.pageCacheFile}：${err && err.message ? err.message : err}` };
   }
-  if (runtime.diagnostics) runtime.diagnostics.info('PAGE_CACHE_CLEARED', { reason, file: runtime.pageCacheFile });
-  return { ok: true };
+  if (runtime.diagnostics) runtime.diagnostics.info('PAGE_CACHE_CLEARED', { reason, file: runtime.pageCacheFile, private: clearedPrivate });
+  return { ok: true, privateCleared: clearedPrivate };
 }
 
 function offlineCachePayload() {
   const items = runtime.pageCache && Array.isArray(runtime.pageCache.items) ? runtime.pageCache.items : [];
+  const privateDecision = privateCacheDecision();
+  const privateNotice = pendingPrivateCacheNotice;
+  pendingPrivateCacheNotice = '';
   return {
     ok: true,
     // 注意：UiStore.get() 不接受参数，返回的是整份偏好对象 —— 不能写成 get('offlineCacheEnabled')
@@ -6507,7 +6696,16 @@ function offlineCachePayload() {
     count: items.length,
     limit: CACHE_LIMIT,
     file: runtime.pageCacheFile || userDataFile('page-cache.json'),
-    note: '只存 http(s) 页面的正文结构与纯文字，外加最多 6 张小图（单张 ≤120 KB、一页合计 ≤480 KB）；不存 Cookie 与表单内容，隐私模式从不写入。',
+    note: '只存 http(s) 页面的正文结构与纯文字，外加最多 6 张小图（单张 ≤120 KB、一页合计 ≤480 KB）；不存 Cookie 与表单内容。隐私模式的快照整条加密后单独存放。',
+    // 隐私模式那半边（用户第 2 项）：加密是否可用、存了几条、为什么没存
+    privateEnabled: runtime.uiStore ? runtime.uiStore.get().privateSnapshotEnabled !== false : true,
+    privateMode: privateDecision.mode,
+    privateAvailable: privateDecision.ok,
+    privateReason: privateDecision.reason,
+    privateNotice,
+    private: privateCacheStatus(runtime.privateCache, { now: Date.now() }),
+    privateFile: runtime.privateCacheFile || userDataFile('private-cache.json'),
+    privateLimit: PRIVATE_CACHE_LIMIT,
   };
 }
 
@@ -6516,6 +6714,29 @@ function registerOfflineCacheIpc() {
 
   ipcMain.handle('nyx:offline:set', (_event, payload) => {
     const enabled = !(payload && payload.enabled === false);
+    // 隐私模式那半边单独一个开关（用户第 2 项）：两个开关互不影响，
+    // 免得"关掉普通缓存"顺手把隐私模式的加密快照也关掉。
+    if (payload && payload.private === true) {
+      const nextPrivate = !(payload.enabled === false);
+      try {
+        const savedPrivate = runtime.uiStore.set('privateSnapshotEnabled', nextPrivate);
+        if (savedPrivate && savedPrivate.ok === false) {
+          if (runtime.diagnostics) runtime.diagnostics.error('PRIVATE_CACHE_TOGGLE_FAILED', '隐私模式快照开关没能保存', { error: savedPrivate.error });
+          return { ...offlineCachePayload(), ok: false, error: `没能保存这个开关：${savedPrivate.error}` };
+        }
+      } catch (err) {
+        if (runtime.diagnostics) runtime.diagnostics.error('PRIVATE_CACHE_TOGGLE_FAILED', '隐私模式快照开关没能保存', { error: String(err && err.message ? err.message : err) });
+        return { ...offlineCachePayload(), ok: false, error: `没能保存这个开关：${err && err.message ? err.message : err}` };
+      }
+      if (!nextPrivate) {
+        pendingPrivateCacheNotice = '';
+        const clearedPrivate = clearPrivateCache('private-disabled');
+        if (!clearedPrivate.ok) {
+          return { ...offlineCachePayload(), ok: false, error: clearedPrivate.error };
+        }
+      }
+      return { ...offlineCachePayload(), ok: true, privateEnabled: nextPrivate };
+    }
     try {
       const saved = runtime.uiStore.set('offlineCacheEnabled', enabled);
       // set() 遇到非法值时返回 { ok:false } 而不抛异常，这里必须看返回值，

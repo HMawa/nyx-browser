@@ -399,13 +399,18 @@
                 <p class="hint">
                   断网时失败页会显示「上次读到的内容」，靠的就是这里的快照：只存 http(s) 页面的正文结构与纯文字，
                   另外最多存 6 张小图（单张不超过 120 KB、一页合计不超过 480 KB），存不下的图只留一句说明；
-                  不存 Cookie，也不存表单内容。隐私模式从不写入；关掉这个开关会停止写入，并把已经保存的快照一起清掉。
+                  不存 Cookie，也不存表单内容。关掉这个开关会停止写入，并把已经保存的快照一起清掉。
                 </p>
                 <label class="ack-row">
                   <input type="checkbox" id="offline-cache-enabled" />
-                  <span>允许保存页面正文快照（用于断网时查看，可随时清空）</span>
+                  <span>允许保存页面正文快照（普通模式：明文存放，用于断网时查看，可随时清空）</span>
                 </label>
                 <p class="hint" id="offline-facts"></p>
+                <label class="ack-row">
+                  <input type="checkbox" id="offline-private-enabled" />
+                  <span>隐私模式也保存快照（整条加密后单独存放，只有这台机器的这个账户能解开）</span>
+                </label>
+                <p class="hint" id="offline-private-facts"></p>
                 <p class="hint" id="offline-status" role="status" aria-live="polite"></p>
               </div>
             </section>
