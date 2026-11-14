@@ -21,7 +21,7 @@
  * 15. scripts/verify-tab-lifecycle.js（标签生命周期判定，18 项；纯 Node，不启动 Electron）
  * 16. scripts/verify-tab-sleep.js（标签休眠与唤醒端到端，10 项）
  * 17. scripts/verify-network-state.js（断网判定与断网横幅，10 项；纯 Node，不启动 Electron）
- * 18. scripts/verify-page-cache.js（离线页面缓存、快照块结构、隐私加密、两份站点名单（含各自的导入导出、「只存这些」与自定义模板及其导入导出）、坏条目清理，62 项；纯 Node，不启动 Electron）
+ * 18. scripts/verify-page-cache.js（离线页面缓存、快照块结构、隐私加密、两份站点名单（含各自的导入导出、「只存这些」与自定义模板及其导入导出、名单是否真生效）、坏条目清理，64 项；纯 Node，不启动 Electron）
  * 19. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
  * 20. scripts/verify-runtime-compat.js（运行时兼容：剪贴板异步化与版本三处一致，9 项；纯 Node，不启动 Electron）
  * 21. scripts/verify-release-gate.js（发版门禁、安装器 e2e 接线、验签挑包、差分命中率实测与过期判定、asar 差分结论、夜间 e2e 注册计划任务与状态卡、发版后自动量差分，43 项；纯 Node，不跑安装包）
@@ -163,7 +163,7 @@ const STEPS = [
   {
     label: '离线页面缓存',
     script: 'verify-page-cache.js',
-    items: '62 项',
+    items: '64 项',
     timeoutMs: 60000,
   },
   {

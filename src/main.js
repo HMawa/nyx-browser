@@ -1350,6 +1350,32 @@ function privateCacheDecision() {
   return pickPrivateStoreMode({ encryptionAvailable, enabled });
 }
 
+/**
+ * 隐私模式名单是不是「真的在生效」。
+ *
+ * 名单只有在隐私快照开着、并且这台机器上系统加密可用时才起作用。
+ * 关着的时候改名单不会报错，但也不会有任何效果——这种事必须让用户看见，
+ * 否则用户会以为「我已经把这些站点放进名单了」，实际什么都没记。
+ */
+function privateSiteEffective() {
+  const prefs = runtime.uiStore ? runtime.uiStore.get() : {};
+  const enabled = prefs.privateSnapshotEnabled !== false;
+  let encryptionAvailable = false;
+  try {
+    encryptionAvailable = Boolean(safeStorage && safeStorage.isEncryptionAvailable());
+  } catch {
+    encryptionAvailable = false;
+  }
+  const active = enabled && encryptionAvailable;
+  let note = '';
+  if (!enabled) {
+    note = '隐私模式快照现在是关着的，这份名单暂时不会生效；把「隐私模式快照」打开之后才会按它来。';
+  } else if (!encryptionAvailable) {
+    note = '这台机器上系统加密不可用，隐私模式快照根本不会写盘，这份名单暂时不会生效。';
+  }
+  return { enabled, encryptionAvailable, active, note };
+}
+
 function savePrivatePageCache(snapshot) {
   const decision = privateCacheDecision();
   if (!decision.ok) {
@@ -7300,6 +7326,7 @@ function registerOfflineCacheIpc() {
     ok: true,
     ...cacheSitePolicy(),
     private: privateSitePolicy(),
+    privateEffective: privateSiteEffective(),
     modes: CACHE_SITE_MODES,
   }));
 
@@ -7322,7 +7349,7 @@ function registerOfflineCacheIpc() {
           block: next.block.length,
         });
       }
-      return { ok: true, ...cacheSitePolicy(), private: privateSitePolicy() };
+      return { ok: true, ...cacheSitePolicy(), private: privateSitePolicy(), privateEffective: privateSiteEffective() };
     }
     const writes = [
       ['cacheSiteMode', next.mode],
@@ -7356,6 +7383,7 @@ function registerOfflineCacheIpc() {
       templates: describeSiteTemplates(custom),
       custom,
       current: privateSitePolicy(),
+      effective: privateSiteEffective(),
     };
   });
 
@@ -7370,12 +7398,15 @@ function registerOfflineCacheIpc() {
     if (!saved.ok) {
       return { ok: false, error: saved.error, private: privateSitePolicy() };
     }
+    // 名单改完要说清「现在到底生效没有」——快照关着或加密不可用时，改了也不会有任何效果
+    const effective = privateSiteEffective();
     if (runtime.diagnostics) {
       runtime.diagnostics.info('PRIVATE_CACHE_TEMPLATE_APPLIED', '隐私模式名单套用了模板', {
         template: result.template.key,
         added: result.added.length,
         skipped: result.skipped.length,
         modeChanged: result.modeChanged,
+        effective: effective.active,
       });
     }
     return {
@@ -7384,7 +7415,8 @@ function registerOfflineCacheIpc() {
       added: result.added,
       skipped: result.skipped,
       modeChanged: result.modeChanged,
-      message: result.message,
+      message: effective.active ? result.message : `${result.message}\n${effective.note}`,
+      effective,
       private: privateSitePolicy(),
     };
   });

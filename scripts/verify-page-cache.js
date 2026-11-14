@@ -1063,6 +1063,30 @@ check('61. 接线：导出/导入各一个 IPC（同步对话框），界面两�
   assert.ok(/dataset\.wired !== 'true'/.test(js), '按钮只绑一次');
 });
 
+check('63. 隐私名单「现在到底生效没有」要能判定出来（关着 / 加密不可用 / 生效）', () => {
+  const main = read('src/main.js');
+  assert.ok(/function privateSiteEffective\(\)/.test(main), '缺「是否生效」判定函数');
+  assert.ok(/privateSnapshotEnabled !== false/.test(main), '判定要看私密快照开关');
+  assert.ok(/isEncryptionAvailable\(\)/.test(main), '判定要看系统加密能不能用');
+  // 关着的时候必须给一句人话，不能只回 active:false
+  assert.ok(/这份名单暂时不会生效/.test(main), '关着要说清"这份名单暂时不会生效"');
+  assert.ok(/隐私模式快照根本不会写盘/.test(main), '加密不可用要说清原因');
+  assert.ok(/privateEffective: privateSiteEffective\(\)/.test(main), '站点名单接口要带上生效状态');
+  assert.ok(/effective: privateSiteEffective\(\)/.test(main), '模板接口要带上生效状态');
+  // 套用模板时，若名单不生效，message 里必须补上原因（否则界面只会说"已并入"）
+  assert.ok(/message: effective\.active \? result\.message : `\$\{result\.message\}\\n\$\{effective\.note\}`/.test(main), '套用时要把"不生效"的原因写进返回文案');
+  assert.ok(/effective,\n\s+private: privateSitePolicy\(\),/.test(main), '套用结果要带回 effective');
+});
+
+check('64. 设置页把「名单不生效」当场说出来，不留到用户自己发现', () => {
+  const js = read('src/renderer/settings.js');
+  assert.ok(/const effective = res && res\.effective \? res\.effective : null;/.test(js), '界面要读 effective');
+  assert.ok(/effective\.active === false/.test(js), '界面要判 active === false');
+  assert.ok(/statusLine\.className = 'hint is-warn';/.test(js), '要用警告样式，别混在普通提示里');
+  assert.ok(/这份名单现在不会生效/.test(js), '要有一句兜底说明');
+  assert.ok(/id="offline-private-template-status"/.test(read('src/renderer/settings.html')), '要用已有状态行，不新造元素');
+});
+
 /* ------------------------------------------------------------------ */
 const failed = checks.filter((item) => !item.ok);
 const total = checks.length;

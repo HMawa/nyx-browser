@@ -1398,6 +1398,17 @@
       return;
     }
     const templates = (res && Array.isArray(res.templates) && res.templates) || [];
+    // 名单生效与否先说清楚：快照关着、或这台机器加密不可用时，名单改了也不会有任何效果
+    const effective = res && res.effective ? res.effective : null;
+    const statusLine = byId('offline-private-template-status');
+    const showEffective = (force) => {
+      if (!statusLine) return;
+      if (effective && effective.active === false && (force || !statusLine.textContent)) {
+        statusLine.className = 'hint is-warn';
+        statusLine.textContent = effective.note || '这份名单现在不会生效。';
+      }
+    };
+    showEffective(false);
     if (!templates.length) {
       list.textContent = '没有可用的模板。';
       return;
