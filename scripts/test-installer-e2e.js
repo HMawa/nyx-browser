@@ -22,7 +22,7 @@
  * 退出码：0 = 全部断言通过；1 = 有失败项（失败后不再执行后续步骤）。
  */
 
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -72,6 +72,8 @@ const results = [];
 let group = '预检';
 let installerPath = null;
 let olderInstallerPath = null;
+/** 跨版本模式：先装旧版、再直接升到新版（跳过中间版本），用于验证"跨两版升级" */
+let crossMode = false;
 let didBackup = false;
 let preflightOnly = false;
 
@@ -323,6 +325,10 @@ function parseArgs() {
       preflightOnly = true;
       continue;
     }
+    if (arg === '--cross') {
+      crossMode = true;
+      continue;
+    }
     if (arg.startsWith('--installer=')) value = arg.slice('--installer='.length);
     else if (arg.startsWith('--from=')) from = arg.slice('--from='.length);
     else if (arg === '--installer' && args[i + 1]) {
@@ -384,12 +390,29 @@ function stageInstaller(round) {
   return copy;
 }
 
-/** 旧版安装包副本（升级 / 降级路径要用两个版本才测得出来）。 */
+/**
+ * 旧版安装包副本（升级 / 降级路径要用两个版本才测得出来）。
+ *
+ * 注意：`--from` 指向 `%APPDATA%\Nyx\updates-archive` 时，测试第一步会把整个
+ * `%APPDATA%\Nyx` 搬到临时备份目录，源文件路径当场失效（这是真踩过的 ENOENT）。
+ * 所以旧包必须在备份之前就落到 STAGE 里的常驻副本上。
+ */
+let olderStagedPath = null;
+
+function stageOlderInstallerMaster() {
+  if (!olderInstallerPath || olderStagedPath) return olderStagedPath;
+  fs.mkdirSync(STAGE, { recursive: true });
+  const master = path.join(STAGE, 'setup-old-master.exe');
+  fs.copyFileSync(olderInstallerPath, master);
+  olderStagedPath = master;
+  return master;
+}
+
 function stageOlderInstaller(round) {
   if (!olderInstallerPath) return null;
-  fs.mkdirSync(STAGE, { recursive: true });
+  const master = stageOlderInstallerMaster();
   const copy = path.join(STAGE, `setup-old${round}.exe`);
-  fs.copyFileSync(olderInstallerPath, copy);
+  fs.copyFileSync(master || olderInstallerPath, copy);
   return copy;
 }
 
@@ -515,9 +538,20 @@ function preflight() {
       oldVersion !== newVersion,
       `${oldVersion} ／ ${newVersion}`,
     );
+    if (crossMode) {
+      const parts = String(oldVersion || '').split('.').map((item) => Number(item) || 0);
+      const nextParts = String(newVersion || '').split('.').map((item) => Number(item) || 0);
+      expect(
+        '跨版本模式：旧版确实比新版低（否则不是"升级"）',
+        parts[0] < nextParts[0] || (parts[0] === nextParts[0] && parts[1] < nextParts[1]),
+        `${oldVersion} → ${newVersion}`,
+      );
+    }
   } else {
     skip(
-      '升级安装 / 降级安装路径（需要 --from=<旧版安装包>）',
+      crossMode
+        ? '跨版本升级路径（--cross 需要同时给 --from=<旧版安装包>）'
+        : '升级安装 / 降级安装路径（需要 --from=<旧版安装包>）',
       '只给一个安装包时无法真跑「旧→新」「新→旧」，本次只测全新安装 / 修复安装 / 保留数据卸载 / 完全卸载',
     );
   }
@@ -782,9 +816,173 @@ async function step2DowngradeToOlder() {
   expect('降级后程序版本回到旧版', !!oldVersion && version.includes(oldVersion), `FileVersion=${version}，期望含 ${oldVersion}`);
 }
 
+// ---------- 跨版本升级（--cross） ----------
+
+/** 这些是旧版本写过、新版本必须还能读的用户数据（跨版升级最容易在这里翻车） */
+const LEGACY_FIXTURES = [
+  {
+    name: 'ui-preferences.json',
+    // 1.16.0 时代的偏好：没有 offlineCacheEnabled 这个后加的键
+    body: { theme: 'ink', downloadAsk: false, downloadDir: '', showLinkBadge: true, showModeSwitch: true },
+  },
+  {
+    name: 'agent-sites.json',
+    // 1.16.0 时代的站点名单：没有 version 字段，规则是纯字符串
+    body: { globalEnabled: true, allow: ['legacy.example.com'], block: [] },
+  },
+  {
+    name: 'page-cache.json',
+    // v1 的缓存表：只有 text，没有 blocks / images
+    body: {
+      version: 1,
+      items: [
+        {
+          url: 'https://legacy.example.com/old-page',
+          title: '旧版本存下来的页面',
+          text: '这是 1.16.0 时期缓存下来的正文，用来验证跨版本升级之后还读得出来。',
+          chars: 36,
+          at: Date.now(),
+        },
+      ],
+    },
+  },
+];
+
+function seedLegacyUserData() {
+  fs.mkdirSync(APP_DATA, { recursive: true });
+  for (const item of LEGACY_FIXTURES) {
+    const file = path.join(APP_DATA, item.name);
+    fs.writeFileSync(file, `${JSON.stringify(item.body, null, 2)}\n`, 'utf8');
+    expect(`写入旧版本用户数据 ${item.name}`, exists(file), file);
+  }
+}
+
+/** 起一次真程序，确认旧数据不会把它炸掉；活够时长就算过，然后按路径收尸。 */
+async function launchAppSmoke(label) {
+  let child = null;
+  let error = '';
+  try {
+    child = spawn(NYX_EXE, [], { detached: true, stdio: 'ignore', windowsHide: true });
+    child.unref();
+    child.on('error', (err) => {
+      error = err && err.message ? err.message : String(err);
+    });
+  } catch (err) {
+    error = err && err.message ? err.message : String(err);
+  }
+  if (!child) {
+    expect(`${label}：程序能启动`, false, error || 'spawn 失败');
+    return;
+  }
+  const startedAt = Date.now();
+  await waitFor(() => false, 9000);
+  const alive = listNyxProcesses().filter((item) => item.Path && item.Path.toLowerCase().startsWith(WORK.toLowerCase()));
+  expect(
+    `${label}：旧版本用户数据下程序能正常启动并存活`,
+    alive.length > 0,
+    alive.length ? `存活 ${alive.length} 个进程，${Math.round((Date.now() - startedAt) / 100) / 10}s` : `没有存活进程${error ? `，错误：${error}` : ''}`,
+  );
+  killTestProcesses();
+  await waitFor(() => listNyxProcesses().length === 0, 15000);
+}
+
+/**
+ * 跨版本第 1 步：全新安装旧版，写下旧格式用户数据。
+ *
+ * 之所以要"真写旧格式文件"：跨版升级最常见的坑不是安装器，是新版读到旧数据就崩。
+ * 只断言 FileVersion 变了，等于没测这一层。
+ */
+async function stepCrossInstallOlder() {
+  group = '步骤 1｜跨版本：先装旧版';
+  const oldVersion = versionFromName(olderInstallerPath);
+  console.log(`\n${'-'.repeat(72)}\n[步骤 1] 全新安装旧版（${oldVersion}），再写入旧格式用户数据`);
+
+  const setup = stageOlderInstaller(1);
+  const res = runSetup(setup, INSTALL_DIR);
+  expect(
+    '旧版静默安装返回 0',
+    res.status === 0,
+    `exit=${res.status}，用时 ${res.ms}ms${res.error ? `，错误：${res.error}` : ''}${res.stderr ? `，stderr：${clip(res.stderr, 200)}` : ''}`,
+  );
+
+  await waitFor(() => exists(NYX_EXE), 60000);
+  expect('旧版安装后存在 Nyx.exe', exists(NYX_EXE), NYX_EXE);
+  const version = exeVersion(NYX_EXE);
+  expect(
+    '旧版安装后程序版本是旧版',
+    !!oldVersion && version.includes(oldVersion),
+    `FileVersion=${version}，期望含 ${oldVersion}`,
+  );
+
+  // 旧版安装器不一定写安装报告（这项能力是后续版本才加的），有就验、没有就显式记 SKIP
+  await waitFor(() => exists(REPORT), 8000);
+  if (exists(REPORT)) {
+    const report = readReportText(REPORT);
+    console.log('  [安装报告]');
+    printReport(report);
+    expect('旧版安装报告模式 = 全新安装', modeIs(report, '全新安装'), modeDetail(report));
+  } else {
+    skip(
+      '旧版安装报告模式 = 全新安装',
+      `${oldVersion} 的安装器还没有安装报告（install-report.txt），只能靠 FileVersion 与注册表判断装成功了`,
+    );
+  }
+  fs.writeFileSync(MARKER, `nyx-installer-e2e cross marker\npid=${PID}\ntime=${new Date().toISOString()}\n`, 'utf8');
+  expect('写入用户数据标记', exists(MARKER), MARKER);
+  seedLegacyUserData();
+
+  await launchAppSmoke('旧版启动');
+}
+
+/** 跨版本第 2 步：新版直接盖上去（跳过中间版本），并要求旧数据原样还在、新版能起来。 */
+async function stepCrossUpgradeToNew() {
+  group = '步骤 2｜跨版本：直接升到新版';
+  const oldVersion = versionFromName(olderInstallerPath);
+  const newVersion = versionFromName(installerPath);
+  console.log(`\n${'-'.repeat(72)}\n[步骤 2] 新版直接覆盖旧版（${oldVersion} → ${newVersion}，跳过中间版本）`);
+
+  const setup = stageInstaller(2);
+  const res = runSetup(setup, INSTALL_DIR);
+  expect(
+    '跨版本升级返回 0',
+    res.status === 0,
+    `exit=${res.status}，用时 ${res.ms}ms${res.error ? `，错误：${res.error}` : ''}${res.stderr ? `，stderr：${clip(res.stderr, 200)}` : ''}`,
+  );
+
+  await waitFor(() => exists(NYX_EXE), 60000);
+  expect('跨版本升级后 Nyx.exe 仍在', exists(NYX_EXE), NYX_EXE);
+  expect('跨版本升级后用户数据标记仍在', exists(MARKER), MARKER);
+
+  await waitFor(() => exists(REPORT), 15000);
+  const report = readReportText(REPORT);
+  console.log('  [安装报告]');
+  printReport(report);
+  expect('安装报告模式 = 升级安装', modeIs(report, '升级安装'), modeDetail(report));
+
+  const version = exeVersion(NYX_EXE);
+  expect(
+    '跨版本升级后程序版本是新版',
+    !!newVersion && version.includes(newVersion),
+    `FileVersion=${version}，期望含 ${newVersion}`,
+  );
+
+  for (const item of LEGACY_FIXTURES) {
+    const file = path.join(APP_DATA, item.name);
+    expect(`跨版本升级后旧用户数据 ${item.name} 仍在`, exists(file), file);
+  }
+
+  const verify = runVerifyIntegrity(NYX_EXE);
+  expect(
+    '跨版本升级后的程序自检（--verify-integrity）退出 0',
+    verify.status === 0,
+    `exit=${verify.status}${verify.error ? `，错误：${verify.error}` : ''}${verify.stderr ? `，stderr：${clip(verify.stderr, 200)}` : ''}`,
+  );
+
+  await launchAppSmoke('新版启动（带着旧版本用户数据）');
+}
+
 /** 升级：旧版装完后用新版覆盖，应当判成「升级安装」。 */
-async function step3UpgradeBackToNew() {
-  group = '步骤 3｜覆盖安装（升级：新版覆盖旧版）';
+async function step3UpgradeBackToNew() {  group = '步骤 3｜覆盖安装（升级：新版覆盖旧版）';
   const newVersion = versionFromName(installerPath);
   const oldVersion = versionFromName(olderInstallerPath);
   console.log(`\n${'-'.repeat(72)}\n[步骤 3] 用新版覆盖旧版，应判定为升级安装（${oldVersion} → ${newVersion}）`);
@@ -946,6 +1144,9 @@ function printUsage() {
   console.log('  node scripts/test-installer-e2e.js --installer=dist\\Nyx-Setup-1.17.1.exe --from=dist\\Nyx-Setup-1.17.0.exe');
   console.log('       加 --from 才会真跑「升级安装」（旧→新）与「降级安装」（新→旧）两条路径；');
   console.log('       不给我会显式记成 SKIP 并说明原因——静默跳过不算测过。');
+  console.log('  node scripts/test-installer-e2e.js --installer=dist\\Nyx-Setup-1.17.2.exe --from=<1.16.0 安装包> --cross');
+  console.log('       --cross：先全新装旧版、写入旧格式用户数据、起一次程序，再直接升到新版（跳过中间版本），');
+  console.log('       验证「跨两版升级」既不丢数据、新版也能带着旧数据正常启动。');
   console.log('  node scripts/test-installer-e2e.js --preflight-only   # 只跑环境检查，不做任何改动');
   console.log('');
   console.log('说明：会静默安装到 %TEMP%\\nyx-e2e-<pid>\\install，测试前自动备份并迁移 %APPDATA%\\Nyx、');
@@ -963,15 +1164,25 @@ async function main() {
     if (preflightOnly) {
       record('预检完成后按 --preflight-only 退出（未做任何改动）', true, '');
     } else {
+      // 旧包先落地成常驻副本：紧接着的备份会把 %APPDATA%\Nyx 整个搬走，
+      // 而 --from 很可能就指向那里的 updates-archive。
+      if (olderInstallerPath) stageOlderInstallerMaster();
       backupUserEnv();
       didBackup = true;
-      await step1FreshInstall();
-      if (olderInstallerPath) {
-        await step2DowngradeToOlder();
-        await step3UpgradeBackToNew();
-        await step2RepairInstall('步骤 4｜覆盖安装（修复）');
+      if (crossMode && olderInstallerPath) {
+        // 跨版本模式的第一步就是"全新装旧版"，所以不再跑 step1FreshInstall
+        await stepCrossInstallOlder();
+        await stepCrossUpgradeToNew();
+        await step2RepairInstall('步骤 3｜覆盖安装（修复）');
       } else {
-        await step2RepairInstall('步骤 2｜覆盖安装（修复）');
+        await step1FreshInstall();
+        if (olderInstallerPath) {
+          await step2DowngradeToOlder();
+          await step3UpgradeBackToNew();
+          await step2RepairInstall('步骤 4｜覆盖安装（修复）');
+        } else {
+          await step2RepairInstall('步骤 2｜覆盖安装（修复）');
+        }
       }
       await step3UninstallKeepData();
       await step4UninstallDeleteData();
