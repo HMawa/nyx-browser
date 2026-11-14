@@ -1385,6 +1385,7 @@
     const list = byId('offline-private-template-list');
     if (!list) return;
     wireTemplateSave();
+    wireTemplateIo();
     if (!window.nyx || typeof window.nyx.offlineCachePrivateTemplates !== 'function') {
       list.textContent = '当前内核不支持套模板。';
       return;
@@ -1521,6 +1522,67 @@
         await loadPrivateTemplates();
       }
     });
+  }
+
+  /**
+   * 模板搬走再搬回来（第九轮 ③）：模板是一份可搬走的清单，换机器不该靠手敲。
+   * 导错文件（比如把站点名单导进来）由主进程按 kind 拒绝，这里只如实显示原因。
+   */
+  function wireTemplateIo() {
+    const status = () => byId('offline-private-template-status');
+    const say = (text, kind) => {
+      const box = status();
+      if (!box) return;
+      box.className = kind === 'ok' ? 'hint is-ok' : 'hint is-warn';
+      box.textContent = text;
+    };
+    const exportButton = byId('btn-offline-private-templates-export');
+    if (exportButton && exportButton.dataset.wired !== 'true') {
+      exportButton.dataset.wired = 'true';
+      exportButton.addEventListener('click', async () => {
+        if (!window.nyx || typeof window.nyx.offlineCachePrivateTemplatesExport !== 'function') {
+          say('当前内核不支持导出模板。');
+          return;
+        }
+        exportButton.disabled = true;
+        let res = null;
+        try {
+          res = await window.nyx.offlineCachePrivateTemplatesExport();
+        } catch (err) {
+          res = { ok: false, error: err && err.message ? err.message : '未知原因' };
+        }
+        exportButton.disabled = false;
+        if (res && res.ok) say(`已导出 ${res.count} 个模板：${res.path}`, 'ok');
+        else if (res && res.canceled) say('已取消导出。');
+        else say(`没能导出模板：${(res && res.error) || '主进程没有响应'}`);
+      });
+    }
+    const importButton = byId('btn-offline-private-templates-import');
+    if (importButton && importButton.dataset.wired !== 'true') {
+      importButton.dataset.wired = 'true';
+      importButton.addEventListener('click', async () => {
+        if (!window.nyx || typeof window.nyx.offlineCachePrivateTemplatesImport !== 'function') {
+          say('当前内核不支持导入模板。');
+          return;
+        }
+        importButton.disabled = true;
+        let res = null;
+        try {
+          res = await window.nyx.offlineCachePrivateTemplatesImport({ mode: 'merge' });
+        } catch (err) {
+          res = { ok: false, error: err && err.message ? err.message : '未知原因' };
+        }
+        importButton.disabled = false;
+        if (res && res.ok) {
+          say(res.summary || '模板已导入。', 'ok');
+          await loadPrivateTemplates();
+        } else if (res && res.canceled) {
+          say('已取消导入。');
+        } else {
+          say(`没能导入模板：${(res && res.error) || '主进程没有响应'}`);
+        }
+      });
+    }
   }
 
   function wireCacheSites() {

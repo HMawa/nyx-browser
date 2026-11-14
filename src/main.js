@@ -117,7 +117,9 @@ const {
   decideCacheSite,
   describeSiteTemplates,
   exportCacheSites,
+  exportCustomTemplates,
   importCacheSites,
+  importCustomTemplates,
   normalizeCustomTemplates,
   normalizeSiteList,
   normalizeSitePolicy,
@@ -7547,6 +7549,92 @@ function registerOfflineCacheIpc() {
       const reason = err && err.message ? err.message : String(err);
       if (runtime.diagnostics) runtime.diagnostics.error('PAGE_CACHE_SITES_IMPORT_FAILED', '导入离线缓存站点名单失败', { scope, error: reason });
       return { ok: false, error: `没能导入名单：${reason}` };
+    }
+  });
+
+  /**
+   * 自定义模板搬走再搬回来（第九轮 ③）。
+   *
+   * 和站点名单分开两个 kind（`nyx-cache-templates` vs `nyx-cache-sites`）：
+   * 模板是"清单的清单"，导错文件会变成一条叫 custom-xxx 的站点，用户还以为搬成功了。
+   * 同样是同步对话框（异步会重演下载那个 Promise 永挂的坑）。
+   */
+  ipcMain.handle('nyx:offline:private-templates-export', () => {
+    try {
+      const custom = readCustomTemplates();
+      if (!custom.length) {
+        return { ok: false, code: 'NOTHING_TO_EXPORT', error: '还没有自定义模板，先把当前名单存成模板再导出。' };
+      }
+      const target = dialog.showSaveDialogSync(runtime.win || undefined, {
+        title: '导出自定义模板',
+        defaultPath: path.join(app.getPath('documents'), `nyx-cache-templates-${new Date().toISOString().slice(0, 10)}.json`),
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      if (!target) return { ok: false, canceled: true, error: '已取消导出。' };
+      const body = exportCustomTemplates(custom, Date.now());
+      fs.writeFileSync(target, `${JSON.stringify(body, null, 2)}\n`, 'utf8');
+      if (runtime.diagnostics) {
+        runtime.diagnostics.info('PRIVATE_CACHE_TEMPLATES_EXPORTED', '导出自定义模板', { count: body.count });
+      }
+      return { ok: true, path: target, count: body.count };
+    } catch (err) {
+      const reason = err && err.message ? err.message : String(err);
+      if (runtime.diagnostics) runtime.diagnostics.error('PRIVATE_CACHE_TEMPLATES_EXPORT_FAILED', '导出自定义模板失败', { error: reason });
+      return { ok: false, error: `没能导出模板：${reason}` };
+    }
+  });
+
+  ipcMain.handle('nyx:offline:private-templates-import', (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    try {
+      const picked = dialog.showOpenDialogSync(runtime.win || undefined, {
+        title: '导入自定义模板',
+        properties: ['openFile'],
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      if (!picked || !picked.length) return { ok: false, canceled: true, error: '已取消导入。' };
+      const source = picked[0];
+      let text;
+      try {
+        text = fs.readFileSync(source, 'utf8');
+      } catch (err) {
+        const reason = err && err.message ? err.message : String(err);
+        return { ok: false, error: `这个文件读不出来：${reason}` };
+      }
+      const result = importCustomTemplates(text, readCustomTemplates(), {
+        mode: input.mode === 'replace' ? 'replace' : 'merge',
+      });
+      if (!result.ok) {
+        if (runtime.diagnostics) {
+          runtime.diagnostics.warn('PRIVATE_CACHE_TEMPLATES_IMPORT_REJECTED', '导入的自定义模板被拒绝', { error: result.error });
+        }
+        return { ok: false, error: result.error, custom: readCustomTemplates() };
+      }
+      const saved = writeCustomTemplates(result.templates);
+      if (!saved.ok) return { ok: false, error: saved.error, custom: readCustomTemplates() };
+      if (runtime.diagnostics) {
+        runtime.diagnostics.info('PRIVATE_CACHE_TEMPLATES_IMPORTED', '导入自定义模板', {
+          added: result.added,
+          duplicates: result.duplicates,
+          rejected: result.rejectedCount,
+        });
+      }
+      return {
+        ok: true,
+        path: source,
+        mode: result.mode,
+        added: result.added,
+        duplicates: result.duplicates,
+        rejected: result.rejected,
+        rejectedCount: result.rejectedCount,
+        summary: result.summary,
+        templates: describeSiteTemplates(result.templates),
+        custom: result.templates,
+      };
+    } catch (err) {
+      const reason = err && err.message ? err.message : String(err);
+      if (runtime.diagnostics) runtime.diagnostics.error('PRIVATE_CACHE_TEMPLATES_IMPORT_FAILED', '导入自定义模板失败', { error: reason });
+      return { ok: false, error: `没能导入模板：${reason}` };
     }
   });
 }

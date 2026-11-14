@@ -987,6 +987,82 @@ check('56. 接线：存模板与删模板各一个 IPC，界面输入框与删�
   assert.ok(/offlineCachePrivateTemplateRemove\(\{ key: template\.key \}\)/.test(js), '自定义模板要能删');
 });
 
+check('57. 模板能导出成文件：带自己的 kind 与版本号，只存名字与站点，不把 mode 塞进去', () => {
+  const policy = cache.normalizeSitePolicy({ mode: 'allowlist', allow: ['a.test', 'b.test'], block: [] });
+  const saved = cache.addCustomTemplate([], policy, '我们组', 1);
+  const body = cache.exportCustomTemplates(saved.templates, 1700000000000);
+  assert.equal(body.kind, 'nyx-cache-templates', '模板要用自己的 kind');
+  assert.notEqual(body.kind, cache.CACHE_SITE_EXPORT_KIND, '别和站点名单共用一个 kind');
+  assert.equal(body.version, 2, '模板格式版本单独一个号');
+  assert.equal(body.count, 1);
+  assert.equal(body.templates[0].label, '我们组');
+  assert.deepEqual(body.templates[0].sites, ['a.test', 'b.test']);
+  assert.equal(body.templates[0].mode, undefined, '模板不存 mode（套用时只合并不替换）');
+  assert.equal(body.exportedAt, new Date(1700000000000).toISOString());
+});
+
+check('58. 模板导入：默认并进来，同名不覆盖；replace 顶掉旧的', () => {
+  const policy = cache.normalizeSitePolicy({ mode: 'allowlist', allow: ['a.test'], block: [] });
+  const mine = cache.addCustomTemplate([], policy, '我的', 1);
+  const theirs = cache.addCustomTemplate([], cache.normalizeSitePolicy({ mode: 'allowlist', allow: ['x.test'], block: [] }), '别人的', 2);
+  const file = JSON.stringify(cache.exportCustomTemplates(theirs.templates, 3));
+  const merged = cache.importCustomTemplates(file, mine.templates);
+  assert.ok(merged.ok === true);
+  assert.equal(merged.templates.length, 2, 'merge 要把两个都留着');
+  assert.ok(merged.summary.includes('新增 1 个模板'), 'summary 要报数');
+  const again = cache.importCustomTemplates(file, merged.templates);
+  assert.equal(again.added, 0, '同名不该再加一条');
+  assert.equal(again.duplicates, 1);
+  assert.ok(again.summary.includes('已存在 1 个'));
+  const replaced = cache.importCustomTemplates(file, mine.templates, { mode: 'replace' });
+  assert.equal(replaced.templates.length, 1, 'replace 只留文件里的');
+  assert.equal(replaced.templates[0].label, '别人的');
+});
+
+check('59. 导错文件要明确拒绝：站点名单不是模板；更高格式版本要求升级 Nyx', () => {
+  const sitesFile = JSON.stringify({ app: 'nyx', kind: cache.CACHE_SITE_EXPORT_KIND, version: 1, allow: ['a.test'], block: [] });
+  const wrong = cache.importCustomTemplates(sitesFile, []);
+  assert.ok(wrong.ok === false);
+  assert.ok(wrong.error.includes('这是站点名单'), '要指出这是名单，别让人以为搬成功了');
+  const newer = cache.importCustomTemplates(JSON.stringify({ kind: 'nyx-cache-templates', version: 99, templates: [] }), []);
+  assert.ok(newer.ok === false && newer.error.includes('更新版本'), '更高版本要让人升级');
+  const notJson = cache.importCustomTemplates('这不是 JSON', []);
+  assert.ok(notJson.ok === false && notJson.error.includes('JSON'), '不是 JSON 要说清');
+  const noList = cache.importCustomTemplates(JSON.stringify({ kind: 'nyx-cache-templates', version: 2 }), []);
+  assert.ok(noList.ok === false && noList.error.includes('templates'), '缺清单要拒');
+});
+
+check('60. 导入超过上限时如实说丢掉了几个，不静默截断', () => {
+  const many = [];
+  for (let i = 0; i < cache.CUSTOM_TEMPLATE_MAX + 3; i += 1) {
+    many.push({ label: `组 ${i}`, sites: ['t.test'], createdAt: 1 });
+  }
+  const file = JSON.stringify({ kind: 'nyx-cache-templates', version: 2, templates: many });
+  const result = cache.importCustomTemplates(file, []);
+  assert.ok(result.ok === true);
+  assert.equal(result.templates.length, cache.CUSTOM_TEMPLATE_MAX, '最多 30 个');
+  assert.equal(result.overflow, 3, '要能报出丢掉了几个');
+  assert.ok(result.summary.includes('超出上限'), 'summary 要把这件事说出来');
+});
+
+check('61. 接线：导出/导入各一个 IPC（同步对话框），界面两个按钮都绑上了', () => {
+  const main = read('src/main.js');
+  const preload = read('src/preload.js');
+  const html = read('src/renderer/settings.html');
+  const js = read('src/renderer/settings.js');
+  assert.ok(main.includes("ipcMain.handle('nyx:offline:private-templates-export'"), '缺导出 IPC');
+  assert.ok(main.includes("ipcMain.handle('nyx:offline:private-templates-import'"), '缺导入 IPC');
+  assert.ok(/showSaveDialogSync/.test(main) && /showOpenDialogSync/.test(main), '要用同步对话框（异步会重演 Promise 永挂）');
+  assert.ok(/exportCustomTemplates\(custom, Date\.now\(\)\)/.test(main), '导出走纯函数');
+  assert.ok(/importCustomTemplates\(text, readCustomTemplates\(\)/.test(main), '导入走纯函数');
+  assert.ok(main.includes('PRIVATE_CACHE_TEMPLATES_EXPORTED') && main.includes('PRIVATE_CACHE_TEMPLATES_IMPORTED'), '两个动作都要留诊断');
+  assert.ok(main.includes('NOTHING_TO_EXPORT'), '没有模板时要明确说没东西可导');
+  assert.ok(/offlineCachePrivateTemplatesExport/.test(preload) && /offlineCachePrivateTemplatesImport/.test(preload), 'preload 缺两个方法');
+  assert.ok(html.includes('id="btn-offline-private-templates-export"') && html.includes('id="btn-offline-private-templates-import"'), '设置页缺两个按钮');
+  assert.ok(/function wireTemplateIo\(\)/.test(js), '缺模板导入导出的绑定');
+  assert.ok(/dataset\.wired !== 'true'/.test(js), '按钮只绑一次');
+});
+
 /* ------------------------------------------------------------------ */
 const failed = checks.filter((item) => !item.ok);
 const total = checks.length;

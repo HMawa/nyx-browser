@@ -768,6 +768,109 @@ function importCacheSites(rawText, current, options) {
   };
 }
 
+/**
+ * 自定义模板的导出格式（第九轮 ③）。
+ * 和站点名单分开一个 kind：模板是"清单的清单"，导进名单文件里会变成一条叫 "custom-xxx" 的站点。
+ * version 单独一个号，因为模板格式以后会长（比如带 mode、带备注），不能和名单共用一个版本号。
+ */
+const CACHE_TEMPLATE_EXPORT_KIND = 'nyx-cache-templates';
+const CACHE_TEMPLATE_EXPORT_VERSION = 2;
+
+function exportCustomTemplates(rawTemplates, now) {
+  const list = normalizeCustomTemplates(rawTemplates);
+  const stamp = Number.isFinite(now) ? now : Date.now();
+  return {
+    app: 'nyx',
+    kind: CACHE_TEMPLATE_EXPORT_KIND,
+    version: CACHE_TEMPLATE_EXPORT_VERSION,
+    exportedAt: new Date(stamp).toISOString(),
+    count: list.length,
+    templates: list.map((item) => ({
+      label: item.label,
+      sites: item.sites.slice(),
+      createdAt: item.createdAt || 0,
+    })),
+  };
+}
+
+/**
+ * 导入自定义模板。整份文件要么按 merge 并进来、要么按 replace 顶掉，不做"部分成功"。
+ * 认不出的条目逐条跳过并在 summary 里报数，绝不静默丢。
+ */
+function importCustomTemplates(rawText, current, options) {
+  const opts = options && typeof options === 'object' ? options : {};
+  const mode = opts.mode === 'replace' ? 'replace' : 'merge';
+  const base = normalizeCustomTemplates(current);
+  const text = typeof rawText === 'string' ? rawText.replace(/^\uFEFF/, '') : '';
+
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { ok: false, error: '这个文件不是 JSON，可能不是 Nyx 导出的模板。', templates: base };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, error: '文件内容不是一份模板（应该是一个对象）。', templates: base };
+  }
+  if (parsed.kind !== CACHE_TEMPLATE_EXPORT_KIND) {
+    const what = typeof parsed.kind === 'string' && parsed.kind ? `「${parsed.kind}」` : '（没写）';
+    const hint = parsed.kind === CACHE_SITE_EXPORT_KIND || parsed.kind === CACHE_SITE_EXPORT_KINDS.private
+      ? '（这是站点名单，不是模板——名单请用名单的导入按钮）'
+      : '';
+    return { ok: false, error: `这份文件的类型是${what}${hint}，不是自定义模板。`, templates: base };
+  }
+  const version = Number(parsed.version);
+  if (Number.isFinite(version) && version > CACHE_TEMPLATE_EXPORT_VERSION) {
+    return {
+      ok: false,
+      error: `这份模板是更新版本的 Nyx 导出的（格式 ${version}，这个版本只认到 ${CACHE_TEMPLATE_EXPORT_VERSION}）。升级 Nyx 再导。`,
+      templates: base,
+    };
+  }
+  const incoming = Array.isArray(parsed.templates) ? parsed.templates : Array.isArray(parsed.custom) ? parsed.custom : null;
+  if (!incoming) {
+    return { ok: false, error: '文件里没有 templates 清单。', templates: base };
+  }
+
+  const next = mode === 'replace' ? [] : base.slice();
+  const rejected = [];
+  let added = 0;
+  let duplicates = 0;
+  for (const item of incoming) {
+    const normalized = normalizeCustomTemplate(item);
+    if (!normalized) {
+      if (rejected.length < 10) rejected.push(typeof item === 'string' ? item : String((item && item.label) || item));
+      continue;
+    }
+    if (next.some((exist) => exist.key === normalized.key)) {
+      duplicates += 1;
+      continue;
+    }
+    next.push(normalized);
+    added += 1;
+  }
+
+  const overflow = Math.max(0, next.length - CUSTOM_TEMPLATE_MAX);
+  const kept = next.slice(0, CUSTOM_TEMPLATE_MAX);
+  const parts = [`导入完成：新增 ${added} 个模板`];
+  if (duplicates) parts.push(`已存在 ${duplicates} 个`);
+  if (rejected.length) parts.push(`跳过 ${rejected.length} 个看不懂的`);
+  if (overflow) parts.push(`超出上限丢掉了 ${overflow} 个（最多 ${CUSTOM_TEMPLATE_MAX} 个）`);
+
+  return {
+    ok: true,
+    mode,
+    templates: kept,
+    custom: kept,
+    added,
+    duplicates,
+    rejected,
+    rejectedCount: rejected.length,
+    overflow,
+    summary: `${parts.join('，')}。`,
+  };
+}
+
 module.exports = {
   BLOCK_TYPES,
   CACHE_BLOCK_MAX,
@@ -782,6 +885,8 @@ module.exports = {
   CACHE_SITE_SCOPE_LABELS,
   CACHE_SITE_EXPORT_VERSION,
   CACHE_SITE_MODES,
+  CACHE_TEMPLATE_EXPORT_KIND,
+  CACHE_TEMPLATE_EXPORT_VERSION,
   CACHE_TEXT_MAX,
   CACHE_VERSION,
   CUSTOM_TEMPLATE_MAX,
@@ -795,9 +900,11 @@ module.exports = {
   describeCachedPage,
   describeSiteTemplates,
   exportCacheSites,
+  exportCustomTemplates,
   getSnapshot,
   imageTargets,
   importCacheSites,
+  importCustomTemplates,
   normalizeSiteList,
   normalizeSitePolicy,
   normalizeSiteText,

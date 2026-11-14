@@ -323,6 +323,10 @@ contextBridge.exposeInMainWorld('nyx', {
     ipcRenderer.invoke('nyx:offline:private-template-remove', payload || {}),
   offlineCacheSitesExport: (payload) => ipcRenderer.invoke('nyx:offline:sites-export', payload || {}),
   offlineCacheSitesImport: (payload) => ipcRenderer.invoke('nyx:offline:sites-import', payload || {}),
+  // 模板本身也能搬走：和名单是两个 kind，导错文件会被明确拒绝
+  offlineCachePrivateTemplatesExport: () => ipcRenderer.invoke('nyx:offline:private-templates-export'),
+  offlineCachePrivateTemplatesImport: (payload) =>
+    ipcRenderer.invoke('nyx:offline:private-templates-import', payload || {}),
 
   /** 订阅「切到某个设置分区」指令（主界面错误页跳诊断用），返回取消订阅函数 */
   onSettingsSection: (handler) => {
