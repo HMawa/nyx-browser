@@ -711,6 +711,38 @@
   box-shadow: var(--ring);
 }
 
+/* 夜间计划任务：改时间 / 删任务（第九轮 ②） */
+.nightly-task-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 4px;
+}
+
+.nightly-time {
+  width: 74px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-input);
+  color: var(--text-main);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.nightly-time:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+  box-shadow: var(--ring);
+}
+
+.nightly-time:disabled {
+  opacity: 0.55;
+}
+
 .agent-site-list {
   list-style: none;
   margin: 0;

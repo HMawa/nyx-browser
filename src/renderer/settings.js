@@ -3391,6 +3391,93 @@ async function loadNightlyStatus() {
     summary.textContent = (res && res.text) || '';
     summary.className = level === 'pass' ? 'hint' : 'hint is-warn';
   }
+
+  // 计划任务那一段（第九轮 ②）：读状态、改时间、删任务。跑一次 e2e 仍然不给按钮。
+  const taskStatus = byId('nightly-task-status');
+  if (typeof window.nyx.nightlyTask === 'function') {
+    const task = await window.nyx.nightlyTask().catch((err) => ({
+      ok: false,
+      schedulable: false,
+      text: `读取计划任务失败：${err && err.message ? err.message : String(err)}`,
+    }));
+    renderNightlyTask(task);
+  } else if (taskStatus) {
+    taskStatus.textContent = '当前内核不支持管理计划任务。';
+    taskStatus.className = 'hint';
+  }
+  wireNightlyTask();
+}
+
+/** 把计划任务的现状画出来：能不能管（安装版不能）、有没有注册、下次什么时候跑 */
+function renderNightlyTask(task) {
+  const statusLine = byId('nightly-task-status');
+  const timeInput = byId('nightly-time');
+  const registerBtn = byId('btn-nightly-register');
+  const removeBtn = byId('btn-nightly-remove');
+  const schedulable = Boolean(task && task.schedulable);
+  if (registerBtn) registerBtn.disabled = !schedulable;
+  if (removeBtn) removeBtn.disabled = !schedulable;
+  if (timeInput) {
+    timeInput.disabled = !schedulable;
+    if (task && task.defaultTime && !timeInput.value) timeInput.value = task.defaultTime;
+  }
+  if (!statusLine) return;
+  const parts = [];
+  if (task && task.text) parts.push(task.text);
+  if (!schedulable && task && task.schedulableError) parts.push(task.schedulableError);
+  statusLine.textContent = parts.join(' ') || '读不出计划任务的状态。';
+  statusLine.className = schedulable ? 'hint' : 'hint is-warn';
+}
+
+/** 两个按钮只绑一次；注册 / 删除之后都以主进程复核过的那句话为准 */
+function wireNightlyTask() {
+  const registerBtn = byId('btn-nightly-register');
+  const removeBtn = byId('btn-nightly-remove');
+  const timeInput = byId('nightly-time');
+  const statusLine = byId('nightly-task-status');
+  const setStatus = (text, ok) => {
+    if (!statusLine) return;
+    statusLine.textContent = text;
+    statusLine.className = ok ? 'hint' : 'hint is-warn';
+  };
+
+  if (registerBtn && !registerBtn.dataset.wired) {
+    registerBtn.dataset.wired = '1';
+    registerBtn.addEventListener('click', async () => {
+      if (typeof window.nyx.nightlyTaskSet !== 'function') {
+        setStatus('当前内核不支持注册计划任务。', false);
+        return;
+      }
+      const time = (timeInput && timeInput.value.trim()) || '';
+      registerBtn.disabled = true;
+      setStatus('正在注册…', true);
+      const res = await window.nyx
+        .nightlyTaskSet({ time, elevated: false })
+        .catch((err) => ({ ok: false, text: `注册失败：${err && err.message ? err.message : String(err)}` }));
+      registerBtn.disabled = false;
+      setStatus((res && res.text) || '注册结果未知。', Boolean(res && res.ok));
+      if (res && res.ok && timeInput) timeInput.value = res.time || time;
+      await loadNightlyStatus();
+    });
+  }
+
+  if (removeBtn && !removeBtn.dataset.wired) {
+    removeBtn.dataset.wired = '1';
+    removeBtn.addEventListener('click', async () => {
+      if (typeof window.nyx.nightlyTaskRemove !== 'function') {
+        setStatus('当前内核不支持删除计划任务。', false);
+        return;
+      }
+      removeBtn.disabled = true;
+      setStatus('正在删除…', true);
+      const res = await window.nyx
+        .nightlyTaskRemove()
+        .catch((err) => ({ ok: false, text: `删除失败：${err && err.message ? err.message : String(err)}` }));
+      removeBtn.disabled = false;
+      setStatus((res && res.text) || '删除结果未知。', Boolean(res && res.ok));
+      await loadNightlyStatus();
+    });
+  }
 }
 
 async function loadFootprint() {

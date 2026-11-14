@@ -594,6 +594,62 @@ check(
   'IPC + preload + 四个 id + 加载函数都在，且没有任何触发跑 e2e 的入口',
 );
 
+check(
+  '夜间计划任务：注册/删除之后必须复核，命令说成功但查不到一律算失败',
+  (() => {
+    const task = require(path.join(ROOT, 'src', 'core', 'nightly-task.js'));
+    const okRegister = task.describeTaskAction('register', { ok: true, code: 0, taskName: task.DEFAULT_TASK_NAME }, { ok: true, registered: true, nextRun: '2026/11/15 3:30:00' });
+    const ghost = task.describeTaskAction('register', { ok: true, code: 0, taskName: task.DEFAULT_TASK_NAME }, { ok: true, registered: false });
+    const blind = task.describeTaskAction('register', { ok: true, code: 0, taskName: task.DEFAULT_TASK_NAME }, { ok: false, error: '读不出来' });
+    const denied = task.describeTaskAction('register', { ok: true, code: 1, output: '', error: '错误: 拒绝访问。', taskName: task.DEFAULT_TASK_NAME }, { ok: true, registered: false });
+    const removed = task.describeTaskAction('remove', { ok: true, code: 0, taskName: task.DEFAULT_TASK_NAME }, { ok: true, registered: false });
+    const stillThere = task.describeTaskAction('remove', { ok: true, code: 0, taskName: task.DEFAULT_TASK_NAME }, { ok: true, registered: true });
+    return okRegister.ok && /下次运行/.test(okRegister.text)
+      && !ghost.ok && /查不到/.test(ghost.text) && /没生效/.test(ghost.text)
+      && !blind.ok && /别当成已经成功/.test(blind.text)
+      && !denied.ok && /拒绝访问/.test(denied.text) && /管理员/.test(denied.text)
+      && removed.ok && /已经删掉/.test(removed.text)
+      && !stillThere.ok && /还在/.test(stillThere.text)
+      && task.isValidTime('03:30') && task.isValidTime('3:30') && !task.isValidTime('24:00') && !task.isValidTime('0330')
+      && task.normalizeTime('3:5') === '03:30'
+      && task.buildQueryArgs({}).args.join(' ').includes('/FO LIST')
+      && /NOT_AVAILABLE|计划任务只能从源码目录注册/.test(task.resolveTaskPaths({ isPackaged: true }).error || '');
+  })(),
+  '四种结果（成功/查不到/读不出/拒绝访问）+ 删除后仍在 + 时间格式 + 安装版明确不支持',
+);
+
+check(
+  '夜间计划任务：设置页能改时间、能删任务，但依然没有「现在就跑一次」的按钮',
+  (() => {
+    const mainCode = read(path.join(ROOT, 'src', 'main.js'));
+    const preloadCode = read(path.join(ROOT, 'src', 'preload.js'));
+    const htmlCode = read(path.join(ROOT, 'src', 'renderer', 'settings.html'));
+    const settingsCode = read(path.join(ROOT, 'src', 'renderer', 'settings.js'));
+    const wired = /ipcMain\.handle\('nyx:nightly:task'/.test(mainCode)
+      && /ipcMain\.handle\('nyx:nightly:task-set'/.test(mainCode)
+      && /ipcMain\.handle\('nyx:nightly:task-remove'/.test(mainCode)
+      // 跑 schtasks 必须按 Buffer 取、按 GBK 解（否则中文报错变乱码 → 误判读不出来）
+      && /spawnSync\('schtasks', args, \{ encoding: 'buffer'/.test(mainCode)
+      && /decodeNightlyConsole\(res\.stdout\)/.test(mainCode)
+      // 注册/删除都必须复核
+      && /describeNightlyTaskAction\('register'/.test(mainCode)
+      && /describeNightlyTaskAction\('remove'/.test(mainCode)
+      && /resolveNightlyNode\(\)/.test(mainCode)
+      && /nightlyTask: \(\) => ipcRenderer\.invoke\('nyx:nightly:task'\)/.test(preloadCode)
+      && /nightlyTaskSet: \(payload\) => ipcRenderer\.invoke\('nyx:nightly:task-set'/.test(preloadCode)
+      && /nightlyTaskRemove: \(\) => ipcRenderer\.invoke\('nyx:nightly:task-remove'\)/.test(preloadCode)
+      && /id="nightly-time"/.test(htmlCode) && /id="btn-nightly-register"/.test(htmlCode)
+      && /id="btn-nightly-remove"/.test(htmlCode) && /id="nightly-task-status"/.test(htmlCode)
+      && /function renderNightlyTask\(/.test(settingsCode) && /function wireNightlyTask\(/.test(settingsCode)
+      && /nightlyTaskSet\(\{ time, elevated: false \}\)/.test(settingsCode);
+    // 「现在就跑」仍然是禁区：没有任何触发 run 的通道
+    const noRunButton = !/nightlyRun|nightly-run|nightlyE2eRun/.test(preloadCode)
+      && !/nightlyRun|nightly-run/.test(settingsCode)
+      && !/nightlyRun|nightly-run/.test(htmlCode);
+    return wired && noRunButton;
+  })(),
+  '三个 IPC + 三个 preload 方法 + 四个 id + 跑一遍的通道依然不存在',
+);
 
 const failed = checks.filter((item) => !item.ok);
 console.log(`\n[Nyx] 发版门禁接线检查（${checks.length} 项）`);

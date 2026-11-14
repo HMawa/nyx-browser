@@ -3568,6 +3568,46 @@ async function main() {
             && nightly.hasRunButton === false,
           JSON.stringify(nightly),
         );
+
+        // 计划任务的界面入口（第九轮 ②）：只改"什么时候跑"，读写都走主进程同一套纯逻辑；
+        // 这里**不点注册**——那会在真机上建一个每天 03:30 跑的东西，验收不许有副作用。
+        const task = await settings.eval(`(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          await wait(300);
+          const api = window.nyx.nightlyTask ? await window.nyx.nightlyTask() : null;
+          const btnRegister = document.getElementById('btn-nightly-register');
+          const btnRemove = document.getElementById('btn-nightly-remove');
+          const timeInput = document.getElementById('nightly-time');
+          const statusLine = document.getElementById('nightly-task-status');
+          return {
+            hasApi: Boolean(window.nyx.nightlyTask),
+            schedulable: Boolean(api && api.schedulable),
+            text: (api && api.text) || '',
+            defaultTime: (api && api.defaultTime) || '',
+            hasRegister: Boolean(btnRegister),
+            hasRemove: Boolean(btnRemove),
+            registerDisabled: Boolean(btnRegister && btnRegister.disabled),
+            timeDisabled: Boolean(timeInput && timeInput.disabled),
+            timeValue: (timeInput && timeInput.value) || '',
+            statusText: (statusLine && statusLine.textContent) || '',
+            hasRunButton: Boolean(document.querySelector('[data-nightly-run],#btn-nightly-run')),
+          };
+        })()`);
+        check(
+          '设置页能改夜间计划任务的时间、能删任务，但注册/删除的权限状态如实反映，且仍没有「现在就跑」（第九轮 ②）',
+          task
+            && task.hasApi === true
+            && task.schedulable === true
+            && task.hasRegister === true
+            && task.hasRemove === true
+            && task.registerDisabled === false
+            && task.timeDisabled === false
+            && task.timeValue === task.defaultTime
+            && task.statusText.length > 0
+            && /计划任务/.test(task.statusText)
+            && task.hasRunButton === false,
+          JSON.stringify(task),
+        );
       } catch (err) {
         check('夜间 e2e 状态卡端到端检查未中断', false, err && err.message);
       }

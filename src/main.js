@@ -19,7 +19,7 @@ const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 const crypto = require('node:crypto');
 // 录屏/远控检测（C4）要读一次进程列表：execFile 起 PowerShell，拿不到就如实报"无法确认"
-const { execFile } = require('node:child_process');
+const { execFile, spawnSync } = require('node:child_process');
 // Edge Cookie 导入模块：复制 Cookies 库 + ABE/DPAPI 解密 + node:sqlite 读取
 const edgeCookieImport = require('./core/edge-cookie-import');
 const {
@@ -204,6 +204,22 @@ const {
 // 夜间安装器 e2e 的最近一次结果（第八轮 ③）：结果文件 → 中文结论
 const { describeNightlyStatus } = require('./core/nightly-status');
 const NIGHTLY_STATUS_FILE = 'nightly-e2e.json';
+
+// 夜间计划任务（第九轮 ②，界面入口）：参数怎么拼、输出怎么读只留一份纯逻辑在 core 里，
+// 命令行（scripts/nightly-e2e.js）与主进程都用它，不许各拼一套。
+const {
+  DEFAULT_TASK_NAME: NIGHTLY_TASK_NAME,
+  buildDeleteArgs: buildNightlyDeleteArgs,
+  buildQueryArgs: buildNightlyQueryArgs,
+  buildRegisterArgs: buildNightlyRegisterArgs,
+  decodeConsole: decodeNightlyConsole,
+  describeTask: describeNightlyTask,
+  describeTaskAction: describeNightlyTaskAction,
+  isValidTime: isValidNightlyTime,
+  normalizeTime: normalizeNightlyTime,
+  parseQueryOutput: parseNightlyQueryOutput,
+  resolveTaskPaths: resolveNightlyTaskPaths,
+} = require('./core/nightly-task');
 
 // 外壳防护现值表（C3）：每个窗口角色的期望开关值 + CSP 审计 + preload 暴露面分类
 const {
@@ -8300,6 +8316,151 @@ function registerUpdateIpc() {
       text: readError
         ? `夜间 e2e 的状态文件读不出来（${readError}）。它应该在 ${file}；没有这个文件说明这台机器还没跑过。`
         : described.text,
+    };
+  });
+
+  /**
+   * 计划任务的管理入口（第九轮 ② 补的界面部分）。
+   *
+   * 三条纪律写在代码里，别在界面上放宽：
+   *   1. 注册 / 删除之后必须**再查一遍**：`schtasks` 说成功不等于真成了；
+   *   2. 安装版里没有 `scripts/`，一律如实说"不支持"，不注册一个指向不存在文件的任务；
+   *   3. 这里只改「什么时候跑」，**不给「现在就跑一次」**——那是另一件事（跑一次要占机器十几分钟）。
+   */
+  function runNightlySchtasks(args) {
+    let res = null;
+    try {
+      res = spawnSync('schtasks', args, { encoding: 'buffer', windowsHide: true, timeout: 20000 });
+    } catch (error) {
+      return { ok: false, code: -1, output: '', error: `没能启动 schtasks：${String((error && error.message) || error)}` };
+    }
+    if (res && res.error) {
+      return { ok: false, code: -1, output: '', error: `没能启动 schtasks：${String(res.error.message || res.error)}` };
+    }
+    return {
+      ok: true,
+      code: typeof res.status === 'number' ? res.status : -1,
+      output: decodeNightlyConsole(res.stdout).trim(),
+      error: decodeNightlyConsole(res.stderr).trim(),
+    };
+  }
+
+  /** 查一次真实状态（stdout 与 stderr 一起看：找不到任务时 schtasks 把话写在 stderr） */
+  function queryNightlyTask() {
+    const built = buildNightlyQueryArgs({ taskName: NIGHTLY_TASK_NAME });
+    const run = runNightlySchtasks(built.args);
+    const text = `${run.output}\n${run.error}`.trim();
+    if (!run.ok) return { ok: false, registered: false, error: run.error };
+    return parseNightlyQueryOutput(text);
+  }
+
+  /** 找出能跑夜间 e2e 的 node 与脚本（找不到就说清找过哪里） */
+  function resolveNightlyNode() {
+    const paths = resolveNightlyTaskPaths({
+      isPackaged: app.isPackaged,
+      sourceRoot: path.join(__dirname, '..'),
+    });
+    if (!paths.ok) return paths;
+    for (const candidate of paths.candidates) {
+      try {
+        if (candidate && fs.existsSync(candidate)) {
+          return { ok: true, node: candidate, script: paths.script };
+        }
+      } catch {
+        // 读不到就当这个候选不存在，继续下一个
+      }
+    }
+    return {
+      ok: false,
+      code: 'NO_NODE',
+      error: `找不到 node.exe（找过 ${paths.candidates.join(' 和 ')}）。计划任务要用绝对路径，把 Node 装到默认位置，或者用命令行 node scripts/nightly-e2e.js --register --apply。`,
+    };
+  }
+
+  function nightlyTaskPayload() {
+    const task = queryNightlyTask();
+    const described = describeNightlyTask(task, { taskName: NIGHTLY_TASK_NAME });
+    const paths = resolveNightlyNode();
+    return {
+      ok: paths.ok !== false,
+      taskName: NIGHTLY_TASK_NAME,
+      level: described.level,
+      text: described.text,
+      registered: task && task.ok === true ? Boolean(task.registered) : null,
+      nextRun: (task && task.nextRun) || '',
+      queryError: (task && task.ok === true) ? '' : (task && task.error) || '',
+      schedulable: paths.ok === true,
+      schedulableError: paths.ok === true ? '' : paths.error,
+      node: paths.ok === true ? paths.node : '',
+      script: paths.ok === true ? paths.script : '',
+      defaultTime: normalizeNightlyTime(''),
+    };
+  }
+
+  ipcMain.handle('nyx:nightly:task', () => nightlyTaskPayload());
+
+  ipcMain.handle('nyx:nightly:task-set', (_event, payload) => {
+    const input = payload || {};
+    const paths = resolveNightlyNode();
+    const before = nightlyTaskPayload();
+    if (!paths.ok) {
+      return { ...before, ok: false, error: paths.error, action: 'register' };
+    }
+    if (!isValidNightlyTime(input.time)) {
+      return {
+        ...before,
+        ok: false,
+        action: 'register',
+        error: '时间要写成 24 小时制的「时:分」，例如 03:30 或 22:10。',
+      };
+    }
+    const built = buildNightlyRegisterArgs({
+      node: paths.node,
+      script: paths.script,
+      taskName: NIGHTLY_TASK_NAME,
+      time: input.time,
+      elevated: Boolean(input.elevated),
+    });
+    if (!built.ok) {
+      return { ...before, ok: false, action: 'register', error: built.error };
+    }
+    const run = runNightlySchtasks(built.args);
+    const verify = queryNightlyTask();
+    const described = describeNightlyTaskAction('register', { ...run, taskName: NIGHTLY_TASK_NAME }, verify);
+    if (described.ok) {
+      diagnostics.info('NIGHTLY_TASK_REGISTERED', `夜间计划任务已注册（每天 ${built.time}）`, { time: built.time, elevated: built.elevated });
+    } else {
+      diagnostics.error('NIGHTLY_TASK_REGISTER_FAILED', `夜间计划任务没能注册（每天 ${built.time}）`, { output: run.output, error: run.error });
+    }
+    return {
+      ok: described.ok,
+      action: 'register',
+      text: described.text,
+      error: described.ok ? '' : described.text,
+      time: built.time,
+      elevated: built.elevated,
+      ...nightlyTaskPayload(),
+    };
+  });
+
+  ipcMain.handle('nyx:nightly:task-remove', () => {
+    const before = nightlyTaskPayload();
+    const built = buildNightlyDeleteArgs({ taskName: NIGHTLY_TASK_NAME });
+    const run = runNightlySchtasks(built.args);
+    const verify = queryNightlyTask();
+    const described = describeNightlyTaskAction('remove', { ...run, taskName: NIGHTLY_TASK_NAME }, verify);
+    if (described.ok) {
+      diagnostics.info('NIGHTLY_TASK_REMOVED', '夜间计划任务已删除', {});
+    } else {
+      diagnostics.error('NIGHTLY_TASK_REMOVE_FAILED', '夜间计划任务没能删除', { output: run.output, error: run.error });
+    }
+    return {
+      ok: described.ok,
+      action: 'remove',
+      text: described.text,
+      error: described.ok ? '' : described.text,
+      ...before,
+      ...nightlyTaskPayload(),
     };
   });
 

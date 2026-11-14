@@ -556,6 +556,10 @@ contextBridge.exposeInMainWorld('nyx', {
 
   // 夜间安装器 e2e 的最近一次结果（只读；跑不跑是命令行的事）
   nightlyStatus: () => ipcRenderer.invoke('nyx:nightly:status'),
+  // 夜间计划任务：改时间 / 删任务（只改"什么时候跑"，不给"现在就跑"）
+  nightlyTask: () => ipcRenderer.invoke('nyx:nightly:task'),
+  nightlyTaskSet: (payload) => ipcRenderer.invoke('nyx:nightly:task-set', payload || {}),
+  nightlyTaskRemove: () => ipcRenderer.invoke('nyx:nightly:task-remove'),
 
   /** 在资源管理器里打开更新源目录 */
   updateOpenSource: () => ipcRenderer.invoke('nyx:update:open-source'),

@@ -1387,9 +1387,20 @@
                 </p>
                 <div class="kv-grid" id="nightly-grid"></div>
                 <p class="hint" id="nightly-summary" role="status" aria-live="polite">读取中…</p>
-                <div class="sec-actions">
+                <div class="agent-site-tools nightly-task-tools">
+                  <label class="agent-audit-range" for="nightly-time">每天几点跑</label>
+                  <input type="text" id="nightly-time" class="nightly-time" value="03:30" maxlength="5"
+                         inputmode="numeric" aria-describedby="nightly-task-hint" placeholder="03:30">
+                  <button type="button" class="btn btn-mini" id="btn-nightly-register">注册 / 改时间</button>
+                  <button type="button" class="btn btn-mini" id="btn-nightly-remove">删掉任务</button>
                   <button type="button" class="btn btn-mini" id="btn-nightly-refresh">重新读取</button>
                 </div>
+                <p class="hint" id="nightly-task-hint">
+                  只改「什么时候跑」。注册与删除都会在命令跑完后再查一遍，查不到就算失败——
+                  不会出现「界面上说有、任务计划程序里没有」。安装版里没有 <code>scripts/</code> 目录，
+                  这两颗按钮只对源码目录生效。
+                </p>
+                <p class="hint" id="nightly-task-status" role="status" aria-live="polite"></p>
               </div>
             </section>
 
