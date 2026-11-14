@@ -89,6 +89,54 @@ const SETTING_KEYS = Object.keys(SETTING_SCHEMA);
 const SETTING_RATE_LIMIT = 10;
 const SETTING_RATE_WINDOW_MS = 60 * 1000;
 
+/**
+ * 场景预设：一次改一组，免得 agent 挨个调五次还把中间态留给用户。
+ *
+ * 三条硬规则（不是建议）：
+ *   1. 预设里**绝不允许出现锁死键**——隐私与安全的开关不在可改范围内，
+ *      预设是个"一把改很多"的入口，更不能绕过这条。
+ *   2. 值必须是 SETTING_SCHEMA 里合法的值，加载时就校验一次（见 assertPresets）。
+ *   3. 落到每个键上仍然**逐项确认**：需要确认的键必须出现在 accepts 里，
+ *      少一个就整体不动，并在 missingConfirm 里点名缺哪一个。
+ */
+const SETTING_PRESETS = {
+  quiet: {
+    label: '安静（少读少写）',
+    summary: '不读页面、不存快照，标签闲置 15 分钟就休眠',
+    settings: { digestEnabled: false, offlineCacheEnabled: false, tabSleepMinutes: 15 },
+  },
+  work: {
+    label: '工作（留文字）',
+    summary: '允许生成摘要、保留离线缓存，标签闲置 1 小时才休眠',
+    settings: { digestEnabled: true, offlineCacheEnabled: true, tabSleepMinutes: 60 },
+  },
+  tidy: {
+    label: '整洁（只留顶栏骨架）',
+    summary: '隐藏链路徽标与模式开关，摘要与缓存保持不动',
+    settings: { showLinkBadge: false, showModeSwitch: false },
+  },
+};
+const PRESET_KEYS = Object.keys(SETTING_PRESETS);
+
+/** 加载时就把畸形的预设挡下来：写错一个键名不该等到用户点下去才暴露 */
+function assertPresets() {
+  const problems = [];
+  for (const presetKey of PRESET_KEYS) {
+    const preset = SETTING_PRESETS[presetKey];
+    if (!preset || typeof preset.settings !== 'object' || preset.settings === null) {
+      problems.push(`${presetKey} 没有 settings`);
+      continue;
+    }
+    for (const [key, value] of Object.entries(preset.settings)) {
+      if (SETTING_LOCKED[key]) problems.push(`${presetKey} 里出现了锁死键 ${key}`);
+      const checked = validateSettingValue(key, value);
+      if (!checked.ok) problems.push(`${presetKey}.${key}：${checked.error}`);
+    }
+  }
+  if (problems.length) throw new Error(`场景预设写错：${problems.join('；')}`);
+  return true;
+}
+
 /** 给 agent 看的"能改什么、要什么条件"（/capabilities 与设置页都用它，避免两套说法） */
 function describeSettingsSchema() {
   return {
@@ -108,6 +156,21 @@ function describeSettingsSchema() {
       };
     }),
     locked: Object.keys(SETTING_LOCKED).map((key) => ({ key, why: SETTING_LOCKED[key] })),
+    presets: PRESET_KEYS.map((presetKey) => {
+      const preset = SETTING_PRESETS[presetKey];
+      return {
+        preset: presetKey,
+        label: preset.label,
+        summary: preset.summary,
+        settings: Object.keys(preset.settings).map((key) => ({
+          key,
+          label: SETTING_SCHEMA[key].label,
+          value: preset.settings[key],
+          summary: SETTING_SCHEMA[key].describe(preset.settings[key]),
+          needsConfirm: SETTING_SCHEMA[key].needsConfirm === true,
+        })),
+      };
+    }),
   };
 }
 
@@ -216,9 +279,122 @@ function planSettingChange(request, context) {
   };
 }
 
+/**
+ * 规划一次"场景预设"批量修改（不落盘）。
+ *
+ * 与 planSettingChange 的差别只有两点：一次改多项、要确认的键必须逐项点名确认。
+ * 其余判定完全复用同一套规则——预设不是后门，只是把多次调用合成一次。
+ *
+ * @param {{preset?: string, accepts?: string[]}} request
+ * @param {{currents?: object, current?: any, history?: number[], now?: number}} context
+ */
+function planPresetChange(request, context) {
+  const input = request && typeof request === 'object' ? request : {};
+  const ctx = context && typeof context === 'object' ? context : {};
+  const now = Number.isFinite(ctx.now) ? ctx.now : Date.now();
+  const presetKey = typeof input.preset === 'string' ? input.preset.trim() : '';
+
+  if (!presetKey) {
+    return {
+      ok: false,
+      code: 'MISSING_PRESET',
+      error: `要套哪个预设？（可选：${PRESET_KEYS.join(' / ')}）`,
+      disclaimer: SETTING_DISCLAIMER,
+    };
+  }
+  const preset = SETTING_PRESETS[presetKey];
+  if (!preset) {
+    return {
+      ok: false,
+      code: 'UNKNOWN_PRESET',
+      error: `没有这个预设：${presetKey}（可选：${PRESET_KEYS.join(' / ')}）`,
+      disclaimer: SETTING_DISCLAIMER,
+    };
+  }
+
+  const history = Array.isArray(ctx.history) ? ctx.history.filter((stamp) => Number.isFinite(stamp)) : [];
+  const recent = history.filter((stamp) => now - stamp < SETTING_RATE_WINDOW_MS);
+  if (recent.length >= SETTING_RATE_LIMIT) {
+    return {
+      ok: false,
+      code: 'RATE_LIMITED',
+      error: `一分钟内最多改 ${SETTING_RATE_LIMIT} 次设置，先停一下（这 1 分钟内已改 ${recent.length} 次）`,
+      disclaimer: SETTING_DISCLAIMER,
+    };
+  }
+
+  const currents = ctx.currents && typeof ctx.currents === 'object' ? ctx.currents : {};
+  const accepts = Array.isArray(input.accepts) ? input.accepts.map((key) => String(key)) : [];
+  const changes = [];
+  const unchanged = [];
+  const missingConfirm = [];
+  const entries = Object.entries(preset.settings);
+
+  for (const [key, value] of entries) {
+    const checked = validateSettingValue(key, value);
+    if (!checked.ok) return { ...checked, disclaimer: SETTING_DISCLAIMER };
+    const rule = SETTING_SCHEMA[key];
+    const hasCurrent = Object.prototype.hasOwnProperty.call(currents, key)
+      || (Object.prototype.hasOwnProperty.call(ctx, 'current') && entries.length === 1);
+    const from = hasCurrent
+      ? (Object.prototype.hasOwnProperty.call(currents, key) ? currents[key] : ctx.current)
+      : undefined;
+    if (hasCurrent && from === checked.value) {
+      unchanged.push({ key, label: rule.label, value: checked.value });
+      continue;
+    }
+    if (rule.needsConfirm === true && !accepts.includes(key)) {
+      missingConfirm.push({ key, label: rule.label, summary: rule.describe(checked.value) });
+      continue;
+    }
+    changes.push({
+      key,
+      value: checked.value,
+      label: rule.label,
+      summary: rule.describe(checked.value),
+      from,
+    });
+  }
+
+  if (missingConfirm.length) {
+    return {
+      ok: false,
+      code: 'NEED_CONFIRM',
+      preset: presetKey,
+      missingConfirm,
+      error: `这些项要你逐项确认后才改：${missingConfirm.map((item) => item.label).join('、')}。`
+        + '把确认过的键放进 accepts 再来一次（其余项不会动）。',
+      disclaimer: SETTING_DISCLAIMER,
+    };
+  }
+
+  if (!changes.length) {
+    return {
+      ok: true,
+      code: 'NO_CHANGE',
+      preset: presetKey,
+      changes: [],
+      unchanged,
+      summary: `「${preset.label}」涉及的东西本来就是这样，什么都没改。`,
+      disclaimer: SETTING_DISCLAIMER,
+    };
+  }
+
+  return {
+    ok: true,
+    preset: presetKey,
+    label: preset.label,
+    changes,
+    unchanged,
+    confirmRequired: changes.length > 0,
+    summary: `按「${preset.label}」改 ${changes.length} 项：${changes.map((item) => item.summary).join('；')}`,
+    message: `已按「${preset.label}」改 ${changes.length} 项。`,
+    disclaimer: SETTING_DISCLAIMER,
+  };
+}
+
 /** 一次最多能连着撤几步：给个上限，免得一次调用把 20 条历史整个翻回去 */
 const MAX_UNDO_STEPS = 5;
-
 /**
  * 撤销由 agent 做成的修改（支持一次撤多步）。
  *
@@ -348,15 +524,20 @@ function planSettingUndo(entries, context) {
   };
 }
 
+assertPresets();
+
 module.exports = {
   MAX_UNDO_STEPS,
+  PRESET_KEYS,
   SETTING_DISCLAIMER,
   SETTING_KEYS,
   SETTING_LOCKED,
+  SETTING_PRESETS,
   SETTING_RATE_LIMIT,
   SETTING_RATE_WINDOW_MS,
   SETTING_SCHEMA,
   describeSettingsSchema,
+  planPresetChange,
   planSettingChange,
   planSettingUndo,
   validateSettingValue,

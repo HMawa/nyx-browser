@@ -4220,6 +4220,28 @@ async function loadFootprint() {
       if (disclaimer && typeof payload.disclaimer === 'string' && payload.disclaimer) {
         disclaimer.textContent = payload.disclaimer;
       }
+      // 场景预设：只列出来，不给界面按钮——套预设仍是 agent 的动作，要过确认与留痕
+      const presetList = byId('agent-settings-preset-list');
+      if (presetList) {
+        presetList.innerHTML = '';
+        const presets = Array.isArray(payload.presets) ? payload.presets : [];
+        for (const item of presets) {
+          const li = document.createElement('li');
+          const name = document.createElement('span');
+          name.className = 'site-host';
+          name.textContent = item.preset;
+          const desc = document.createElement('span');
+          const parts = (Array.isArray(item.settings) ? item.settings : []).map((one) => one.summary);
+          desc.textContent = `　${item.label}：${item.summary}（${parts.join('；')}）`;
+          li.append(name, desc);
+          presetList.append(li);
+        }
+        if (!presets.length) {
+          const li = document.createElement('li');
+          li.textContent = '当前内核没有提供场景预设。';
+          presetList.append(li);
+        }
+      }
       // 撤销：不给界面单独开一条路（那会绕开人工确认与留痕），只如实说现在能撤哪一次、怎么撤
       const undoLine = byId('agent-settings-undo');
       if (undoLine) {

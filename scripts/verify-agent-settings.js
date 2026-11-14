@@ -320,6 +320,80 @@ check('产品红线：这一层不许自己联网、不许调生成式接口', (
   return 'ok';
 });
 
+check('场景预设：清单与能力读数是同一份，且预设里不许出现锁死键', () => {
+  const schema = settings.describeSettingsSchema();
+  assert(Array.isArray(schema.presets) && schema.presets.length >= 2, `预设至少要有两个：${JSON.stringify(schema.presets)}`);
+  assert(settings.PRESET_KEYS.length === schema.presets.length, 'PRESET_KEYS 与回给界面的清单必须一致');
+  const lockedKeys = Object.keys(settings.SETTING_LOCKED);
+  for (const preset of schema.presets) {
+    assert(typeof preset.label === 'string' && preset.label.length > 0, `${preset.preset} 要有中文名字`);
+    assert(typeof preset.summary === 'string' && preset.summary.length > 4, `${preset.preset} 要说清它会做什么`);
+    assert(Array.isArray(preset.settings) && preset.settings.length > 0, `${preset.preset} 不能是空预设`);
+    for (const item of preset.settings) {
+      assert(!lockedKeys.includes(item.key), `${preset.preset} 里出现了锁死键 ${item.key}`);
+      assert(settings.SETTING_KEYS.includes(item.key), `${preset.preset} 里出现了不认识的键 ${item.key}`);
+      assert(typeof item.summary === 'string' && item.summary.length > 0, `${preset.preset}.${item.key} 要能说清改成什么`);
+    }
+  }
+  return `presets=${schema.presets.map((item) => item.preset).join(',')}`;
+});
+
+check('场景预设：要确认的键必须逐项点过，少一个就整组不动', () => {
+  const ctx = { currents: { digestEnabled: false, offlineCacheEnabled: true, tabSleepMinutes: 30 } };
+  const partial = settings.planPresetChange({ preset: 'quiet', accepts: ['digestEnabled'] }, ctx);
+  assert(partial.ok === false && partial.code === 'NEED_CONFIRM', `缺项要被拦下：${JSON.stringify(partial)}`);
+  assert(Array.isArray(partial.missingConfirm) && partial.missingConfirm.length === 1, '要逐项点名缺哪一个');
+  assert(partial.missingConfirm[0].key === 'offlineCacheEnabled', `点名点错了：${partial.missingConfirm[0].key}`);
+
+  const ok = settings.planPresetChange({ preset: 'quiet', accepts: ['digestEnabled', 'offlineCacheEnabled'] }, ctx);
+  assert(ok.ok === true, `确认齐了就该放行：${JSON.stringify(ok)}`);
+  const keys = ok.changes.map((item) => item.key).sort();
+  assert(keys.join(',') === 'offlineCacheEnabled,tabSleepMinutes', `只该改真正需要改的项：${keys.join(',')}`);
+  assert(ok.changes.every((item) => Object.prototype.hasOwnProperty.call(item, 'from')), '每项都要带改前的值，撤销才有的可回');
+  return ok.summary;
+});
+
+check('场景预设：认不出预设、值不合法都给中文原因，不是一句「失败」', () => {
+  const missing = settings.planPresetChange({}, { currents: {} });
+  assert(missing.ok === false && missing.code === 'MISSING_PRESET', '不给预设名要说清楚');
+  assert(/quiet/.test(missing.error), `要把可选的预设列出来：${missing.error}`);
+  const unknown = settings.planPresetChange({ preset: 'nope' }, { currents: {} });
+  assert(unknown.ok === false && unknown.code === 'UNKNOWN_PRESET', '不认识的预设要被拒');
+  assert(/没有这个预设/.test(unknown.error), `要说人话：${unknown.error}`);
+  const same = settings.planPresetChange(
+    { preset: 'quiet', accepts: ['digestEnabled', 'offlineCacheEnabled'] },
+    { currents: { digestEnabled: false, offlineCacheEnabled: false, tabSleepMinutes: 15 } },
+  );
+  assert(same.ok === true && same.code === 'NO_CHANGE', `本来就是这样要说没改：${JSON.stringify(same)}`);
+  return 'ok';
+});
+
+check('场景预设的接线：动作通道认 preset、主进程按目标列表落盘、界面只读列出', () => {
+  const actions = read('src/core/actions.js');
+  assert(/params\.preset/.test(actions), '执行器要认 preset');
+  const dispatch = read('src/core/agent-dispatch.js');
+  assert(/source\.preset/.test(dispatch), '留痕里要看得到套了哪个预设');
+  assert(/source\.accepts/.test(dispatch), '留痕里要看得到确认了哪些键');
+  assert(/预设 \$\{source\.preset/.test(dispatch), '目标描述要写「预设 x」');
+  const main = read('src/main.js');
+  assert(/planPresetChange: planAgentPresetChange/.test(main), '主进程要引入预设规划函数');
+  assert(/planAgentPresetChange\(/.test(main), '主进程要真的调用它');
+  assert(/presetChanges\.map\(/.test(main), '预设要按目标列表落盘');
+  assert(/for \(const item of targets\) \{\s*\n\s*runtime\.agentSettingUndo\.push/.test(main), '预设改了几项就要留几条可撤销记录');
+  const mcp = read('src/mcp/server.js');
+  assert(/preset: z\.string\(\)/.test(mcp), 'MCP 工具要能把 preset 传下来');
+  assert(/accepts: z\.array\(z\.string\(\)\)/.test(mcp), 'MCP 工具要能带 accepts');
+  const html = read('src/renderer/settings.html');
+  assert(html.includes('id="agent-settings-preset-list"'), '设置页要列出预设');
+  const js = read('src/renderer/settings.js');
+  assert(/agent-settings-preset-list/.test(js), '预设在界面上要真的渲染');
+  assert(/不给界面按钮|仍是 agent 的动作/.test(html + js), '要写清应用预设仍要走 agent 通道');
+  const api = read('src/api/http-api.js');
+  assert(/settings: \{/.test(api), '/capabilities 里要列出 settings 动作');
+  assert(/accepts: 'string\[\]\?'/.test(api), '/capabilities 要说明 accepts 的类型');
+  return 'ok';
+});
+
 let passed = 0;
 let failed = 0;
 for (const item of checks) {

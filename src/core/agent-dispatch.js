@@ -181,6 +181,11 @@ function redactParams(type, params) {
         confirm: source.confirm === true,
         // 撤销也要在留痕里看得见：否则"设置怎么变回去了"会变成无解的问题
         undo: source.undo === true,
+        // 预设同样要看得见：它一次改多项，留痕里只剩一个 key 会让人看不出发生了什么
+        preset: typeof source.preset === 'string' ? source.preset.slice(0, 40) : undefined,
+        accepts: Array.isArray(source.accepts)
+          ? source.accepts.filter((key) => typeof key === 'string').slice(0, 12)
+          : undefined,
       };
     case 'download':
       return {
@@ -200,6 +205,7 @@ function describeTarget(type, params) {
   // 改设置的目标是"哪个键"，没有页面元素可指；撤销时键由主进程按记录决定
   if (type === 'settings') {
     if (source.undo === true) return '（撤销上一次）';
+    if (typeof source.preset === 'string' && source.preset) return `预设 ${source.preset.slice(0, 40)}`;
     return typeof source.key === 'string' ? source.key.slice(0, 60) : '（未指定键）';
   }
   if (typeof source.elementId === 'string' && source.elementId) return source.elementId.slice(0, 40);

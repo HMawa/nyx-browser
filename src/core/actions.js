@@ -182,7 +182,7 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog, ge
       if (type === 'settings') {
         if (aborted()) return interrupted();
         // undo:true 是"撤销上一次"，它同样只走这一个入口（人工确认与留痕都在通道里做）
-        if (params.apply === true || params.key || params.undo === true) {
+        if (params.apply === true || params.key || params.undo === true || params.preset) {
           if (typeof applySetting !== 'function') {
             return wrap({ ok: false, error: '当前内核不支持由 agent 改设置' });
           }

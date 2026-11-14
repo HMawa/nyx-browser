@@ -155,6 +155,16 @@ function startHttpApi({
         extractText: { selector: 'string?', maxLength: 'number?' },
         state: {},
         riskLog: { limit: 'number?', onlyBlocked: 'boolean?' },
+        // 改设置：不传 key 就只读清单；undo 撤销、preset 套预设（预设同样逐项确认）
+        settings: {
+          key: 'string?',
+          value: 'any?',
+          confirm: 'boolean?',
+          preset: 'string?',
+          accepts: 'string[]?',
+          undo: 'boolean?',
+          steps: 'number?',
+        },
       };
       return sendJson(res, 200, {
         ok: true,

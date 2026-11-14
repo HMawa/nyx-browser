@@ -254,16 +254,22 @@ async function main() {
     server,
     'nyx_settings',
     {
-      title: '设置（读 / 改）',
+      title: '设置（读 / 改 / 撤销 / 预设）',
       description:
-        '不传 key 时返回可改设置清单（含免责与限流规则）；传 key + value 时改一项设置。'
+        '不传 key 时返回可改设置清单（含免责、限流规则与场景预设）；传 key + value 时改一项设置；'
+        + '传 undo:true 撤销上一次（可带 steps 一次撤多步）；传 preset 套用一个场景预设（一次改一组）。'
         + '每次修改都要用户在 Nyx 里点一次确认，并写进动作留痕。'
+        + '预设里需要确认的键要逐项放进 accepts，少一个就整体不动。'
         + '隐私与安全相关的键（模式、出站方式、站点授权、接入模式、私密快照）不在可改范围内。'
         + '要确认才能生效的键需要再带 confirm:true。',
       inputSchema: {
         key: z.string().optional().describe('要改的键，如 theme / tabSleepMinutes；不传则只读清单'),
         value: z.union([z.string(), z.number(), z.boolean()]).optional().describe('新值'),
         confirm: z.boolean().optional().describe('对需要确认的键，必须显式传 true'),
+        preset: z.string().optional().describe('场景预设的名字（见只读清单里的 presets）'),
+        accepts: z.array(z.string()).optional().describe('预设里已逐项确认的键'),
+        undo: z.boolean().optional().describe('撤销上一次设置修改'),
+        steps: z.number().optional().describe('撤销几步（默认 1，最多 5）'),
       },
     },
     async ({ key, value, confirm }) =>

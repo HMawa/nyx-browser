@@ -76,6 +76,7 @@ const {
   SETTING_LOCKED,
   SETTING_SCHEMA,
   describeSettingsSchema,
+  planPresetChange: planAgentPresetChange,
   planSettingChange: planAgentSettingChange,
   planSettingUndo: planAgentSettingUndo,
 } = require('./core/agent-settings');
@@ -7170,6 +7171,7 @@ function registerOfflineCacheIpc() {
       }
       return {
         ok: true,
+        scope,
         imported: {
           path: source,
           mode: result.mode,
@@ -7183,7 +7185,7 @@ function registerOfflineCacheIpc() {
       };
     } catch (err) {
       const reason = err && err.message ? err.message : String(err);
-      if (runtime.diagnostics) runtime.diagnostics.error('PAGE_CACHE_SITES_IMPORT_FAILED', '导入离线缓存站点名单失败', { error: reason });
+      if (runtime.diagnostics) runtime.diagnostics.error('PAGE_CACHE_SITES_IMPORT_FAILED', '导入离线缓存站点名单失败', { scope, error: reason });
       return { ok: false, error: `没能导入名单：${reason}` };
     }
   });
@@ -8714,6 +8716,7 @@ function agentSettingsSnapshot() {
 async function applyAgentSetting(params) {
   const input = params && typeof params === 'object' ? params : {};
   const undo = input.undo === true;
+  const presetKey = typeof input.preset === 'string' ? input.preset.trim() : '';
   let key = typeof input.key === 'string' ? input.key.trim() : '';
   const ui = runtime.uiStore ? runtime.uiStore.get() : {};
   const history = Array.isArray(runtime.agentSettingHistory) ? runtime.agentSettingHistory : [];
@@ -8725,6 +8728,7 @@ async function applyAgentSetting(params) {
   // 支持一次撤多步（steps），但仍要过人工确认与留痕，只是不占修改限流的额度。
   let plan;
   let undoPicked = [];
+  let presetChanges = [];
   if (undo) {
     const entries = Array.isArray(runtime.agentSettingUndo) ? runtime.agentSettingUndo : [];
     const stepsInput = Number(input.steps);
@@ -8734,6 +8738,15 @@ async function applyAgentSetting(params) {
     for (const entry of entries) currents[entry.key] = ui[entry.key];
     plan = planAgentSettingUndo(entries, { currents, steps });
     if (plan.ok && Array.isArray(plan.changes)) undoPicked = plan.changes;
+  } else if (presetKey) {
+    // 场景预设（第五轮 ④）：一次改一组，但需要确认的键仍然逐项点名确认，
+    // 不是"套一个预设就等于同意里面所有改动"。限流按"一次调用"算，不按项数算。
+    key = presetKey;
+    plan = planAgentPresetChange(
+      { preset: presetKey, accepts: Array.isArray(input.accepts) ? input.accepts : [] },
+      { currents: ui, history: runtime.agentSettingHistory, now },
+    );
+    if (plan.ok && Array.isArray(plan.changes)) presetChanges = plan.changes;
   } else {
     plan = planAgentSettingChange(
       { key, value: input.value, confirm: input.confirm === true },
@@ -8777,10 +8790,12 @@ async function applyAgentSetting(params) {
     return { ok: false, code: 'STORE_UNAVAILABLE', error: '设置存储还没就绪，这次没有改。', disclaimer: SETTING_DISCLAIMER };
   }
 
-  // 撤销可能一次改多项，所以这里按"目标列表"落盘；普通修改只有一项。
+  // 撤销与预设都可能一次改多项，所以这里按"目标列表"落盘；普通修改只有一项。
   const targets = undo
-    ? undoPicked.map((item) => ({ key: item.key, value: item.value, summary: item.summary }))
-    : [{ key, value: plan.value, summary: plan.summary }];
+    ? undoPicked.map((item) => ({ key: item.key, value: item.value, summary: item.summary, from: undefined }))
+    : presetChanges.length
+      ? presetChanges.map((item) => ({ key: item.key, value: item.value, summary: item.summary, from: item.from }))
+      : [{ key, value: plan.value, summary: plan.summary, from: ui[key] }];
   const applied = [];
   for (const item of targets) {
     // 关掉离线缓存时要把已存的正文一起清掉——和界面上手动关掉是同一条路径，
@@ -8818,7 +8833,7 @@ async function applyAgentSetting(params) {
     }
   }
 
-  // 撤销不占修改额度（一键回退不该被限流卡住），普通修改才记一次
+  // 撤销不占修改额度（一键回退不该被限流卡住）；普通修改与预设都只记一次
   if (!undo) runtime.agentSettingHistory.push(now);
 
   if (undo) {
@@ -8827,10 +8842,12 @@ async function applyAgentSetting(params) {
       runtime.agentSettingUndo.splice(Math.max(0, runtime.agentSettingUndo.length - plan.consumed));
     }
   } else if (Array.isArray(runtime.agentSettingUndo)) {
-    // 留一条可撤销的记录：只记"这次改成了什么、改之前是什么"，
-    // 不记 agent 是谁（那在动作留痕里）。
-    const previous = ui[key];
-    runtime.agentSettingUndo.push({ key, value: plan.value, previous, at: now });
+    // 留可撤销的记录：只记"这次改成了什么、改之前是什么"，
+    // 不记 agent 是谁（那在动作留痕里）。预设一次改多项，就记多项——
+    // 否则撤销只能退回其中一项，看起来像"只撤了一半"。
+    for (const item of targets) {
+      runtime.agentSettingUndo.push({ key: item.key, value: item.value, previous: item.from, at: now });
+    }
     if (runtime.agentSettingUndo.length > 20) runtime.agentSettingUndo.splice(0, runtime.agentSettingUndo.length - 20);
   }
 
