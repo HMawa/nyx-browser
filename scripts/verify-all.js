@@ -5,7 +5,7 @@
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
- *  2. scripts/verify-ui-polish.js（界面体验，107 项）
+ *  2. scripts/verify-ui-polish.js（界面体验，108 项）
  *  3. scripts/verify-link-guard.js（出站链路守卫，12 项；纯 Node，不启动 Electron）
  *  4. scripts/verify-downloads.js（下载链路，16 项；纯 Node，不启动 Electron）
  *  5. scripts/verify-gpu-policy.js（图形性能策略，14 项；纯 Node，不启动 Electron）
@@ -18,7 +18,7 @@
  * 12. scripts/verify-agent-sites.js（站点三层授权，19 项；纯 Node，不启动 Electron）
  * 13. scripts/verify-agent-mode.js（agent 接入模式与两步确认，16 项；纯 Node，不启动 Electron）
  * 14. scripts/verify-page-digest.js（页面摘要，17 项；纯 Node，不启动 Electron）
- * 15. scripts/verify-tab-lifecycle.js（标签生命周期判定，15 项；纯 Node，不启动 Electron）
+ * 15. scripts/verify-tab-lifecycle.js（标签生命周期判定，18 项；纯 Node，不启动 Electron）
  * 16. scripts/verify-tab-sleep.js（标签休眠与唤醒端到端，10 项）
  * 17. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
  *
@@ -61,8 +61,8 @@ const STEPS = [
   {
     label: '界面体验回归',
     script: 'verify-ui-polish.js',
-    items: '107 项',
-    timeoutMs: 300000,
+    items: '108 项',
+    timeoutMs: 360000,
   },
   {
     label: '出站链路守卫',
@@ -139,7 +139,7 @@ const STEPS = [
   {
     label: '标签生命周期回归',
     script: 'verify-tab-lifecycle.js',
-    items: '15 项',
+    items: '18 项',
     timeoutMs: 60000,
   },
   {

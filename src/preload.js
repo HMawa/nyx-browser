@@ -161,6 +161,10 @@ contextBridge.exposeInMainWorld('nyx', {
   digestRun: (payload) => ipcRenderer.invoke('nyx:digest:run', payload || {}),
   digestCopy: (text) => ipcRenderer.invoke('nyx:digest:copy', { text: String(text || '') }),
 
+  /** 标签休眠阈值（分钟，0 = 不自动休眠）：读 / 改，改完立刻生效 */
+  tabSleep: () => ipcRenderer.invoke('nyx:tabs:sleep'),
+  tabSleepSet: (payload) => ipcRenderer.invoke('nyx:tabs:sleep-set', payload || {}),
+
 
   /** 权限决策轨迹（默认最近 50 条） */
   listPermissionDecisions: (limit) => ipcRenderer.invoke('nyx:permissions:list', limit),

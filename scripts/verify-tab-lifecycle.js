@@ -13,12 +13,17 @@ const path = require('node:path');
 const {
   AGENT_KEEP_AWAKE_MS,
   DEFAULT_SLEEP_AFTER_MS,
+  DEFAULT_SLEEP_MINUTES,
   LIFECYCLE_REASONS,
   MIN_SLEEP_AFTER_MS,
+  TAB_SLEEP_MINUTES,
   decideTabLifecycle,
   describeLifecycle,
+  describeSleepMinutes,
   normalizeSleepAfter,
+  normalizeSleepMinutes,
   readSleepAfterFromEnv,
+  sleepMinutesToMs,
   summarizeLifecycle,
 } = require('../src/core/tab-lifecycle');
 
@@ -202,11 +207,42 @@ check('14. 每个原因码都有中文说明（不许出现空原因给用户看
   return { reasons: reasons.length };
 });
 
-check('15. 接线守位：判定与执行都在标签管理器里，入口在 main / 外壳', () => {
+check('16. 设置页的"分钟"解析可靠：0 是关闭，脏值回默认，越界夹回范围内', () => {
+  expect(normalizeSleepMinutes(undefined), DEFAULT_SLEEP_MINUTES, '缺省');
+  expect(normalizeSleepMinutes('abc'), DEFAULT_SLEEP_MINUTES, '非数字');
+  expect(normalizeSleepMinutes(-3), DEFAULT_SLEEP_MINUTES, '负数');
+  expect(normalizeSleepMinutes(0), 0, '0 = 关闭');
+  expect(normalizeSleepMinutes('15'), 15, '字符串数字');
+  expect(normalizeSleepMinutes(0.6), 1, '小数至少 1 分钟');
+  expect(normalizeSleepMinutes(9999), 240, '超过上限夹回 240');
+  return { default: DEFAULT_SLEEP_MINUTES, options: TAB_SLEEP_MINUTES };
+});
+
+check('17. 分钟换算成毫秒时仍然守住最小阈值，且关闭就是 0', () => {
+  expect(sleepMinutesToMs(0), 0, '关闭');
+  expect(sleepMinutesToMs(30), 30 * 60 * 1000, '30 分钟');
+  expectTrue(sleepMinutesToMs(1) >= MIN_SLEEP_AFTER_MS, '1 分钟应不小于最小阈值');
+  return { oneMinute: sleepMinutesToMs(1) };
+});
+
+check('18. 说明文案讲清后果：关闭时明说不建议，开启时讲清会重新加载', () => {
+  const off = describeSleepMinutes(0);
+  expectTrue(off.includes('不会自动休眠'), '关闭文案');
+  expectTrue(off.includes('不建议'), '关闭时要提示内存占用代价');
+  const on = describeSleepMinutes(30);
+  expectTrue(on.includes('30 分钟') && on.includes('重新加载'), '开启文案');
+  return { off: off.slice(0, 24), on: on.slice(0, 24) };
+});
+
+check('19. 接线守位：判定与执行都在标签管理器里，入口在 main / 外壳', () => {
   const read = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
   const tabs = read('src/core/tabs.js');
   const main = read('src/main.js');
   const renderer = read('src/renderer/renderer.js');
+  const preload = read('src/preload.js');
+  const settingsHtml = read('src/renderer/settings.html');
+  const settingsJs = read('src/renderer/settings.js');
+  const uiStore = read('src/core/ui-store.js');
   const must = {
     applyLifecycle: tabs.includes('applyLifecycle()') && tabs.includes('sleepAfterMs'),
     sleepAndWake: tabs.includes('sleepTab(tab)') && tabs.includes('wakeTab(tab)'),
@@ -218,6 +254,14 @@ check('15. 接线守位：判定与执行都在标签管理器里，入口在 ma
     mainKeepAwake: main.includes('touchAgentSession(') && main.includes('AGENT_SESSION_IDLE_MS'),
     mainStarts: main.includes('runtime.tabManager.startLifecycle()'),
     rendererDim: renderer.includes('is-asleep') && renderer.includes('已休眠'),
+    // G 的后续：休眠时长做成设置项
+    tabsSetter: tabs.includes('setSleepAfterMs('),
+    mainIpc: main.includes("ipcMain.handle('nyx:tabs:sleep'") && main.includes("ipcMain.handle('nyx:tabs:sleep-set'"),
+    mainAppliesSaved: main.includes('tabSleepMinutes') && main.includes('setSleepAfterMs(sleepMinutesToMs('),
+    preloadApi: preload.includes("invoke('nyx:tabs:sleep')") && preload.includes("invoke('nyx:tabs:sleep-set'"),
+    settingsCard: settingsHtml.includes('id="tab-sleep-row"') && settingsHtml.includes('id="btn-tab-sleep-save"'),
+    settingsLogic: settingsJs.includes('loadTabSleep()') && settingsJs.includes('tabSleepSet('),
+    prefStored: uiStore.includes('tabSleepMinutes:'),
   };
   const bad = Object.keys(must).filter((key) => !must[key]);
   expect(bad.length, 0, `缺少接线：${bad.join(',')}`);

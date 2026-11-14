@@ -85,7 +85,15 @@ const {
 } = require('./core/page-digest');
 const { getRiskLog } = require('./core/risk-guard');
 // 标签生命周期（清单 G）：休眠阈值与 agent 保持唤醒时长
-const { AGENT_KEEP_AWAKE_MS, readSleepAfterFromEnv } = require('./core/tab-lifecycle');
+const {
+  AGENT_KEEP_AWAKE_MS,
+  DEFAULT_SLEEP_MINUTES,
+  TAB_SLEEP_MINUTES,
+  describeSleepMinutes,
+  normalizeSleepMinutes,
+  readSleepAfterFromEnv,
+  sleepMinutesToMs,
+} = require('./core/tab-lifecycle');
 const { startHttpApi } = require('./api/http-api');
 const { createModeEventLog } = require('./core/mode-events');
 const { ACTIONS: LINK_GUARD_ACTIONS, isProxyFailureCode, decideProxyFailureAction } = require('./core/link-guard');
@@ -2412,6 +2420,14 @@ function createMainWindow() {
 
   // 休眠巡检：5 秒一次，判定与执行都在 TabManager 里，这里只负责开起来
   runtime.tabManager.startLifecycle();
+
+  // 设置页里选的休眠时长（清单 G 的后续）：启动时套用，没设过就是默认 30 分钟。
+  // 环境变量优先级更高——它是自动化验证的旋钮，不能让用户设置在验证时把它盖掉。
+  if (process.env.NYX_TAB_SLEEP_MS === undefined && runtime.uiStore) {
+    const savedMinutes = normalizeSleepMinutes(runtime.uiStore.get().tabSleepMinutes);
+    const savedMs = runtime.tabManager.setSleepAfterMs(sleepMinutesToMs(savedMinutes));
+    console.log(`[Nyx] 标签休眠：${describeSleepMinutes(savedMinutes)}（${savedMs} ms）`);
+  }
 
   // 启动标签按「启动与主页」配置打开：空白页 / 新标签页 / 指定网页（可多条）
   const targets = startupTargets();
@@ -7721,6 +7737,55 @@ function agentModeStatus() {
  *  3. 一定要把抓包摘要一起给：页面说"成功"、接口其实 500 是这类工具最容易骗人的地方。
  */
 function registerDigestIpc() {
+  /**
+   * 标签休眠阈值（清单 G 的后续）。
+   *
+   * 之前阈值写死 30 分钟，只能靠环境变量在测试里改——用户想调（或想关掉）没有办法。
+   * 这里给一个正经设置项：改完立刻对 TabManager 生效，不需要重启；
+   * 环境变量 NYX_TAB_SLEEP_MS 仍然优先，它是自动化验证的旋钮，界面上要如实说明。
+   */
+  function tabSleepPayload() {
+    const envOverride = process.env.NYX_TAB_SLEEP_MS !== undefined;
+    const minutes = normalizeSleepMinutes(runtime.uiStore ? runtime.uiStore.get().tabSleepMinutes : DEFAULT_SLEEP_MINUTES);
+    const effectiveMs = runtime.tabManager ? runtime.tabManager.sleepAfterMs : sleepMinutesToMs(minutes);
+    return {
+      ok: true,
+      minutes,
+      effectiveMs,
+      options: TAB_SLEEP_MINUTES,
+      hint: describeSleepMinutes(Math.round(effectiveMs / 60000)),
+      envOverride,
+      envMs: envOverride ? readSleepAfterFromEnv(process.env) : 0,
+      envNote: envOverride
+        ? '本次启动被环境变量 NYX_TAB_SLEEP_MS 覆盖，界面上的设置这次不生效（这个变量只给自动化验证用）。'
+        : '',
+    };
+  }
+
+  ipcMain.handle('nyx:tabs:sleep', () => tabSleepPayload());
+
+  ipcMain.handle('nyx:tabs:sleep-set', (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    const minutes = normalizeSleepMinutes(input.minutes, -1);
+    if (minutes < 0) {
+      return { ...tabSleepPayload(), ok: false, error: '休眠时长要是 0（不自动休眠）或 1–240 之间的分钟数。' };
+    }
+    let result = null;
+    try {
+      result = runtime.uiStore.set('tabSleepMinutes', minutes);
+    } catch (err) {
+      diagnostics.error('TAB_SLEEP_SAVE_FAILED', '标签休眠时长没能保存', { error: err && err.message });
+      return { ...tabSleepPayload(), ok: false, error: `没能保存休眠时长：${err && err.message ? err.message : err}` };
+    }
+    const effectiveMs = runtime.tabManager ? runtime.tabManager.setSleepAfterMs(sleepMinutesToMs(minutes)) : sleepMinutesToMs(minutes);
+    diagnostics.info('TAB_SLEEP_CHANGED', `标签休眠：${describeSleepMinutes(minutes)}`, {
+      minutes,
+      effectiveMs,
+      envOverride: process.env.NYX_TAB_SLEEP_MS !== undefined,
+    });
+    return { ...tabSleepPayload(), ok: true, minutes, effectiveMs, ui: result && result.ui ? result.ui : null };
+  });
+
   ipcMain.handle('nyx:digest:get', () => ({
     ok: true,
     enabled: runtime.uiStore ? runtime.uiStore.get().digestEnabled === true : false,

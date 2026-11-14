@@ -1289,6 +1289,98 @@ async function main() {
       JSON.stringify(gpuSetting && { after: gpuSetting.afterSwitch, restored: gpuSetting.afterRestore }),
     );
 
+    // F1e：外观 →「标签休眠」（G 的后续）：时长可调、立刻生效、关掉要有代价说明
+    const sleepSetting = await settings.eval(`(async () => {
+      const waitFor = async (fn, timeoutMs = 6000) => {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+          const value = fn();
+          if (value) return value;
+          await new Promise((resolve) => setTimeout(resolve, 120));
+        }
+        return null;
+      };
+      try {
+        document.querySelector('.nav-item[data-sec="appearance"]').click();
+        const badge = await waitFor(() => {
+          const el = document.getElementById('tab-sleep-badge');
+          return el && el.textContent && el.textContent !== '读取中…' ? el : null;
+        });
+        const initial = {
+          badge: badge ? badge.textContent.trim() : '',
+          badgeClass: badge ? badge.className : '',
+          radios: document.querySelectorAll('#tab-sleep-row input[name="tab-sleep"]').length,
+          checked: Array.from(document.querySelectorAll('#tab-sleep-row input[name="tab-sleep"]')).filter((i) => i.checked).map((i) => i.value),
+          hint: (document.getElementById('tab-sleep-hint') || {}).textContent || '',
+          before: (await window.nyx.getState()).lifecycle.sleepAfterMs,
+        };
+
+        // 走真实界面路径：点 5 分钟 → 立刻生效（不需要重启），快照里的阈值当场变
+        const radio5 = Array.from(document.querySelectorAll('#tab-sleep-row input[name="tab-sleep"]')).find((i) => i.value === '5');
+        if (radio5) {
+          radio5.click();
+          await waitFor(() => (document.getElementById('tab-sleep-badge') || {}).textContent === '5 分钟');
+        }
+        const after5Badge = (document.getElementById('tab-sleep-badge') || {}).textContent || '';
+        const afterMs = (await window.nyx.getState()).lifecycle.sleepAfterMs;
+
+        // 点「不自动休眠」：界面要如实说清代价，不能只说"已关闭"
+        const radio0 = Array.from(document.querySelectorAll('#tab-sleep-row input[name="tab-sleep"]')).find((i) => i.value === '0');
+        let offBadge = '';
+        let offHint = '';
+        if (radio0) {
+          radio0.click();
+          const offEl = await waitFor(() => {
+            const el = document.getElementById('tab-sleep-badge');
+            return el && el.textContent.includes('已关闭') ? el : null;
+          });
+          offBadge = offEl ? offEl.textContent.trim() : '';
+          offHint = (document.getElementById('tab-sleep-hint') || {}).textContent || '';
+        }
+        const offMs = (await window.nyx.getState()).lifecycle.sleepAfterMs;
+
+        // 非法值要被拒（不能悄悄改成奇怪的数）
+        const bad = await window.nyx.tabSleepSet({ minutes: 'abc' });
+        const badMinutes = (await window.nyx.tabSleep()).minutes;
+
+        // 收尾改回 30 分钟，别污染后面的断言
+        await window.nyx.tabSleepSet({ minutes: 30 });
+        const restored = (await window.nyx.getState()).lifecycle.sleepAfterMs;
+
+        return {
+          initial,
+          hasRange: !!radio5,
+          set5: { ok: after5Badge.includes('5'), badge: after5Badge, afterMs },
+          offSet: { ok: offBadge !== '', offMs, offBadge, offHint },
+          bad: { ok: bad && bad.ok, error: bad && bad.error, minutes: badMinutes },
+          restoredMs: restored,
+        };
+      } catch (err) {
+        return { failedAt: err.message };
+      }
+    })()`);
+    check(
+      '外观分区能调标签休眠时长，改完立刻生效，关掉时说清代价（G）',
+      !!sleepSetting &&
+        !sleepSetting.failedAt &&
+        String(sleepSetting.initial.badge).includes('30') &&
+        sleepSetting.initial.radios >= 5 &&
+        sleepSetting.initial.checked[0] === '30' &&
+        String(sleepSetting.initial.hint).includes('重新加载') &&
+        sleepSetting.initial.before === 30 * 60 * 1000 &&
+        sleepSetting.hasRange === true &&
+        String(sleepSetting.set5.badge).includes('5') &&
+        sleepSetting.set5.afterMs === 5 * 60 * 1000 &&
+        sleepSetting.offSet.ok === true &&
+        sleepSetting.offSet.offMs === 0 &&
+        String(sleepSetting.offSet.offBadge).includes('已关闭') &&
+        String(sleepSetting.offSet.offHint).includes('不建议') &&
+        sleepSetting.bad.ok === false &&
+        sleepSetting.bad.minutes === 0 &&
+        sleepSetting.restoredMs === 30 * 60 * 1000,
+      JSON.stringify(sleepSetting),
+    );
+
     // F1c：关于 →「安全基线」（C2）：声明版本 vs 机器上跑的版本要摆在一起，
     // 且公告入口只认白名单 key（渲染进程传不进任意 URL，否则就是个开放跳转）。
     const baselinePanel = await settings.eval(`(async () => {

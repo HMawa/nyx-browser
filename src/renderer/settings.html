@@ -216,6 +216,30 @@
               </div>
               <div class="info-body" id="hw-body"></div>
             </section>
+
+            <!-- 标签休眠（清单 G）：后台标签闲置到点释放内存，改完立刻生效 -->
+            <section class="info-card">
+              <div class="info-head">
+                <h3>标签休眠</h3>
+                <span class="badge" id="tab-sleep-badge">读取中…</span>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  后台标签闲置一段时间后会被卸载，释放它占的内存；点回来时按原地址重新加载。
+                  当前标签、被 agent 操作过的标签、以及设置页本身永不参与休眠。
+                </p>
+                <div class="radio-row" id="tab-sleep-row" role="radiogroup" aria-label="标签休眠时长"></div>
+                <div class="gpu-facts">
+                  <p class="hint" id="tab-sleep-hint" role="status" aria-live="polite">正在读取…</p>
+                </div>
+                <div class="sec-actions">
+                  <label class="hint" for="tab-sleep-custom">自定义分钟数（1–240）：</label>
+                  <input type="number" id="tab-sleep-custom" min="1" max="240" step="1" style="width: 88px" />
+                  <button type="button" class="btn" id="btn-tab-sleep-save">保存</button>
+                  <span class="hint" id="tab-sleep-status"></span>
+                </div>
+              </div>
+            </section>
           </div>
         </section>
 

@@ -44,6 +44,12 @@ const UI_PREF_DEFAULTS = {
    * 它是纯抽取式的（不调生成式 API），但"要不要让 Nyx 读这一页"仍然应该由用户点开关决定。
    */
   digestEnabled: false,
+
+  /**
+   * 后台标签闲置多少分钟后休眠（清单 G）。0 = 不自动休眠。
+   * 改完立刻生效（TabManager.setSleepAfterMs），不需要重启。
+   */
+  tabSleepMinutes: 30,
 };
 
 /** 枚举型偏好的合法取值（键 → 允许值）。

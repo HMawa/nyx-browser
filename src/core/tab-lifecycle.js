@@ -164,16 +164,57 @@ function summarizeLifecycle(decisions) {
   return { total: list.length, active, background, asleep, keptAwake, text: parts.join(' · ') };
 }
 
+/**
+ * 设置页里能选的休眠时长（分钟）。0 = 不自动休眠。
+ *
+ * 上限 240 分钟是刻意的：再长的阈值和"从不休眠"几乎没有区别，
+ * 但界面上看起来像是在保护什么，容易误导。
+ */
+const TAB_SLEEP_MINUTES = [0, 5, 10, 15, 30, 60, 120, 240];
+const DEFAULT_SLEEP_MINUTES = Math.round(DEFAULT_SLEEP_AFTER_MS / 60000);
+
+/**
+ * 把界面上的"分钟"解析成可靠值：非法回落默认，合法但不在候选里也接受（用户手填）。
+ *
+ * @param {unknown} raw 分钟
+ * @param {number} [fallback] 解析不出来时用的分钟数
+ * @returns {number} 0 或 [1, 240]
+ */
+function normalizeSleepMinutes(raw, fallback = DEFAULT_SLEEP_MINUTES) {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return fallback;
+  if (value === 0) return 0;
+  return Math.min(240, Math.max(1, Math.round(value)));
+}
+
+/** 分钟 → 毫秒（0 仍表示关闭） */
+function sleepMinutesToMs(minutes) {
+  const safe = normalizeSleepMinutes(minutes);
+  return safe === 0 ? 0 : normalizeSleepAfter(safe * 60 * 1000);
+}
+
+/** 给用户看的说明，别让他对"0"产生误解 */
+function describeSleepMinutes(minutes) {
+  const safe = normalizeSleepMinutes(minutes);
+  if (safe === 0) return '后台标签不会自动休眠（内存占用会一直涨，不建议长期这样）';
+  return `后台标签闲置 ${safe} 分钟后释放内存，点回来时按原地址重新加载`;
+}
+
 module.exports = {
   AGENT_KEEP_AWAKE_MS,
   DEFAULT_SLEEP_AFTER_MS,
+  DEFAULT_SLEEP_MINUTES,
   LIFECYCLE_LABELS,
   LIFECYCLE_REASONS,
   LIFECYCLE_STATES,
   MIN_SLEEP_AFTER_MS,
+  TAB_SLEEP_MINUTES,
   decideTabLifecycle,
   describeLifecycle,
+  describeSleepMinutes,
   normalizeSleepAfter,
+  normalizeSleepMinutes,
   readSleepAfterFromEnv,
+  sleepMinutesToMs,
   summarizeLifecycle,
 };

@@ -190,6 +190,21 @@ class TabManager {
   }
 
   /**
+   * 改休眠阈值（设置页可调）。立刻生效，不用重启。
+   * @param {number} ms 0 = 关闭休眠
+   * @returns {number} 实际生效的毫秒数
+   */
+  setSleepAfterMs(ms) {
+    const next = normalizeSleepAfter(ms, DEFAULT_SLEEP_AFTER_MS);
+    if (next === this.sleepAfterMs) return this.sleepAfterMs;
+    this.sleepAfterMs = next;
+    // 阈值改小可能让某些后台标签马上符合休眠条件；改大则要把已睡的唤醒回来。
+    this.applyLifecycle();
+    this.emit();
+    return this.sleepAfterMs;
+  }
+
+  /**
    * 标记某个标签刚被 agent 操作过：在一段时间内不许休眠。
    * @param {number} [tabId] 缺省用当前标签
    * @param {number} [ttlMs]

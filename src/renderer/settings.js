@@ -304,6 +304,8 @@
       loadSlowMs();
       // 图形性能策略（A5）：进分区就回读，适配器信息也一并刷新
       loadGpuPolicy();
+      // 标签休眠时长（G）：进分区回读，改完立刻生效
+      loadTabSleep();
     }
 
     // 更新状态每次进入都刷一次：版本与升级包状态随时可能被后台改变
@@ -1354,6 +1356,123 @@
         } catch (err) {
           setStatus(`重启失败：${err.message}`);
         }
+      });
+    }
+  }
+
+  /* ================= 标签休眠（清单 G 的后续） ================= */
+
+  let tabSleepWired = false;
+  let tabSleepState = null;
+
+  function renderTabSleep(payload) {
+    tabSleepState = payload || {};
+    const badge = byId('tab-sleep-badge');
+    const row = byId('tab-sleep-row');
+    const hint = byId('tab-sleep-hint');
+    const statusEl = byId('tab-sleep-status');
+    const custom = byId('tab-sleep-custom');
+    if (!badge || !row || !hint) return;
+
+    const minutes = Number(tabSleepState.minutes);
+    const off = minutes === 0;
+    badge.textContent = off ? '已关闭' : `${minutes} 分钟`;
+    badge.className = `badge ${off ? 'warn' : 'ok'}`;
+
+    // 候选按钮按 payload 给的候选来渲染，选中项与真实值一致（自定义值不选中任何一项）
+    const options = Array.isArray(tabSleepState.options) ? tabSleepState.options : [];
+    row.textContent = '';
+    for (const value of options) {
+      const label = document.createElement('label');
+      label.className = 'radio-item';
+      const input = document.createElement('input');
+      input.type = 'radio';
+      input.name = 'tab-sleep';
+      input.value = String(value);
+      input.checked = value === minutes;
+      const span = document.createElement('span');
+      const strong = document.createElement('strong');
+      strong.textContent = value === 0 ? '不自动休眠' : `${value} 分钟`;
+      span.appendChild(strong);
+      label.appendChild(input);
+      label.appendChild(span);
+      row.appendChild(label);
+    }
+
+    hint.textContent = tabSleepState.envOverride
+      ? `本次启动被环境变量覆盖（${tabSleepState.envMs} ms）：${tabSleepState.envNote}`
+      : tabSleepState.hint || '';
+    hint.classList.toggle('is-warn', Boolean(tabSleepState.envOverride));
+
+    if (custom) {
+      custom.value = minutes > 0 ? String(minutes) : '';
+      custom.placeholder = off ? '被关掉了' : '分钟';
+    }
+    if (statusEl) statusEl.textContent = '';
+  }
+
+  async function loadTabSleep() {
+    if (!window.nyx.tabSleep) return;
+
+    try {
+      renderTabSleep(await window.nyx.tabSleep());
+    } catch (err) {
+      const hint = byId('tab-sleep-hint');
+      if (hint) {
+        hint.textContent = `读取标签休眠设置失败：${err.message}`;
+        hint.classList.add('is-warn');
+      }
+    }
+
+    if (!tabSleepWired) wireTabSleep();
+  }
+
+  function wireTabSleep() {
+    const row = byId('tab-sleep-row');
+    const saveBtn = byId('btn-tab-sleep-save');
+    const custom = byId('tab-sleep-custom');
+    if (!row) return;
+
+    tabSleepWired = true;
+
+    const apply = async (minutes) => {
+      const statusEl = byId('tab-sleep-status');
+      if (statusEl) statusEl.textContent = '正在保存…';
+
+      let res = null;
+      try {
+        res = await window.nyx.tabSleepSet({ minutes });
+      } catch (err) {
+        res = { ok: false, error: err.message };
+      }
+
+      if (!res || res.ok === false) {
+        if (statusEl) statusEl.textContent = `没有保存：${(res && res.error) || '未知原因'}`;
+        await loadTabSleep();
+        return;
+      }
+
+      setStatus(minutes === 0 ? '标签休眠已关闭（后台标签会一直留在内存里）' : `标签休眠已保存：闲置 ${minutes} 分钟后释放内存`);
+      await loadTabSleep();
+      if (statusEl) statusEl.textContent = '';
+    };
+
+    row.addEventListener('change', (event) => {
+      const input = event.target;
+      if (!input || input.name !== 'tab-sleep' || !input.checked) return;
+      apply(Number(input.value));
+    });
+
+    if (saveBtn) {
+      saveBtn.addEventListener('click', () => {
+        const raw = custom ? String(custom.value || '').trim() : '';
+        const minutes = Number(raw);
+        if (!raw || !Number.isFinite(minutes) || minutes < 1 || minutes > 240) {
+          const statusEl = byId('tab-sleep-status');
+          if (statusEl) statusEl.textContent = '请输入 1–240 之间的分钟数（0 请用上面的「不自动休眠」）。';
+          return;
+        }
+        apply(minutes);
       });
     }
   }
