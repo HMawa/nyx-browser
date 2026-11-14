@@ -1,11 +1,11 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把二十个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把二十一个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
- *  2. scripts/verify-ui-polish.js（界面体验，114 项）
+ *  2. scripts/verify-ui-polish.js（界面体验，115 项）
  *  3. scripts/verify-link-guard.js（出站链路守卫，14 项；纯 Node，不启动 Electron）
  *  4. scripts/verify-downloads.js（下载链路，16 项；纯 Node，不启动 Electron）
  *  5. scripts/verify-gpu-policy.js（图形性能策略，14 项；纯 Node，不启动 Electron）
@@ -17,13 +17,14 @@
  * 11. scripts/verify-agent-audit.js（agent 审计面与急停，17 项；纯 Node，不启动 Electron）
  * 12. scripts/verify-agent-sites.js（站点三层授权与名单导入导出，34 项；纯 Node，不启动 Electron）
  * 13. scripts/verify-agent-mode.js（agent 接入模式与两步确认，16 项；纯 Node，不启动 Electron）
- * 14. scripts/verify-page-digest.js（页面摘要与拦截统计，20 项；纯 Node，不启动 Electron）
+ * 14. scripts/verify-page-digest.js（页面摘要与拦截统计，22 项；纯 Node，不启动 Electron）
  * 15. scripts/verify-tab-lifecycle.js（标签生命周期判定，18 项；纯 Node，不启动 Electron）
  * 16. scripts/verify-tab-sleep.js（标签休眠与唤醒端到端，10 项）
  * 17. scripts/verify-network-state.js（断网判定与断网横幅，10 项；纯 Node，不启动 Electron）
- * 18. scripts/verify-page-cache.js（离线页面缓存与快照块结构，23 项；纯 Node，不启动 Electron）
+ * 18. scripts/verify-page-cache.js（离线页面缓存与快照块结构，24 项；纯 Node，不启动 Electron）
  * 19. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
- * 20. scripts/verify-runtime-compat.js（运行时兼容：剪贴板异步化与版本三处一致，6 项；纯 Node，不启动 Electron）
+ * 20. scripts/verify-runtime-compat.js（运行时兼容：剪贴板异步化与版本三处一致，9 项；纯 Node，不启动 Electron）
+ * 21. scripts/verify-release-gate.js（发版门禁与安装器 e2e 接线，13 项；纯 Node，不跑安装包）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -64,7 +65,7 @@ const STEPS = [
   {
     label: '界面体验回归',
     script: 'verify-ui-polish.js',
-    items: '114 项',
+    items: '115 项',
     timeoutMs: 360000,
   },
   {
@@ -136,7 +137,7 @@ const STEPS = [
   {
     label: '页面摘要回归',
     script: 'verify-page-digest.js',
-    items: '20 项',
+    items: '22 项',
     timeoutMs: 60000,
   },
   {
@@ -160,13 +161,19 @@ const STEPS = [
   {
     label: '离线页面缓存',
     script: 'verify-page-cache.js',
-    items: '23 项',
+    items: '24 项',
     timeoutMs: 60000,
   },
   {
     label: '运行时兼容',
     script: 'verify-runtime-compat.js',
-    items: '6 项',
+    items: '9 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '发版门禁接线',
+    script: 'verify-release-gate.js',
+    items: '13 项',
     timeoutMs: 60000,
   },
   {

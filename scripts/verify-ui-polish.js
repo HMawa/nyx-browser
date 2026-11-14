@@ -3041,6 +3041,53 @@ async function main() {
     })()`);
     await sleep(500);
 
+    /* ---------- 摘要里「被拦下」的站点能一键跳到抓包并按它筛（候选④） ---------- */
+    // 摘要侧栏的按钮只负责发事件，真正切页/填筛选在工具箱里；
+    // 这里直接发同一个事件，验证整条链路的接线是真的通（不依赖真的拦到请求）。
+    const blockedHost = '127.0.0.1';
+    await shell.eval(`(() => {
+      window.dispatchEvent(new CustomEvent('nyx:toolbox-focus-net', { detail: { query: ${JSON.stringify(blockedHost)} } }));
+      return true;
+    })()`);
+    let netFocus = null;
+    for (let i = 0; i < 24; i += 1) {
+      netFocus = await shell.eval(`(() => {
+        const dbg = window.__nyxToolboxDebug || null;
+        const input = document.getElementById('net-search');
+        if (!dbg) return null;
+        return {
+          open: dbg.isOpen(),
+          pane: dbg.activePane(),
+          query: dbg.getNetQuery(),
+          inputValue: input ? input.value : null,
+        };
+      })()`);
+      if (netFocus && netFocus.open && netFocus.pane === 'net' && netFocus.query === blockedHost) break;
+      await sleep(250);
+    }
+    check(
+      '摘要里点「被拦下」的站点能把工具箱切到抓包并按它筛出来（候选④）',
+      netFocus !== null
+        && netFocus.open === true
+        && netFocus.pane === 'net'
+        && netFocus.query === blockedHost
+        && netFocus.inputValue === blockedHost,
+      JSON.stringify(netFocus),
+    );
+    // 收尾：清掉筛选并收起工具箱，避免影响后面读抓包/历史的用例
+    await shell.eval(`(() => {
+      const input = document.getElementById('net-search');
+      if (input) {
+        input.value = '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      const close = document.getElementById('btn-toolbox');
+      const panel = document.getElementById('toolbox');
+      if (panel && !panel.hidden) close && close.click();
+      return true;
+    })()`);
+    await sleep(400);
+
     /* ---------- 断网横幅（G 的离线/在线部分） ---------- */
     // 这里只测"渲染层是否按主进程给的说法显示"，不在测试里真的断网：
     // 断网判定本身由 verify-network-state.js 的纯函数断言兜住。
