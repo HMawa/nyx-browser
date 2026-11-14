@@ -60,7 +60,15 @@
  *   顺序约定：与 --restore 同时给时先 restore 再 clean；与 --release/--prune 同时给时
  *   发版 → prune 归档 → clean-updates。
  *
- * 五、--dry-run：全链路预演，只校验 / 计算 / 打印，绝不写文件、不复制、不删除。
+ * 五、--with-installer-test：发版时真跑一遍安装器端到端（候选⑤）。
+ *   会调用 scripts/test-installer-e2e.js，用 dist 或留档里版本号最接近的旧安装包当
+ *   `--from`，覆盖 全新安装 → 降级 → 升级 → 修复 → 保留数据卸载 → 完全卸载 六条路径；
+ *   要管理员权限、会临时移动真实的 %APPDATA%\Nyx（跑完自动还原），耗时几分钟。
+ *   为什么默认不跑：它会动真实用户数据、还要两个版本的安装包，塞进一键回归只会让人关掉回归。
+ *   但「没跑」绝不允许静默：发版摘要里永远有一行「安装器 e2e：…」，没跑时连同可复制的命令一起打印。
+ *   失败按发版失败处理（exit 1）——包已经写进更新源但升级路径没验过，不能算发布完成。
+ *
+ * 六、--dry-run：全链路预演，只校验 / 计算 / 打印，绝不写文件、不复制、不删除。
  *   --release --dry-run：照常算 sha256、差分块与所有目标路径，打印「预演摘要」；
  *   --restore --dry-run：只校验归档完整性与签名，打印将回写的文件，不复制；
  *   --prune --dry-run / --clean-updates --dry-run：只列不删；
@@ -576,6 +584,81 @@ function listArchivedReleases(archiveRoot) {
 }
 
 /**
+ * 安装器端到端门禁（候选⑤）。
+ *
+ * 为什么不进 `npm run verify`：它要管理员权限、会临时移走真实的
+ * `%APPDATA%\Nyx`、还要两个版本的安装包，跑一次好几分钟 —— 塞进一键回归
+ * 只会让人关掉回归。它只跟发版绑在一起。
+ *
+ * 但「不发命令就当测过」是造假，所以没有 `--with-installer-test` 时必须
+ * 把「没跑」和「怎么跑」打印在发版摘要里，让人看得见。
+ */
+function findOlderInstaller(setupPath, version) {
+  const candidates = [];
+  const distDir = path.dirname(setupPath);
+  try {
+    for (const name of fs.readdirSync(distDir)) {
+      const match = /^Nyx-Setup-(\d+\.\d+\.\d+)\.exe$/i.exec(name);
+      if (!match || match[1] === version) continue;
+      candidates.push({ version: match[1], file: path.join(distDir, name) });
+    }
+  } catch {
+    /* dist 读不到就只看留档 */
+  }
+  const archiveRoot = path.resolve(readArg('archive', DEFAULT_ARCHIVE_ROOT));
+  try {
+    for (const name of fs.readdirSync(archiveRoot)) {
+      const match = /^Nyx-Setup-(\d+\.\d+\.\d+)\.exe$/i.exec(name);
+      if (!match || match[1] === version) continue;
+      candidates.push({ version: match[1], file: path.join(archiveRoot, name) });
+    }
+  } catch {
+    /* 留档不存在也不算错 */
+  }
+  return candidates
+    .filter((item) => compareVersion(item.version, version) < 0 && fs.existsSync(item.file))
+    .sort((a, b) => compareVersion(b.version, a.version))[0] || null;
+}
+
+function installerE2eGate(setupPath, version) {
+  const scriptPath = path.join(__dirname, 'test-installer-e2e.js');
+  const wantRun = hasFlag('with-installer-test');
+  const older = findOlderInstaller(setupPath, version);
+
+  const manualCmd = older
+    ? `node scripts/test-installer-e2e.js --installer=${setupPath} --from=${older.file}`
+    : `node scripts/test-installer-e2e.js --installer=${setupPath}`;
+
+  if (!wantRun) {
+    return {
+      ran: false,
+      ok: null,
+      reason: '本次没跑（发版默认不跑：要管理员权限、会临时移动真实用户数据）',
+      manualCmd,
+      olderVersion: older ? older.version : '',
+    };
+  }
+  if (!fs.existsSync(scriptPath)) {
+    return { ran: false, ok: false, reason: `找不到 ${scriptPath}`, manualCmd, olderVersion: '' };
+  }
+
+  const args = [scriptPath, `--installer=${setupPath}`];
+  if (older) args.push(`--from=${older.file}`);
+  console.log('');
+  info(`运行安装器端到端（真实安装/升级/降级/卸载，需管理员权限，几分钟）`);
+  console.log(`  命令：node ${args.map((item) => (item.includes(' ') ? `"${item}"` : item)).join(' ')}`);
+  const result = spawnSync(process.execPath, args, { stdio: 'inherit', windowsHide: false });
+  const ok = result.status === 0;
+  if (!ok) {
+    fail(
+      `安装器端到端没通过（exit ${result.status === null ? 'null' : result.status}）——` +
+        '安装包已经写进更新源，但升级路径没有被验证过；先修，别当作已发布。',
+    );
+  }
+  return { ran: true, ok, reason: '已运行并全部通过', manualCmd, olderVersion: older ? older.version : '' };
+}
+
+/**
  * 清理旧留档：保留版本号最大的 keep 份，其余删除。
  * 返回 { kept, removed, freed }，供发版的「发布摘要」引用；清理日志逐条打印。
  */
@@ -1003,6 +1086,11 @@ function releaseDryRun() {
       console.log(`    ${action.order}. ${action.label}：${action.to}（${sizeText(action.size)}）`);
     });
     console.log('');
+    const olderForDry = findOlderInstaller(setupPath, version);
+    console.log(
+      '  安装器 e2e：预演不运行（真实安装会移动 %APPDATA%\\Nyx，预演阶段一律不碰）' +
+        (olderForDry ? `；要用 ${olderForDry.version} 当升级基线` : '；dist / 留档里没有更旧的安装包，只能测全新安装'),
+    );
     console.log(`  预演摘要 ：共 ${actions.length} 个写入/复制动作，合计约 ${humanSize(totalBytes)}；未做任何改动。`);
 
     if (json) {
@@ -1101,6 +1189,9 @@ function releaseMode() {
   // ===== 发布者签名状态（只告警不中断，发版不该被签名环境卡住）=====
   const signature = logSignature(checkSignature(setupPath));
 
+  // ===== 安装器端到端（候选⑤：门禁）=====
+  const e2e = installerE2eGate(setupPath, version);
+
   // ===== 跟随发版一起清理留档（--release --prune）=====
   let pruneResult = null;
   if (hasFlag('prune')) {
@@ -1137,6 +1228,14 @@ function releaseMode() {
           ? `，删除 ${pruneResult.removed.length} 份（释放 ${humanSize(pruneResult.freed)}）`
           : '，无删除'),
     );
+  }
+  console.log(
+    `    安装器 e2e：${e2e.ran ? '已运行并通过' : e2e.reason}` +
+      (e2e.olderVersion ? `（升级基线 ${e2e.olderVersion}）` : ''),
+  );
+  if (!e2e.ran) {
+    console.log('                需要时这样跑：');
+    console.log(`                  ${e2e.manualCmd}`);
   }
 }
 
