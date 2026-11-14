@@ -57,6 +57,7 @@ const { TabManager, normalizeInput } = require('./core/tabs');
 const { createActionRunner } = require('./core/actions');
 // 统一动作通道（清单 C）：所有 agent 动作唯一入口，权限/确认/留痕/急停都从这里过
 const { createDispatcher } = require('./core/agent-dispatch');
+const { AgentAudit, toCsv } = require('./core/agent-audit');
 const { getRiskLog } = require('./core/risk-guard');
 const { startHttpApi } = require('./api/http-api');
 const { createModeEventLog } = require('./core/mode-events');
@@ -153,6 +154,14 @@ const THEME_BG = { ink: '#0c0a09', aurora: '#080b16', paper: '#f5f1e8', quiet: '
 const MAX_TABS = Math.max(1, Number(process.env.NYX_MAX_TABS || 12));
 /** 恐慌清场快捷键 */
 const PANIC_SHORTCUT = process.env.NYX_PANIC_SHORTCUT || 'CommandOrControl+Shift+X';
+/**
+ * agent 紧急停止快捷键（清单 D）。
+ *
+ * 必须是**全局**热键：agent 动作在后台标签里跑时，主窗口可能根本不在前台，
+ * 用户需要一个「不看界面也能刹车」的入口。与恐慌清场（关窗口清存储）分开：
+ * 急停只停 agent，不动用户的页面与数据。
+ */
+const AGENT_STOP_SHORTCUT = process.env.NYX_AGENT_STOP_SHORTCUT || 'CommandOrControl+Alt+X';
 /**
  * 新标签初始地址（清单 B1）。
  *
@@ -285,6 +294,13 @@ const runtime = {
    * 留痕（D）、急停（D）、三层授权（E）、双模（A）都挂在这个对象上。
    */
   agentDispatcher: null,
+  /** agent 审计（清单 D）：动作留痕的唯一出口，通道的 audit 回调往这里写 */
+  agentAudit: null,
+  /** agent 是否已被紧急停止（停止后拒绝一切新动作，直到手动恢复） */
+  agentStopped: false,
+  /** 停止原因与时间，给界面与诊断用 */
+  agentStopReason: '',
+  agentStopAt: 0,
   /** agent 接入模式（清单 A）：builtin 进程内 / external 外部 CDP；默认内置 */
   agentMode: 'builtin',
   /** 下载中心窗口（独立 BrowserWindow） */
@@ -830,6 +846,7 @@ async function bootstrap() {
   createMainWindow();
   createTray();
   registerPanicShortcut();
+  registerAgentStopShortcut();
 
   await startLocalApi();
 
@@ -3346,6 +3363,8 @@ function registerIpc() {
   // 主界面加载失败页（A4）：重试 / 跳诊断 / 复制详情
   registerErrorPageIpc();
   registerDownloadsIpc();
+  // agent 审计面与急停（D）
+  registerAgentAuditIpc();
 
   registerUpdateIpc();
 
@@ -6971,6 +6990,28 @@ function registerPanicShortcut() {
 }
 
 /**
+ * agent 急停快捷键（清单 D）。
+ *
+ * 注册失败不能静默：那样用户以为有热键、按下去没反应，比没有更糟。
+ * 所以失败时既打日志、也记诊断、还在工具栏按钮的 title 里去掉热键提示（由界面读 status）。
+ */
+function registerAgentStopShortcut() {
+  const ok = globalShortcut.register(AGENT_STOP_SHORTCUT, () => {
+    stopAgent('快捷键紧急停止');
+  });
+  runtime.agentStopShortcutOk = ok;
+  if (ok) {
+    console.log(`[Nyx] agent 急停快捷键：${AGENT_STOP_SHORTCUT}`);
+  } else {
+    console.warn(`[Nyx] agent 急停快捷键注册失败（${AGENT_STOP_SHORTCUT}），可能已被其他程序占用；工具栏按钮仍可用`);
+    diagnostics.warn('AGENT_STOP_SHORTCUT_FAILED', 'agent 急停快捷键注册失败', {
+      shortcut: AGENT_STOP_SHORTCUT,
+    });
+  }
+  return ok;
+}
+
+/**
  * 恐慌清场：
  *   关闭全部标签 → 清空所有分区存储与缓存 → 销毁窗口与托盘 → 退出进程。
  */
@@ -7141,29 +7182,211 @@ async function confirmAgentAction(request) {
 }
 
 /**
- * 审计写入（清单 D 会换成环形缓冲 + jsonl + 审计面）。
- * 现在先进诊断日志：至少每次动作都有痕迹、可导出，不会静默。
+ * 审计写入（清单 D）：
+ *   1. 进 AgentAudit（内存环形缓冲 + `<userData>/agent-audit.jsonl` 追加），界面与导出都读它；
+ *   2. 同时进诊断日志，方便 C1 的诊断包一起带走。
+ * 两条路都要走：审计面挂了还有诊断，诊断挂了审计落盘还在。
  */
 function recordAgentAudit(entry) {
-  const code = entry && entry.code ? entry.code : entry && entry.rule ? entry.rule : '';
-  const summary = `${entry.type || '未知动作'} · ${entry.decision || '?'}${code ? ` · ${code}` : ''}`;
+  const record = entry || {};
+  if (runtime.agentAudit) runtime.agentAudit.record(record);
+  const code = record.code ? record.code : record.rule ? record.rule : '';
+  const summary = `${record.type || '未知动作'} · ${record.decision || '?'}${code ? ` · ${code}` : ''}`;
   const payload = {
-    id: entry.id,
-    stage: entry.stage,
-    site: entry.site || '',
-    target: entry.target || '',
-    ok: entry.ok !== false,
-    error: entry.error || '',
-    elapsedMs: entry.elapsedMs || 0,
-    confirmedBy: entry.confirmedBy || '',
-    sensitive: entry.sensitive === true,
+    id: record.id,
+    stage: record.stage,
+    site: record.site || '',
+    target: record.target || '',
+    ok: record.ok !== false,
+    error: record.error || '',
+    elapsedMs: record.elapsedMs || 0,
+    confirmedBy: record.confirmedBy || '',
+    sensitive: record.sensitive === true,
   };
-  if (entry.ok === false) diagnostics.warn('AGENT_ACTION', summary, payload);
+  if (record.ok === false) diagnostics.warn('AGENT_ACTION', summary, payload);
   else diagnostics.info('AGENT_ACTION', summary, payload);
+}
+
+/** 急停状态快照：界面角标、设置页、诊断都读这一份 */
+function agentStatusPayload() {
+  const dispatcher = runtime.agentDispatcher;
+  const inner = dispatcher && typeof dispatcher.status === 'function' ? dispatcher.status() : null;
+  return {
+    ok: true,
+    stopped: runtime.agentStopped === true,
+    stopReason: runtime.agentStopReason || '',
+    stopAt: runtime.agentStopAt || 0,
+    stopShortcut: AGENT_STOP_SHORTCUT,
+    mode: runtime.agentMode || 'builtin',
+    channel: inner || null,
+    audit: runtime.agentAudit ? runtime.agentAudit.stats() : null,
+  };
+}
+
+/** 把急停状态推给外壳与设置页（设置页是主窗口里的标签，同一个 webContents 通道） */
+function pushAgentStatus() {
+  const payload = agentStatusPayload();
+  try {
+    const win = runtime.mainWindow;
+    if (win && !win.isDestroyed() && win.webContents) win.webContents.send('nyx:agent:status', payload);
+  } catch (err) {
+    console.warn('[Nyx] 急停状态推送失败：', err && err.message ? err.message : err);
+  }
+  return payload;
+}
+
+/**
+ * 紧急停止（清单 D 的「真刹车」）：
+ *   1. 中断正在执行的动作（AbortSignal）；
+ *   2. 让「等待人工确认」立刻失败，不等超时；
+ *   3. 会话标记 stopped，之后所有新动作一律被拒不执行；
+ *   4. 前台立刻看得见（工具栏常驻按钮 + 通知 + 诊断）。
+ * 诚实边界：单条 executeJavaScript 在 V8 里掐不断，所以只能保证「不再派发下一条」。
+ */
+function stopAgent(reason) {
+  const why = typeof reason === 'string' && reason.trim() ? reason.trim() : '手动紧急停止';
+  const before = runtime.agentStopped === true;
+  runtime.agentStopped = true;
+  runtime.agentStopReason = why;
+  runtime.agentStopAt = Date.now();
+  let aborted = 0;
+  try {
+    if (runtime.agentDispatcher) {
+      const result = runtime.agentDispatcher.cancelAll(why);
+      aborted = result && result.abortedInFlight ? result.abortedInFlight : 0;
+    }
+  } catch (err) {
+    diagnostics.error('AGENT_STOP_FAILED', '急停调用出错', { error: err && err.message });
+  }
+  diagnostics.warn('AGENT_STOPPED', `agent 已停止：${why}`, { aborted, alreadyStopped: before });
+  pushAgentStatus();
+  notifyNotice({
+    level: 'error',
+    code: 'AGENT_STOPPED',
+    title: '已停止 agent 操作',
+    message: `${why}。正在执行的动作已中断，之后 agent 发来的动作一律拒绝；确认安全后可点工具栏的「agent 已停止」按钮恢复。`,
+  });
+  return { ok: true, stopped: true, reason: why, aborted, at: runtime.agentStopAt };
+}
+
+/** 恢复：清停止标记，换新的 AbortController，让 agent 可以继续发动作 */
+function resumeAgent() {
+  if (runtime.agentDispatcher) runtime.agentDispatcher.resume();
+  const was = runtime.agentStopped === true;
+  runtime.agentStopped = false;
+  runtime.agentStopReason = '';
+  runtime.agentStopAt = 0;
+  diagnostics.warn('AGENT_RESUMED', 'agent 操作已恢复', { wasStopped: was });
+  pushAgentStatus();
+  if (was) {
+    notifyNotice({
+      level: 'warn',
+      code: 'AGENT_RESUMED',
+      title: 'agent 操作已恢复',
+      message: '之后再来的动作会照常走权限判定与人工确认。',
+    });
+  }
+  return { ok: true, stopped: false };
+}
+
+/**
+ * agent 审计面 + 急停的 IPC（清单 D）。
+ *
+ * 导出格式只做两件：CSV（给人看，Excel 能开）与 JSON（给机器/留档）。
+ * 落点：给了 payload.path 就直接写（自动化测试用），否则弹保存框，
+ * 弹框被取消要如实返回 cancelled，不能假装成功。
+ */
+function registerAgentAuditIpc() {
+  ipcMain.handle('nyx:agent:status', () => agentStatusPayload());
+
+  ipcMain.handle('nyx:agent:audit', (_event, payload) => {
+    if (!runtime.agentAudit) {
+      return { ok: false, error: '审计还没准备好（agent 通道未启动）', rows: [], total: 0 };
+    }
+    try {
+      const result = runtime.agentAudit.list(payload || {});
+      return { ...result, stats: runtime.agentAudit.stats(), agent: agentStatusPayload() };
+    } catch (err) {
+      diagnostics.error('AGENT_AUDIT_LIST_FAILED', '读取审计记录失败', { error: err && err.message });
+      return { ok: false, error: `读取审计记录失败：${err && err.message ? err.message : err}`, rows: [], total: 0 };
+    }
+  });
+
+  ipcMain.handle('nyx:agent:audit-export', async (_event, payload) => {
+    if (!runtime.agentAudit) {
+      return { ok: false, error: '审计还没准备好（agent 通道未启动）' };
+    }
+    const options = payload && typeof payload === 'object' ? payload : {};
+    const format = options.format === 'json' ? 'json' : 'csv';
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    let dest = typeof options.path === 'string' && options.path ? options.path : '';
+    if (!dest) {
+      const win = runtime.mainWindow;
+      const picked = await dialog.showSaveDialog(win, {
+        title: '导出 agent 审计记录',
+        defaultPath: path.join(app.getPath('downloads'), `Nyx-agent审计-${stamp}.${format}`),
+        filters:
+          format === 'json'
+            ? [{ name: 'JSON', extensions: ['json'] }]
+            : [{ name: 'CSV', extensions: ['csv'] }],
+        buttonLabel: '导出',
+      });
+      if (picked.canceled || !picked.filePath) {
+        return { ok: false, cancelled: true, error: '已取消导出（没有写任何文件）' };
+      }
+      dest = picked.filePath;
+    }
+    try {
+      const wanted = runtime.agentAudit.exportRows(options.filters || {});
+      const text = format === 'json' ? `${JSON.stringify({ exportedAt: new Date().toISOString(), count: wanted.count, rows: wanted.rows }, null, 2)}\n` : toCsv(wanted.rows);
+      fs.writeFileSync(dest, text, 'utf8');
+      diagnostics.info('AGENT_AUDIT_EXPORTED', `导出审计记录 ${wanted.count} 条`, { format, dest });
+      return { ok: true, format, path: dest, count: wanted.count, bytes: Buffer.byteLength(text, 'utf8') };
+    } catch (err) {
+      diagnostics.error('AGENT_AUDIT_EXPORT_FAILED', '导出审计记录失败', {
+        format,
+        dest,
+        error: err && err.message,
+      });
+      return { ok: false, error: `导出失败：${err && err.message ? err.message : err}` };
+    }
+  });
+
+  ipcMain.handle('nyx:agent:audit-clear', () => {
+    if (!runtime.agentAudit) return { ok: false, error: '审计还没准备好（agent 通道未启动）' };
+    const result = runtime.agentAudit.clear();
+    diagnostics.warn('AGENT_AUDIT_CLEARED', '清空内存里的审计缓冲', { cleared: result.cleared });
+    return { ...result, stats: runtime.agentAudit.stats() };
+  });
+
+  ipcMain.handle('nyx:agent:stop', (_event, payload) => {
+    const reason = payload && typeof payload.reason === 'string' ? payload.reason : '';
+    return stopAgent(reason || '界面按钮紧急停止');
+  });
+
+  ipcMain.handle('nyx:agent:resume', () => resumeAgent());
 }
 
 async function startLocalApi() {
   runtime.apiToken = ensureApiToken();
+
+  // 审计面（清单 D）：内存环形缓冲给界面，jsonl 落盘给事后翻账。
+  // 落盘走 fs.appendFileSync，失败只会计数 + 打印，不会让动作本身失败。
+  const auditFile = userDataFile('agent-audit.jsonl');
+  runtime.agentAudit = new AgentAudit({
+    filePath: auditFile,
+    appendFile: (target, text) => {
+      if (!text) return;
+      fs.appendFileSync(target, text);
+    },
+    statSize: (target) => {
+      try {
+        return fs.statSync(target).size;
+      } catch {
+        return 0;
+      }
+    },
+  });
 
   const runner = createActionRunner({
     getTabManager: () => runtime.tabManager,

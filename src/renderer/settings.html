@@ -31,6 +31,7 @@
           <li><button type="button" class="nav-item" data-sec="downloads">下载</button></li>
           <li><button type="button" class="nav-item" data-sec="extensions">扩展插件</button></li>
           <li><button type="button" class="nav-item" data-sec="diagnostics">诊断</button></li>
+          <li><button type="button" class="nav-item" data-sec="agent">Agent 访问</button></li>
           <li><button type="button" class="nav-item" data-sec="about">关于与更新</button></li>
         </ul>
 
@@ -830,6 +831,94 @@
               <div class="info-body">
                 <p class="hint" id="diag-empty" hidden>暂无记录。下次出现异常时会自动记到这里。</p>
                 <div class="diag-list" id="diag-list"></div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="sec-panel" data-sec="agent">
+          <header class="sec-head">
+            <h2>Agent 访问</h2>
+            <p>agent 的每一次动作都会过同一条通道：先判权限、再问人、然后留痕、最后执行。这里是留痕的去处，也是刹车。</p>
+          </header>
+
+          <div class="sec-scroll">
+            <section class="info-card">
+              <div class="info-head">
+                <h3>紧急停止</h3>
+                <span class="badge" id="agent-badge">—</span>
+              </div>
+              <div class="info-body">
+                <p class="hint" id="agent-stop-hint">
+                  急停会中断正在执行的动作，并拒绝之后所有新动作，直到你手动恢复。已发出的单条脚本无法在浏览器内核里中途掐断，
+                  所以最坏情况是那一条跑完，但不会再有下一条。
+                </p>
+                <div class="sec-actions">
+                  <button type="button" class="btn btn-primary" id="btn-agent-stop">立即停止 agent</button>
+                  <button type="button" class="btn" id="btn-agent-resume">恢复 agent 操作</button>
+                </div>
+                <p class="hint" id="agent-stop-status" role="status" aria-live="polite"></p>
+              </div>
+            </section>
+
+            <section class="info-card">
+              <div class="info-head">
+                <h3>动作留痕</h3>
+                <span class="badge" id="agent-audit-count">—</span>
+              </div>
+              <div class="info-body">
+                <p class="hint" id="agent-audit-hint">
+                  记录时间、站点、动作、判定（放行 / 人工确认 / 拒绝）、结果与耗时。输入内容与地址里的查询串已脱敏。
+                </p>
+                <div class="agent-filters">
+                  <label class="agent-field">
+                    <span>动作</span>
+                    <select id="agent-filter-type">
+                      <option value="">全部</option>
+                      <option value="navigate">打开网址</option>
+                      <option value="readPage">读取页面</option>
+                      <option value="click">点击</option>
+                      <option value="type">输入文字</option>
+                      <option value="screenshot">截图</option>
+                      <option value="executeJS">执行脚本</option>
+                      <option value="extractText">提取文字</option>
+                      <option value="state">读状态</option>
+                      <option value="riskLog">读风险日志</option>
+                      <option value="download">下载</option>
+                    </select>
+                  </label>
+                  <label class="agent-field">
+                    <span>判定</span>
+                    <select id="agent-filter-decision">
+                      <option value="">全部</option>
+                      <option value="allow">放行</option>
+                      <option value="confirmed">人工确认后放行</option>
+                      <option value="deny">拒绝</option>
+                      <option value="observed">旁观记录</option>
+                    </select>
+                  </label>
+                  <label class="agent-field">
+                    <span>站点</span>
+                    <input type="text" id="agent-filter-site" placeholder="域名，可留空" />
+                  </label>
+                  <label class="agent-field">
+                    <span>关键词</span>
+                    <input type="text" id="agent-filter-keyword" placeholder="目标或错误" />
+                  </label>
+                  <label class="agent-field">
+                    <span>只看失败</span>
+                    <input type="checkbox" id="agent-filter-failed" />
+                  </label>
+                </div>
+                <div class="sec-actions">
+                  <button type="button" class="btn" id="btn-agent-refresh">刷新</button>
+                  <button type="button" class="btn" id="btn-agent-export-csv">导出 CSV</button>
+                  <button type="button" class="btn" id="btn-agent-export-json">导出 JSON</button>
+                  <button type="button" class="btn btn-ghost" id="btn-agent-clear">清空（仅内存）</button>
+                </div>
+                <p class="hint" id="agent-audit-empty" hidden>还没有动作记录。agent 一动手就会出现在这里。</p>
+                <div class="diag-list" id="agent-audit-list"></div>
+                <p class="hint" id="agent-audit-status" role="status" aria-live="polite"></p>
               </div>
             </section>
           </div>

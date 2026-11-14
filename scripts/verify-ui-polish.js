@@ -2473,6 +2473,110 @@ async function main() {
       JSON.stringify({ code: agentPage.bogusCode, status: agentPage.bogusStatus, error: agentPage.bogusError.slice(0, 80) }),
     );
 
+    /* ---------- D（手与刹车）：外壳常驻急停 + 审计面与导出 ---------- */
+    const agentStop = await (async () => {
+      try {
+        const raw = await shell.eval(`(async () => {
+          const btn = document.getElementById('btn-agent-stop');
+          if (!btn) return { missing: true };
+          const before = await window.nyx.agentStatus();
+          btn.click();
+          let stopped = null;
+          for (let i = 0; i < 24; i += 1) {
+            await new Promise((r) => setTimeout(r, 150));
+            stopped = await window.nyx.agentStatus();
+            if (stopped && stopped.stopped) break;
+          }
+          const textAfterStop = (document.getElementById('agent-stop-text') || {}).textContent || '';
+          const hasStoppedClass = btn.classList.contains('is-stopped');
+          const titleAfterStop = btn.title || '';
+          btn.click();
+          let resumed = null;
+          for (let i = 0; i < 24; i += 1) {
+            await new Promise((r) => setTimeout(r, 150));
+            resumed = await window.nyx.agentStatus();
+            if (resumed && !resumed.stopped) break;
+          }
+          return {
+            exists: true,
+            beforeStopped: Boolean(before && before.stopped),
+            stopped: Boolean(stopped && stopped.stopped),
+            reason: (stopped && stopped.stopReason) || '',
+            textAfterStop,
+            hasStoppedClass,
+            titleAfterStop,
+            resumedStopped: Boolean(resumed && resumed.stopped),
+            shortcut: (before && before.stopShortcut) || '',
+          };
+        })()`);
+        return typeof raw === 'string' ? JSON.parse(raw) : raw;
+      } catch (err) {
+        return { error: err.message };
+      }
+    })();
+    check(
+      '主界面有常驻急停按钮：点一下 agent 真的停住并变成"已停"，再点一下恢复（D）',
+      agentStop.exists === true
+        && agentStop.beforeStopped === false
+        && agentStop.stopped === true
+        && agentStop.textAfterStop.includes('已停')
+        && agentStop.hasStoppedClass === true
+        && agentStop.resumedStopped === false,
+      JSON.stringify({ stopped: agentStop.stopped, text: agentStop.textAfterStop, resumed: agentStop.resumedStopped, shortcut: agentStop.shortcut, reason: agentStop.reason }),
+    );
+
+    const auditExportPath = path.join(workDir, 'agent-audit-export.csv');
+    const agentAuditView = await (async () => {
+      try {
+        const raw = await shell.eval(`(async () => {
+          const list = await window.nyx.agentAudit({ limit: 20 });
+          const exp = await window.nyx.agentAuditExport({ format: 'csv', path: ${JSON.stringify(auditExportPath)} });
+          const stats = (list && list.stats) || {};
+          const rows = (list && list.rows) || [];
+          return {
+            ok: Boolean(list && list.ok !== false),
+            count: rows.length,
+            total: stats.total || 0,
+            types: rows.map((r) => r.typeLabel || r.type).slice(0, 6),
+            decisions: rows.map((r) => r.decisionLabel || r.decision).slice(0, 6),
+            hasTime: rows.every((r) => typeof r.time === 'string' && r.time.length >= 8),
+            exportOk: Boolean(exp && exp.ok),
+            exportCount: (exp && exp.count) || 0,
+            exportPath: (exp && exp.path) || '',
+            exportError: (exp && exp.error) || '',
+          };
+        })()`);
+        return typeof raw === 'string' ? JSON.parse(raw) : raw;
+      } catch (err) {
+        return { error: err.message };
+      }
+    })();
+    let auditFileText = '';
+    try {
+      auditFileText = fs.readFileSync(auditExportPath, 'utf8');
+    } catch (err) {
+      auditFileText = '';
+    }
+    check(
+      '审计面看得见刚才的动作（含时间与判定），并能导出成带表头的 CSV（D）',
+      agentAuditView.ok === true
+        && agentAuditView.count >= 3
+        && agentAuditView.hasTime === true
+        && agentAuditView.exportOk === true
+        && agentAuditView.exportCount >= 3
+        && auditFileText.startsWith('"时间","动作ID"')
+        && /读取页面|点击/.test(auditFileText),
+      JSON.stringify({
+        count: agentAuditView.count,
+        total: agentAuditView.total,
+        types: agentAuditView.types,
+        decisions: agentAuditView.decisions,
+        exportCount: agentAuditView.exportCount,
+        exportError: agentAuditView.exportError,
+        csvHead: auditFileText.slice(0, 32),
+      }),
+    );
+
     /* ---------- 运行时无脚本异常 ---------- */
     const shellErrors = shell.exceptions();
     /* ---------- B3（设置页侧）：卡片 / 未勾确认被拦 / 勾选后可改可回 ---------- */

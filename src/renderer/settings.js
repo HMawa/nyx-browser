@@ -18,6 +18,7 @@
     downloads: '下载',
     extensions: '扩展插件',
     diagnostics: '诊断',
+    agent: 'Agent 访问',
     about: '关于与更新',
   };
 
@@ -273,6 +274,10 @@
 
     // 通知「网络与代理」分区脚本：它据此按需加载代理数据，且只在自身分区可见时才写状态栏
     document.dispatchEvent(new CustomEvent('nyx:section-change', { detail: section }));
+
+    if (section === 'agent') {
+      loadAgentSection();
+    }
 
     if (section === 'privacy') {
       if (!privacyReady) {
@@ -2843,6 +2848,249 @@ async function loadFootprint() {
     if (badge) badge.checked = ui.showLinkBadge !== false;
     if (toggle) toggle.checked = ui.showModeSwitch !== false;
   });
+
+  /* ---------------- agent 审计面与急停（清单 D） ---------------- */
+
+  let agentWired = false;
+
+  /** 从筛选控件收集条件；空值不传，免得后端把空串当成真的过滤条件 */
+  function collectAgentFilters() {
+    const out = { limit: 200 };
+    const type = byId('agent-filter-type');
+    const decision = byId('agent-filter-decision');
+    const site = byId('agent-filter-site');
+    const keyword = byId('agent-filter-keyword');
+    const failed = byId('agent-filter-failed');
+    if (type && type.value) out.type = type.value;
+    if (decision && decision.value) out.decision = decision.value;
+    if (site && site.value.trim()) out.site = site.value.trim();
+    if (keyword && keyword.value.trim()) out.keyword = keyword.value.trim();
+    if (failed && failed.checked) out.ok = false;
+    return out;
+  }
+
+  function buildAgentRow(row) {
+    const el = document.createElement('div');
+    el.className = 'agent-row';
+    if (row.ok === false) el.classList.add('is-failed');
+    el.dataset.auditId = row.id || '';
+
+    const time = document.createElement('span');
+    time.className = 'agent-time';
+    time.textContent = row.time || '—';
+    el.appendChild(time);
+
+    const type = document.createElement('span');
+    type.className = 'agent-type';
+    type.textContent = row.typeLabel || row.type || '—';
+    el.appendChild(type);
+
+    const decision = document.createElement('span');
+    decision.className = `agent-decision is-${row.decision || 'allow'}`;
+    decision.textContent = row.decisionLabel || row.decision || '—';
+    el.appendChild(decision);
+
+    const result = document.createElement('span');
+    result.className = 'agent-result';
+    const where = row.site ? `${row.site} · ` : '';
+    const target = row.target ? ` → ${row.target}` : '';
+    result.textContent = row.ok === false ? `${where}${row.error || '失败'}${target}` : `${where}成功${target}`;
+    result.title = result.textContent;
+    el.appendChild(result);
+
+    const ms = document.createElement('span');
+    ms.className = 'agent-ms';
+    ms.textContent = row.elapsedMs ? `${row.elapsedMs} ms` : '—';
+    el.appendChild(ms);
+
+    const params = document.createElement('div');
+    params.className = 'agent-params';
+    const parts = [`阶段 ${row.stageLabel || row.stage || '—'}`];
+    if (row.paramsText) parts.push(row.paramsText);
+    if (row.code) parts.push(`码 ${row.code}`);
+    if (row.rule) parts.push(`规则 ${row.rule}`);
+    params.textContent = parts.join(' · ');
+    el.appendChild(params);
+
+    return el;
+  }
+
+  async function loadAgentStatus() {
+    if (!window.nyx.agentStatus) return;
+    try {
+      const status = await window.nyx.agentStatus();
+      const badge = byId('agent-badge');
+      const hint = byId('agent-stop-status');
+      const stopBtn = byId('btn-agent-stop');
+      const resumeBtn = byId('btn-agent-resume');
+      const stopped = Boolean(status && status.stopped);
+      if (badge) {
+        badge.textContent = stopped ? '已停止' : '运行中';
+        badge.className = `badge ${stopped ? 'bad' : 'ok'}`;
+      }
+      if (hint) {
+        const shortcut = (status && status.stopShortcut) || '';
+        hint.textContent = stopped
+          ? `已停止：${(status && status.stopReason) || '手动停止'}。恢复后动作会照常走权限判定与人工确认。`
+          : `当前没有停止。全局热键 ${shortcut}，也可以点上面的按钮。`;
+        hint.className = stopped ? 'hint is-warn' : 'hint';
+      }
+      if (stopBtn) stopBtn.disabled = stopped;
+      if (resumeBtn) resumeBtn.disabled = !stopped;
+    } catch (err) {
+      const hint = byId('agent-stop-status');
+      if (hint) {
+        hint.textContent = `读取急停状态失败：${err && err.message ? err.message : err}`;
+        hint.className = 'hint is-warn';
+      }
+    }
+  }
+
+  async function loadAgentAudit() {
+    const list = byId('agent-audit-list');
+    const empty = byId('agent-audit-empty');
+    const count = byId('agent-audit-count');
+    const status = byId('agent-audit-status');
+    if (!window.nyx.agentAudit) {
+      if (status) status.textContent = '当前内核不支持读取 agent 审计记录。';
+      return;
+    }
+    if (status) {
+      status.textContent = '正在读取…';
+      status.className = 'hint';
+    }
+    try {
+      const res = await window.nyx.agentAudit(collectAgentFilters());
+      if (!res || res.ok === false) {
+        if (status) {
+          status.textContent = `读取失败：${(res && res.error) || '未知原因'}`;
+          status.className = 'hint is-warn';
+        }
+        return;
+      }
+      const rows = Array.isArray(res.rows) ? res.rows : [];
+      if (list) {
+        list.textContent = '';
+        for (const row of rows) list.appendChild(buildAgentRow(row));
+      }
+      if (empty) empty.hidden = rows.length > 0;
+      if (count) {
+        const stats = res.stats || {};
+        count.textContent = `${rows.length} 条 / 共 ${stats.total || rows.length}`;
+        count.className = `badge${stats.failed ? ' bad' : ''}`;
+      }
+      if (status) {
+        const stats = res.stats || {};
+        status.textContent =
+          `内存里保留 ${stats.kept || rows.length} 条，累计 ${stats.total || rows.length} 条` +
+          `，敏感 ${stats.sensitive || 0} 条，失败 ${stats.failed || 0} 条` +
+          `${stats.diskFailures ? `；落盘失败 ${stats.diskFailures} 次` : ''}` +
+          `。文件：${stats.filePath || '—'}`;
+        status.className = stats.diskFailures || stats.memoryFailures ? 'hint is-warn' : 'hint';
+      }
+    } catch (err) {
+      if (status) {
+        status.textContent = `读取失败：${err && err.message ? err.message : err}`;
+        status.className = 'hint is-warn';
+      }
+    }
+  }
+
+  async function exportAgentAudit(format) {
+    const status = byId('agent-audit-status');
+    if (!window.nyx.agentAuditExport) return;
+    try {
+      const res = await window.nyx.agentAuditExport({ format, filters: collectAgentFilters() });
+      if (!res || res.ok === false) {
+        if (status) {
+          status.textContent = `没有导出：${(res && res.error) || '未知原因'}`;
+          status.className = 'hint is-warn';
+        }
+        return;
+      }
+      if (status) {
+        status.textContent = `已导出 ${res.count} 条到 ${res.path}（${formatBytes(res.bytes)}）`;
+        status.className = 'hint';
+      }
+    } catch (err) {
+      if (status) {
+        status.textContent = `导出失败：${err && err.message ? err.message : err}`;
+        status.className = 'hint is-warn';
+      }
+    }
+  }
+
+  function wireAgentSection() {
+    if (agentWired) return;
+    agentWired = true;
+    const stopBtn = byId('btn-agent-stop');
+    const resumeBtn = byId('btn-agent-resume');
+    const refresh = byId('btn-agent-refresh');
+    const csv = byId('btn-agent-export-csv');
+    const json = byId('btn-agent-export-json');
+    const clear = byId('btn-agent-clear');
+    const status = byId('agent-audit-status');
+
+    if (stopBtn) {
+      stopBtn.addEventListener('click', async () => {
+        stopBtn.disabled = true;
+        const res = await window.nyx.agentStop('设置页按钮紧急停止');
+        if (res && res.ok === false && status) {
+          status.textContent = `没有停止：${res.error || '未知原因'}`;
+          status.className = 'hint is-warn';
+        }
+        await loadAgentStatus();
+        await loadAgentAudit();
+      });
+    }
+    if (resumeBtn) {
+      resumeBtn.addEventListener('click', async () => {
+        resumeBtn.disabled = true;
+        await window.nyx.agentResume();
+        await loadAgentStatus();
+      });
+    }
+    if (refresh) {
+      refresh.addEventListener('click', () => {
+        loadAgentAudit();
+      });
+    }
+    if (csv) csv.addEventListener('click', () => exportAgentAudit('csv'));
+    if (json) json.addEventListener('click', () => exportAgentAudit('json'));
+    if (clear) {
+      clear.addEventListener('click', async () => {
+        const res = await window.nyx.agentAuditClear();
+        if (status) {
+          status.textContent = res && res.ok === false
+            ? `没有清空：${res.error || '未知原因'}`
+            : `已清空内存里的 ${(res && res.cleared) || 0} 条记录（磁盘上的 jsonl 不动）`;
+          status.className = res && res.ok === false ? 'hint is-warn' : 'hint';
+        }
+        await loadAgentAudit();
+      });
+    }
+    // 筛选条件一变就重查：不做"应用"按钮，少一步操作
+    for (const id of ['agent-filter-type', 'agent-filter-decision']) {
+      const el = byId(id);
+      if (el) el.addEventListener('change', () => loadAgentAudit());
+    }
+    for (const id of ['agent-filter-site', 'agent-filter-keyword']) {
+      const el = byId(id);
+      if (el) {
+        el.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') loadAgentAudit();
+        });
+      }
+    }
+    const failed = byId('agent-filter-failed');
+    if (failed) failed.addEventListener('change', () => loadAgentAudit());
+  }
+
+  function loadAgentSection() {
+    wireAgentSection();
+    loadAgentStatus();
+    loadAgentAudit();
+  }
 
   // 主界面加载失败页（A4）的「打开诊断」会要求设置窗口直接落到「诊断」分区
   if (window.nyx.onSettingsSection) {

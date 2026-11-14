@@ -20,6 +20,10 @@ const els = {
   downloads: document.getElementById('btn-downloads'),
   dlBadge: document.getElementById('dl-badge'),
   dlBadgeLabel: document.getElementById('dl-badge-label'),
+  // agent 急停（D）
+  agentStop: document.getElementById('btn-agent-stop'),
+  agentStopDot: document.getElementById('agent-stop-dot'),
+  agentStopText: document.getElementById('agent-stop-text'),
   linkBadge: document.getElementById('link-badge'),
   modeGroup: document.getElementById('mode-group'),
   // 加载失败页（A4）
@@ -843,6 +847,70 @@ if (window.nyx.onDownloadsState) {
 if (window.nyx.listDownloads) {
   window.nyx.listDownloads().then((res) => {
     if (res && res.ok) applyDownloadsBadge({ summary: res.summary });
+  });
+}
+
+/* ---------------- agent 急停（清单 D） ---------------- */
+
+/**
+ * 工具栏上的常驻刹车。
+ *
+ * 要求（清单 D）：入口必须是「全局热键 + 主界面常驻按钮」，不能藏在菜单里。
+ * 这里的按钮在任何模式下都可见，状态由主进程推送，避免界面自己猜。
+ */
+function applyAgentStatus(payload) {
+  if (!els.agentStop) return;
+  const stopped = Boolean(payload && payload.stopped);
+  const shortcut = (payload && payload.stopShortcut) || '';
+  els.agentStop.classList.toggle('is-stopped', stopped);
+  if (els.agentStopDot) els.agentStopDot.setAttribute('aria-hidden', 'true');
+  if (els.agentStopText) els.agentStopText.textContent = stopped ? 'agent 已停' : 'agent 停止';
+  const keyHint = shortcut ? `（${shortcut}）` : '';
+  els.agentStop.title = stopped
+    ? `agent 已停止：${(payload && payload.stopReason) || '手动停止'}。点击恢复`
+    : `停止 agent 操作${keyHint}`;
+  els.agentStop.setAttribute('aria-label', stopped ? 'agent 已停止，点击恢复' : '停止 agent 操作');
+  els.agentStop.setAttribute('aria-pressed', stopped ? 'true' : 'false');
+  const audit = (payload && payload.audit) || null;
+  if (audit && typeof audit.kept === 'number' && els.agentStop.dataset) {
+    els.agentStop.dataset.auditKept = String(audit.kept);
+  }
+}
+
+async function toggleAgentStop() {
+  if (!els.agentStop) return;
+  const stopped = els.agentStop.classList.contains('is-stopped');
+  els.agentStop.disabled = true;
+  try {
+    const res = stopped
+      ? await window.nyx.agentResume()
+      : await window.nyx.agentStop('工具栏按钮紧急停止');
+    if (res && res.ok === false) {
+      showNotice({ level: 'warn', title: '没能切换 agent 状态', message: res.error || '未知原因' });
+    } else {
+      // 不要自己拼一份状态：再拉一次权威快照，避免界面与主进程不一致
+      const fresh = await window.nyx.agentStatus();
+      if (fresh && fresh.ok) applyAgentStatus(fresh);
+    }
+  } catch (err) {
+    showNotice({ level: 'warn', title: '没能切换 agent 状态', message: String(err && err.message ? err.message : err) });
+  } finally {
+    els.agentStop.disabled = false;
+  }
+}
+
+if (els.agentStop) {
+  els.agentStop.addEventListener('click', () => {
+    toggleAgentStop();
+  });
+}
+
+if (window.nyx.onAgentStatus) {
+  window.nyx.onAgentStatus(applyAgentStatus);
+}
+if (window.nyx.agentStatus) {
+  window.nyx.agentStatus().then((res) => {
+    if (res && res.ok) applyAgentStatus(res);
   });
 }
 

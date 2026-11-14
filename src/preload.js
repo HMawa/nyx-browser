@@ -120,6 +120,33 @@ contextBridge.exposeInMainWorld('nyx', {
   /** 用户对「无法确认是否在录屏」的显式确认（10 分钟内有效） */
   screenWatchAck: () => ipcRenderer.invoke('nyx:screen:ack'),
 
+  /** agent 急停状态（D）：stopped / 原因 / 热键 / 审计统计 */
+  agentStatus: () => ipcRenderer.invoke('nyx:agent:status'),
+
+  /** agent 审计记录（D）：时间/站点/动作/判定/结果/耗时/参数摘要，支持筛选 */
+  agentAudit: (filters) => ipcRenderer.invoke('nyx:agent:audit', filters || {}),
+
+  /** 导出审计记录（D）：format='csv'|'json'，给了 path 就直接写 */
+  agentAuditExport: (payload) => ipcRenderer.invoke('nyx:agent:audit-export', payload || {}),
+
+  /** 清空内存里的审计缓冲（磁盘 jsonl 不动） */
+  agentAuditClear: () => ipcRenderer.invoke('nyx:agent:audit-clear'),
+
+  /** 紧急停止（D）：中断在途动作并拒绝后续，直到 resume */
+  agentStop: (reason) => ipcRenderer.invoke('nyx:agent:stop', { reason: String(reason || '') }),
+
+  /** 恢复 agent 操作 */
+  agentResume: () => ipcRenderer.invoke('nyx:agent:resume'),
+
+  /** 订阅急停状态推送（返回取消订阅） */
+  onAgentStatus: (handler) => {
+    const listener = (_event, payload) => {
+      if (typeof handler === 'function') handler(payload);
+    };
+    ipcRenderer.on('nyx:agent:status', listener);
+    return () => ipcRenderer.removeListener('nyx:agent:status', listener);
+  },
+
 
   /** 权限决策轨迹（默认最近 50 条） */
   listPermissionDecisions: (limit) => ipcRenderer.invoke('nyx:permissions:list', limit),

@@ -247,6 +247,65 @@ body {
   color: var(--bg-shell);
 }
 
+/* agent 急停（清单 D）：常驻可见，正常时低调、停止后变成明确的红 */
+.icon-btn.agent-stop {
+  width: auto;
+  min-width: 0;
+  padding: 0 9px 0 8px;
+  gap: 6px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  transition:
+    color 0.16s ease,
+    border-color 0.16s ease,
+    background 0.16s ease;
+}
+
+.icon-btn.agent-stop:hover {
+  color: var(--text-main);
+  border-color: var(--border-strong);
+}
+
+.icon-btn.agent-stop .agent-stop-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-faint) 70%, transparent);
+  flex: none;
+}
+
+.icon-btn.agent-stop .agent-stop-text {
+  white-space: nowrap;
+}
+
+/* 已停止：红底红边 + 实心点，表示"刹车已经踩下去了" */
+.icon-btn.agent-stop.is-stopped {
+  color: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.icon-btn.agent-stop.is-stopped .agent-stop-dot {
+  background: var(--danger);
+}
+
+.icon-btn.agent-stop:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+  box-shadow: var(--ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-btn.agent-stop {
+    transition: none;
+  }
+}
+
 /* 只给读屏用的文本：视觉上不占位 */
 .sr-only {
   position: absolute;

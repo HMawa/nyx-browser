@@ -504,6 +504,128 @@
   color: var(--text-main);
 }
 
+/* agent 审计面（清单 D）：筛选条 + 记录行 */
+.agent-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px 10px;
+  margin: 10px 0 12px;
+}
+
+.agent-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.agent-field > span {
+  letter-spacing: 0.02em;
+}
+
+.agent-field select,
+.agent-field input[type='text'] {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-input);
+  color: var(--text-main);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.agent-field input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  align-self: flex-start;
+  accent-color: var(--accent);
+}
+
+.agent-field select:focus-visible,
+.agent-field input:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+}
+
+/* 审计行：时间 / 动作 / 判定 / 结果 / 耗时 / 站点 + 一行参数摘要 */
+.agent-row {
+  display: grid;
+  grid-template-columns: 118px 96px 84px minmax(0, 1fr) 62px;
+  gap: 8px;
+  align-items: baseline;
+  padding: 7px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--bg-code) 55%, transparent);
+  font-size: 12px;
+}
+
+.agent-row + .agent-row {
+  margin-top: 6px;
+}
+
+.agent-row .agent-time,
+.agent-row .agent-type,
+.agent-row .agent-result,
+.agent-row .agent-ms {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-row .agent-type {
+  color: var(--text-main);
+}
+
+.agent-row .agent-result {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-row .agent-ms {
+  text-align: right;
+}
+
+.agent-decision {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.agent-decision.is-allow {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent-soft);
+}
+
+.agent-decision.is-confirmed {
+  border-color: color-mix(in srgb, var(--accent) 65%, transparent);
+  color: var(--text-main);
+}
+
+.agent-decision.is-deny {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  color: var(--danger-soft);
+}
+
+.agent-row.is-failed .agent-result {
+  color: var(--danger-soft);
+}
+
+.agent-params {
+  grid-column: 1 / -1;
+  color: var(--text-faint);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+  word-break: break-all;
+}
+
 /* 置顶导入 / 导出行（v1.15.0）：按钮与说明文字同一行时垂直居中，说明不挤压按钮 */
 #pinned-io-row {
   align-items: center;
