@@ -150,6 +150,29 @@ check('12. 静态守卫：提示推送必须等外壳就绪（不许直接 send 
   return { ok, detail: { 命中: ok } };
 });
 
+check('13. 断网时不把链路改成直连：普通模式也只报 offline（G 离线/在线）', () => {
+  const d = decideProxyFailureAction(normalDown({ online: false }));
+  const n = d.notice || {};
+  const ok =
+    d.action === ACTIONS.offline &&
+    d.reason === 'network-offline' &&
+    n.code === 'NETWORK_OFFLINE' &&
+    typeof n.message === 'string' &&
+    n.message.includes('断网') &&
+    n.message.includes('不是代理坏了');
+  return { ok, detail: { action: d.action, code: n.code } };
+});
+
+check('14. 断网时隐私模式同样保持代理、不降级（说法与普通模式不同）', () => {
+  const priv = decideProxyFailureAction(privateDown({ online: false }));
+  const ok =
+    priv.action === ACTIONS.offline &&
+    typeof priv.notice.message === 'string' &&
+    priv.notice.message.includes('保持代理不变') &&
+    !String(priv.notice.message).includes('降级为直连');
+  return { ok, detail: { action: priv.action } };
+});
+
 const failed = results.filter((r) => !r.ok);
 console.log('');
 if (failed.length > 0) {

@@ -62,6 +62,12 @@
           <span class="sr-only" id="dl-badge-label"></span>
         </button>
 
+        <!-- 断网提示（G 的离线/在线部分）：只说明"是断网，不是代理坏了"，链路不动 -->
+        <div class="net-offline-flag" id="net-offline-flag" role="status" aria-live="polite" hidden>
+          <span class="net-offline-dot" aria-hidden="true"></span>
+          <span class="net-offline-text" id="net-offline-text">当前离线</span>
+        </div>
+
         <!-- agent 接入模式（A）：外部接入时这条标识必须常驻，不能只在切换时提示一次 -->
         <div class="agent-mode-flag" id="agent-mode-flag" role="status" aria-live="polite" hidden>
           <span class="agent-mode-dot" aria-hidden="true"></span>

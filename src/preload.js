@@ -164,6 +164,8 @@ contextBridge.exposeInMainWorld('nyx', {
   /** 标签休眠阈值（分钟，0 = 不自动休眠）：读 / 改，改完立刻生效 */
   tabSleep: () => ipcRenderer.invoke('nyx:tabs:sleep'),
   tabSleepSet: (payload) => ipcRenderer.invoke('nyx:tabs:sleep-set', payload || {}),
+  // 整机在线/离线：外壳横幅用它，别在渲染层自己猜 navigator.onLine
+  netState: () => ipcRenderer.invoke('nyx:net:state'),
 
 
   /** 权限决策轨迹（默认最近 50 条） */

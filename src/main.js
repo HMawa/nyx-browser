@@ -97,6 +97,7 @@ const {
 const { startHttpApi } = require('./api/http-api');
 const { createModeEventLog } = require('./core/mode-events');
 const { ACTIONS: LINK_GUARD_ACTIONS, isProxyFailureCode, decideProxyFailureAction } = require('./core/link-guard');
+const { networkStatePayload } = require('./core/network-state');
 const { Updater } = require('./core/updater');
 const { UiStore } = require('./core/ui-store');
 const { StartupStore } = require('./core/startup-store');
@@ -1452,6 +1453,23 @@ function recordProbe(probe) {
 }
 
 /**
+ * 整机有没有网（走 Chromium 网络栈的判断，比 ping 轻）。
+ *
+ * 为什么单独包一层：`electronNet.isOnline()` 在个别网卡切换的瞬间会抛，
+ * 而这段代码跑在"页面已经打不开"的路径上——再崩一次只会让用户看到更差的局面。
+ * 读不到就返回 true（按"有网"处理），让后面的代理探测继续做判断，
+ * 绝不因为读不到就默认"断网"从而掩盖真正的代理故障。
+ */
+function onlineState() {
+  try {
+    return electronNet.isOnline() !== false;
+  } catch (err) {
+    console.warn('[Nyx] 读取网络在线状态失败，按"有网"处理：', err.message);
+    return true;
+  }
+}
+
+/**
  * 当前出站链路快照（随 /state、nyx:state 一起下发）。
  *
  * link 直接读 sessions：主进程与 session 只有一份真相，界面不再自己推断；
@@ -1569,6 +1587,8 @@ async function handleProxyLoadFailure(info) {
   runtime.linkGuardBusy = true;
   try {
     const probe = recordProbe(await isProxyReachable());
+    // 整机有没有网：断网时"代理不可达"是必然结果，不能因此把链路改成直连。
+    const online = onlineState();
     const decision = decideProxyFailureAction({
       mode,
       link,
@@ -1578,7 +1598,35 @@ async function handleProxyLoadFailure(info) {
       port: probe.port,
       error: probe.error,
       url: info.url,
+      online,
     });
+
+    if (decision.action === LINK_GUARD_ACTIONS.offline) {
+      console.warn(
+        `[Nyx] 整机断网（代理 ${probe.host}:${probe.port} 不可达：${probe.error}），` +
+          '保持原链路不改',
+      );
+      diagnostics.warn('NETWORK_OFFLINE', {
+        host: probe.host,
+        port: probe.port,
+        error: probe.error,
+        errorCode: info.errorCode,
+        url: info.url || '',
+        mode,
+      });
+      modeEventLog.record({
+        type: 'switch',
+        from: mode,
+        to: mode,
+        changed: false,
+        ok: false,
+        code: 'NETWORK_OFFLINE',
+        message: decision.notice.message,
+      });
+      notifyNotice(decision.notice);
+      pushState(currentSnapshot());
+      return;
+    }
 
     if (decision.action === LINK_GUARD_ACTIONS.notifyPrivate) {
       console.warn(
@@ -7763,6 +7811,12 @@ function registerDigestIpc() {
   }
 
   ipcMain.handle('nyx:tabs:sleep', () => tabSleepPayload());
+
+  // 整机在线/离线状态：外壳横幅与诊断页共用同一份说法，避免两处文案不一致。
+  ipcMain.handle('nyx:net:state', () => {
+    const mode = sessions.getMode();
+    return networkStatePayload({ online: onlineState(), mode, link: sessions.getLink(mode) });
+  });
 
   ipcMain.handle('nyx:tabs:sleep-set', (_event, payload) => {
     const input = payload && typeof payload === 'object' ? payload : {};

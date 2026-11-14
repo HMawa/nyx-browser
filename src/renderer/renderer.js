@@ -27,6 +27,9 @@ const els = {
   // agent 接入模式（A）：外部接入时这条标识常驻
   agentModeFlag: document.getElementById('agent-mode-flag'),
   agentModeText: document.getElementById('agent-mode-text'),
+  // 断网提示（G 离线/在线）
+  netOfflineFlag: document.getElementById('net-offline-flag'),
+  netOfflineText: document.getElementById('net-offline-text'),
   linkBadge: document.getElementById('link-badge'),
   modeGroup: document.getElementById('mode-group'),
   // 加载失败页（A4）
@@ -915,6 +918,37 @@ function applyAgentModeFlag(modeInfo) {
     : '当前是外部接入模式：审计只覆盖经过浏览器的部分，站点授权与动作级确认管不到 CDP 的内部调用。';
 }
 
+/**
+ * 断网横幅（G 的离线/在线部分）。
+ *
+ * 只做一件事：把"是断网，不是代理坏了"说清楚。链路状态由主进程保证不动
+ * （见 link-guard 的 offline 分支），界面这边不许自己推测、也不许顺手提示
+ * "已切换直连"这类会让用户误判的文案。
+ */
+function applyNetState(payload) {
+  if (!els.netOfflineFlag) return;
+  const info = payload && typeof payload === 'object' ? payload : null;
+  const visible = Boolean(info) && info.visible === true;
+  els.netOfflineFlag.hidden = !visible;
+  if (!visible) {
+    els.netOfflineFlag.removeAttribute('title');
+    return;
+  }
+  if (els.netOfflineText) els.netOfflineText.textContent = info.text || '当前离线';
+  els.netOfflineFlag.title = info.title || '整机没有网络：页面打不开是网络断了，不是代理坏了。';
+}
+
+async function refreshNetState() {
+  try {
+    const res = await window.nyx.netState();
+    if (res && res.ok) applyNetState(res);
+  } catch (err) {
+    // 读不到在线状态：不弹错误（用户正在断网时最不需要的就是再多一个错误框），
+    // 只在控制台留痕，横幅保持原样。
+    console.warn('[Nyx] 读取网络状态失败：', String(err && err.message ? err.message : err));
+  }
+}
+
 async function toggleAgentStop() {
   if (!els.agentStop) return;
   const stopped = els.agentStop.classList.contains('is-stopped');
@@ -951,6 +985,11 @@ if (window.nyx.agentStatus) {
     if (res && res.ok) applyAgentStatus(res);
   });
 }
+
+// 断网横幅（G 离线/在线）：系统网络状态可能随时变，两个方向都要听
+window.addEventListener('online', () => { refreshNetState(); });
+window.addEventListener('offline', () => { refreshNetState(); });
+if (window.nyx.netState) refreshNetState();
 
 /* ------------------------------------------------------------------ */
 /* 页面摘要侧栏（清单 F）                                              */

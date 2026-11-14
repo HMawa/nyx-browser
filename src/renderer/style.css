@@ -304,6 +304,35 @@ body {
   background: var(--danger);
 }
 
+/* 断网提示（G 离线/在线）：用警示色但比 agent 标识轻——断网时用户本来就无能为力 */
+.net-offline-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong);
+  background: color-mix(in srgb, var(--bg-code) 70%, transparent);
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.net-offline-flag .net-offline-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--warn-soft, var(--text-dim));
+  flex: none;
+}
+
+.net-offline-flag:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+  box-shadow: var(--ring);
+}
+
 /* agent 接入模式（A）：外部接入时这条标识常驻，红底红字，不能用灰色小字糊过去 */
 .agent-mode-flag {
   display: inline-flex;

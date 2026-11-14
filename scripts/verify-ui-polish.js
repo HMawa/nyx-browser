@@ -2959,6 +2959,43 @@ async function main() {
     })()`);
     await sleep(500);
 
+    /* ---------- 断网横幅（G 的离线/在线部分） ---------- */
+    // 这里只测"渲染层是否按主进程给的说法显示"，不在测试里真的断网：
+    // 断网判定本身由 verify-network-state.js 的纯函数断言兜住。
+    const netBanner = await shell.eval(`(async () => {
+      const flag = document.getElementById('net-offline-flag');
+      const text = document.getElementById('net-offline-text');
+      const initialHidden = flag ? flag.hidden : null;
+      applyNetState({ visible: true, text: '当前离线 · 直连链路保持原样', title: '整机没有网络：页面打不开是网络断了，不是代理坏了。' });
+      const shownHidden = flag.hidden;
+      const shownText = text ? text.textContent : '';
+      const shownTitle = flag.getAttribute('title') || '';
+      // 复原：真实网络状态由主进程说了算
+      if (window.nyx && window.nyx.netState) {
+        const real = await window.nyx.netState();
+        applyNetState(real);
+      } else {
+        applyNetState({ visible: false });
+      }
+      return {
+        initialHidden,
+        shownHidden,
+        shownText,
+        shownTitle,
+        restoredHidden: flag.hidden,
+      };
+    })()`);
+    check(
+      '断网横幅默认不显示，收到"断网"载荷才显示，并能按真实网络状态复原（G）',
+      netBanner
+        && netBanner.initialHidden === true
+        && netBanner.shownHidden === false
+        && /当前离线/.test(netBanner.shownText)
+        && /不是代理坏了/.test(netBanner.shownTitle)
+        && netBanner.restoredHidden === true,
+      JSON.stringify(netBanner),
+    );
+
     /* ---------- 运行时无脚本异常 ---------- */
     const shellErrors = shell.exceptions();
     /* ---------- B3（设置页侧）：卡片 / 未勾确认被拦 / 勾选后可改可回 ---------- */

@@ -22,7 +22,7 @@
 const PROXY_FAILURE_CODES = new Set([-130, -102, -101, -104, -118, -105]);
 
 /** 判定结果：不动 / 普通模式转直连 / 隐私模式仅告知 */
-const ACTIONS = { none: 'none', fallbackDirect: 'fallback-direct', notifyPrivate: 'notify-private' };
+const ACTIONS = { none: 'none', fallbackDirect: 'fallback-direct', notifyPrivate: 'notify-private', offline: 'offline' };
 
 /** 是否属于"链路可疑"的失败码（只认数字：Chromium 给的就是 number，字符串说明上游传错了） */
 function isProxyFailureCode(errorCode) {
@@ -33,14 +33,16 @@ function isProxyFailureCode(errorCode) {
  * 决定一次可疑失败后的动作（纯函数）。
  *
  * @param {{mode?:string, link?:string, reachable?:boolean, errorCode?:number,
- *          host?:string, port?:number, error?:string, url?:string}} [rawInput]
+ *          host?:string, port?:number, error?:string, url?:string, online?:boolean}} [rawInput]
  *   mode      当前模式：'normal' | 'private'
  *   link      当前分区的链路：'proxy' | 'smart' | 'direct'
  *   reachable 刚刚探测到的代理可达性
+ *   online    整机是否有网（`net.isOnline()`）；false 时不改链路
  * @returns {{action:string, notice:object|null, reason:string}}
  *   action='none'            —— 不动链路（不相关 / 代理其实还活着）
  *   action='fallback-direct' —— 普通模式：代理确已不在，转直连并重载
  *   action='notify-private'  —— 隐私模式：代理确已不在，**保持代理**，只告知
+ *   action='offline'         —— 整机断网：两种模式都不改链路，只告知"是断网"
  */
 function decideProxyFailureAction(rawInput) {
   // 调用方可能只拿到一个残缺的对象（甚至 null）：一律按普通模式的保守假设处理，
@@ -60,6 +62,27 @@ function decideProxyFailureAction(rawInput) {
   }
   if (link === 'direct') {
     return { action: ACTIONS.none, notice: null, reason: 'link-is-direct' };
+  }
+
+  // 整机没网的时候，代理不可达是"必然结果"，不是代理坏了。这时候转直连毫无意义
+  // （直连也不通），而且会把链路状态改脏——等网络回来就变成"明明是代理模式却在直连"。
+  // 所以先判网络，再判代理。
+  if (input.online === false) {
+    return {
+      action: ACTIONS.offline,
+      reason: 'network-offline',
+      notice: {
+        level: 'warn',
+        code: 'NETWORK_OFFLINE',
+        title: '当前没有网络，先别改链路',
+        message:
+          `这一页打不开是因为整机断网了（代理 ${where} 也不可达：${error}），` +
+          '不是代理坏了。' +
+          (mode === 'private'
+            ? '隐私模式保持代理不变，网络恢复后点「重试」即可。'
+            : '链路保持原样，网络恢复后会自动重新探测。'),
+      },
+    };
   }
 
   // 隐私模式：无论探测结果如何都不许降级。可达 → 属于站点问题；不可达 → 明确告知。
