@@ -98,6 +98,13 @@ const { startHttpApi } = require('./api/http-api');
 const { createModeEventLog } = require('./core/mode-events');
 const { ACTIONS: LINK_GUARD_ACTIONS, isProxyFailureCode, decideProxyFailureAction } = require('./core/link-guard');
 const { networkStatePayload } = require('./core/network-state');
+const {
+  buildCaptureScript: buildPageCaptureScript,
+  describeCachedPage,
+  getSnapshot,
+  putSnapshot,
+  readCache: readPageCache,
+} = require('./core/page-cache');
 const { Updater } = require('./core/updater');
 const { UiStore } = require('./core/ui-store');
 const { StartupStore } = require('./core/startup-store');
@@ -366,6 +373,9 @@ const runtime = {
   apiServer: null,
   apiPort: null,
   apiToken: null,
+  /** 离线可用：最近读到的页面正文快照（隐私模式不写） */
+  pageCache: null,
+  pageCacheFile: '',
   /** 内置代理编排（订阅管理 + mihomo 内核生命周期） */
   proxyService: null,
   /** 设置页（v1.17.0 起是主窗口里的一个标签，不再是独立窗口） */
@@ -821,6 +831,7 @@ async function bootstrap() {
   initStartupStore();
   initVault();
   initHistoryStore();
+  initPageCache();
   initBookmarkStore();
   initSiteIcons();
   initPrivacyHardening();
@@ -1024,6 +1035,43 @@ function initHistoryStore() {
     `[Nyx] 历史记录就绪｜条目：${runtime.historyStore.list().length}｜文件：${runtime.historyStore.statePath}`,
   );
   return runtime.historyStore;
+}
+
+/**
+ * 离线缓存：<userData>/page-cache.json。
+ *
+ * 只存正文快照（标题 + 纯文字），隐私模式绝不写（见 savePageCache）。
+ * 加载失败就当空表——一个坏文件不该让"断网还能看点东西"整体失效。
+ */
+function initPageCache() {
+  const file = userDataFile('page-cache.json');
+  let raw = '';
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch {
+    raw = '';
+  }
+  runtime.pageCache = readPageCache(raw);
+  if (runtime.pageCache.items.length) {
+    console.log(`[Nyx] 离线缓存就绪｜条目：${runtime.pageCache.items.length}｜文件：${file}`);
+  }
+  runtime.pageCacheFile = file;
+  return runtime.pageCache;
+}
+
+/** 写一条离线快照（隐私模式直接返回，不落盘）。 */
+function savePageCache(snapshot) {
+  if (sessions.getMode() === 'private') return false;
+  const result = putSnapshot(runtime.pageCache, snapshot);
+  if (!result.stored) return false;
+  runtime.pageCache = result.store;
+  try {
+    fs.writeFileSync(runtime.pageCacheFile, JSON.stringify(runtime.pageCache), 'utf8');
+  } catch (err) {
+    console.warn('[Nyx] 离线缓存没能写入磁盘（内存里仍有效）：', err && err.message ? err.message : err);
+    if (runtime.diagnostics) runtime.diagnostics.warn('PAGE_CACHE_SAVE_FAILED', '离线缓存写盘失败', { error: String(err && err.message ? err.message : err) });
+  }
+  return true;
 }
 
 /**
@@ -2528,6 +2576,25 @@ function hookHistoryRecording(tab) {
     if (!runtime.historyStore) return;
     if (sessions.getMode() === 'private') return;
     if (title) runtime.historyStore.updateTitle(tab.url, title);
+  });
+
+  // 离线缓存：页面加载完成后留一份正文快照，断网时失败页能把"上次读到什么"显示出来。
+  // 只在普通模式、只在 http(s)、只在加载成功后抓；抓取失败只记日志（缓存是锦上添花，
+  // 不能因为它报错打断正常浏览）。
+  wc.on('did-finish-load', () => {
+    if (sessions.getMode() === 'private') return;
+    const url = typeof wc.getURL === 'function' ? wc.getURL() : '';
+    if (!isRecordableUrl(url)) return;
+    if (wc.isDestroyed()) return;
+    wc.executeJavaScript(buildPageCaptureScript(), true)
+      .then((raw) => {
+        if (!raw || raw.ok !== true) return;
+        const saved = savePageCache({ url: raw.url || url, title: raw.title || '', lines: raw.lines || [], at: Date.now() });
+        if (saved && runtime.diagnostics) runtime.diagnostics.info('PAGE_CACHE_SAVED', { url: redactUrlForLog(url) });
+      })
+      .catch((err) => {
+        console.warn('[Nyx] 离线缓存没能抓取这一页：', err && err.message ? err.message : err);
+      });
   });
 }
 
@@ -6195,6 +6262,18 @@ function registerErrorPageIpc() {
     } catch (err) {
       return { ok: false, error: `复制失败：${err.message}` };
     }
+  });
+
+  // 断网时给一份"上次读到什么"——只有真的缓存过才返回内容，
+  // 没缓存就返回 available:false + 中文说明，界面据此自己决定说什么。
+  ipcMain.handle('nyx:error:cached', (_event, payload) => {
+    const url = String((payload && payload.url) || '');
+    const snapshot = getSnapshot(runtime.pageCache, url);
+    const described = describeCachedPage(snapshot, { now: Date.now() });
+    if (runtime.diagnostics && described.available) {
+      runtime.diagnostics.info('OFFLINE_CACHE_SHOWN', { url: redactUrlForLog(url), chars: described.chars, at: described.at });
+    }
+    return { ok: true, url, ...described };
   });
 }
 

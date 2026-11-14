@@ -290,6 +290,9 @@ contextBridge.exposeInMainWorld('nyx', {
   /** 复制失败详情（错误码 / 原因 / 地址 / 模式链路）到剪贴板 */
   errorCopyDetail: (text) => ipcRenderer.invoke('nyx:error:copy', { text }),
 
+  /** 断网时取这一页的离线快照（只有真的缓存过才 available:true） */
+  errorCachedPage: (payload) => ipcRenderer.invoke('nyx:error:cached', payload || {}),
+
   /** 订阅「切到某个设置分区」指令（主界面错误页跳诊断用），返回取消订阅函数 */
   onSettingsSection: (handler) => {
     const listener = (_event, section) => handler(section);

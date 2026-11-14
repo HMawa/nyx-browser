@@ -45,6 +45,10 @@ const els = {
   peDiagnostics: document.getElementById('pe-diagnostics'),
   peCopy: document.getElementById('pe-copy'),
   peFoot: document.getElementById('pe-foot'),
+  peCached: document.getElementById('pe-cached'),
+  peCachedLabel: document.getElementById('pe-cached-label'),
+  peCachedNote: document.getElementById('pe-cached-note'),
+  peCachedText: document.getElementById('pe-cached-text'),
   // 页面摘要侧栏（F）：纯抽取式，默认关
   btnDigest: document.getElementById('btn-digest'),
   digestPanel: document.getElementById('digest-panel'),
@@ -345,6 +349,8 @@ function renderPageError() {
   if (!err) {
     if (!els.pageError.hidden) els.pageError.hidden = true;
     currentPageError = null;
+    cachedPageFor = '';
+    hideCachedPage();
     return;
   }
 
@@ -374,6 +380,45 @@ function renderPageError() {
     els.peHints.textContent = '';
     if (hintBlock) hintBlock.hidden = true;
   }
+
+  // 注意：view.url 是给人看的（带「地址：」前缀），查缓存必须用原始 err.url。
+  loadCachedPage(err.url);
+}
+
+/** 缓存内容按地址取一次；同一地址只请求一次，避免每次状态推送都打接口。 */
+let cachedPageFor = '';
+function loadCachedPage(url) {
+  if (!els.peCached || !window.nyx || !window.nyx.errorCachedPage) return;
+  const key = String(url || '');
+  if (!key) {
+    hideCachedPage();
+    return;
+  }
+  if (key === cachedPageFor) return;
+  cachedPageFor = key;
+  hideCachedPage();
+  window.nyx.errorCachedPage({ url: key })
+    .then((res) => {
+      if (!res || res.available !== true) return;
+      if (cachedPageFor !== key) return; // 已经切到别的失败页，丢弃这次结果
+      els.peCachedNote.textContent = res.note || '';
+      els.peCachedText.textContent = res.text || '';
+      els.peCachedLabel.textContent = res.ageText
+        ? `上次读到的内容（${res.ageText}抓取）`
+        : '上次读到的内容';
+      els.peCached.hidden = false;
+    })
+    .catch((err) => {
+      console.warn('[Nyx] 离线缓存读取失败：', err && err.message ? err.message : err);
+      hideCachedPage();
+    });
+}
+
+function hideCachedPage() {
+  if (!els.peCached) return;
+  els.peCached.hidden = true;
+  if (els.peCachedNote) els.peCachedNote.textContent = '';
+  if (els.peCachedText) els.peCachedText.textContent = '';
 }
 
 /**

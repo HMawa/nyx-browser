@@ -2812,6 +2812,63 @@ async function main() {
       JSON.stringify(sitesFlow.bad),
     );
 
+    /* ---------- URL 前缀规则（候选④）：界面上要能看出来这条只覆盖一个路径 ---------- */
+    // 前缀规则和域名规则在列表里长得像，但管的范围差一个量级，
+    // 所以用真实界面加一条前缀，检查行上有没有「前缀」标记，再删掉。
+    const prefixFlow = await settings.eval(`(async () => {
+      // 走真实界面：选「URL 前缀」→ 填 example.com/admin → 点加入，
+      // 这样测的是用户实际点的路径（直接调 IPC 会绕过列表重渲染，测不到标记）。
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const rowsNow = () => Array.from(document.querySelectorAll('#agent-allow-list li')).map((li) => ({
+        host: (li.querySelector('.site-host') || {}).textContent || '',
+        mode: (li.querySelector('.site-mode') || {}).textContent || '',
+        dataMode: ((li.querySelector('.site-remove') || {}).dataset || {}).mode || '',
+      }));
+      const modeSel = document.getElementById('agent-allow-mode');
+      const input = document.getElementById('agent-allow-input');
+      const addBtn = document.getElementById('btn-agent-allow-add');
+      if (!modeSel || !input || !addBtn) return { missing: true };
+      modeSel.value = 'prefix';
+      input.value = 'example.com/admin';
+      addBtn.click();
+      let prefixed = [];
+      for (let i = 0; i < 40 && prefixed.length === 0; i += 1) {
+        await sleep(150);
+        prefixed = rowsNow().filter((item) => item.host === 'example.com/admin');
+      }
+      const payload = await window.nyx.agentSites({ site: 'https://example.com/admin/x' });
+      const removeBtn = Array.from(document.querySelectorAll('#agent-allow-list .site-remove'))
+        .find((btn) => btn.dataset && btn.dataset.target === 'example.com/admin');
+      if (removeBtn) removeBtn.click();
+      let gone = false;
+      for (let i = 0; i < 40 && !gone; i += 1) {
+        await sleep(150);
+        gone = rowsNow().every((item) => item.host !== 'example.com/admin');
+      }
+      const after = await window.nyx.agentSites({ site: 'https://example.com/admin/x' });
+      return {
+        prefixed,
+        currentDecision: (payload.current || {}).decision || '',
+        currentMode: (payload.current || {}).ruleMode || '',
+        gone,
+        // 隔离 userData 里预置了 127.0.0.1 / localhost 等白名单，所以这里不能断言「全空」，
+        // 只能断言这条前缀确实不在名单里了。
+        stillListed: ((after.policy && after.policy.allow) || []).some((rule) => rule.target === 'example.com/admin'),
+      };
+    })()`);
+    check(
+      '前缀规则在名单里带「前缀」标记，加进去和删掉都按路径生效（候选④）',
+      prefixFlow.missing !== true
+        && prefixFlow.prefixed.length === 1
+        && prefixFlow.prefixed[0].mode === '前缀'
+        && prefixFlow.prefixed[0].dataMode === 'prefix'
+        && prefixFlow.currentDecision === 'allow'
+        && prefixFlow.currentMode === 'prefix'
+        && prefixFlow.gone === true
+        && prefixFlow.stillListed === false,
+      JSON.stringify(prefixFlow),
+    );
+
     /* ---------- agent 接入模式（清单 A） ---------- */
     // 两步确认不能靠"点一下按钮"验证，得看第二道门是不是真的拦得住：
     // 只走第一步必须被拒（NEED_CONFIRM）、第二步没勾风险必须被拒（NEED_ACK）。
@@ -3079,6 +3136,99 @@ async function main() {
         !!ackFlow && ackFlow.directLink === 'direct' && ackFlow.back === 'proxy',
         JSON.stringify(ackFlow),
       );
+    }
+
+    /* ---------- 离线可读缓存（候选③）：断网后失败页要给出"上次读到的内容" ---------- */
+    // 用独立的小服务，测完就关掉：关掉之后再访问同一地址，就是一次真实的连接失败。
+    const httpCache = require('node:http');
+    const pollUntil = async (fn, attempts, intervalMs) => {
+      for (let i = 0; i < attempts; i += 1) {
+        const value = await fn();
+        if (value) return value;
+        await sleep(intervalMs);
+      }
+      return false;
+    };
+    let cacheProbeServer = null;
+    let cacheProbeUrl = '';
+    let cacheHits = 0;
+    try {
+      const marker = '这段文字来自离线缓存，断网时应该还能读到它。';
+      cacheProbeServer = httpCache.createServer((req, res) => {
+        cacheHits += 1;
+        if (cacheHits > 1) {
+          // 第二次请求直接把连接掐掉：这样必然是网络失败，
+          // 又不会因为浏览器自己那份 HTTP 缓存而"看起来加载成功"。
+          req.socket.destroy();
+          return;
+        }
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          // 不让 Chromium 自己缓存：要验的是我们的快照，不是浏览器缓存
+          'Cache-Control': 'no-store',
+        });
+        res.end(`<!doctype html><html><head><meta charset="utf-8"><title>缓存验证页</title></head><body><main><h1>缓存验证页</h1><p>${marker}</p><p>第二段正文，用来凑够缓存的正文长度下限，免得被判成没有正文。</p></main></body></html>`);
+      });
+      await new Promise((resolve) => cacheProbeServer.listen(0, '127.0.0.1', resolve));
+      cacheProbeUrl = `http://127.0.0.1:${cacheProbeServer.address().port}/c-cache`;
+      await shell.eval(`window.nyx.navigate(${JSON.stringify(cacheProbeUrl)})`);
+      // 等页面加载完成
+      await pollUntil(async () => {
+        const current = await shell.eval(`(async () => {
+          const s = await window.nyx.getState();
+          const tab = (s.tabs || []).find((item) => item.active);
+          return { url: tab ? tab.url : '', loading: tab ? tab.loading : true };
+        })()`);
+        return current.url.startsWith(cacheProbeUrl) && current.loading === false;
+      }, 40, 250);
+      // 等主进程把快照写进 page-cache.json（写盘是异步的，不能只等页面加载）
+      const cacheFile = path.join(userData, 'page-cache.json');
+      const cached = await pollUntil(async () => {
+        try {
+          const raw = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+          return (raw.items || []).some((item) => item.url === cacheProbeUrl);
+        } catch {
+          return false;
+        }
+      }, 40, 250);
+      check('页面加载完成后会把正文快照写进 page-cache.json（候选③）', cached === true, cacheFile);
+
+      // 同一地址再打开（现在连接会被掐断）→ 失败页应显示缓存正文
+      await shell.eval(`window.nyx.navigate(${JSON.stringify(cacheProbeUrl)})`);
+      const cachedView = await pollUntil(async () => {
+        const view = await shell.eval(`(() => {
+          const box = document.getElementById('pe-cached');
+          const text = document.getElementById('pe-cached-text');
+          const label = document.getElementById('pe-cached-label');
+          const note = document.getElementById('pe-cached-note');
+          return {
+            hidden: box ? box.hidden : true,
+            text: text ? text.textContent : '',
+            label: label ? label.textContent : '',
+            note: note ? note.textContent : '',
+          };
+        })()`);
+        return view && view.hidden === false && view.text.length > 20 ? view : false;
+      }, 40, 250);
+      check(
+        '断网重开同一地址时，失败页显示「上次读到的内容」并注明是缓存（候选③）',
+        !!cachedView
+          && cachedView.text.includes('这段文字来自离线缓存')
+          && /缓存快照/.test(cachedView.note)
+          && /重试/.test(cachedView.note)
+          && /上次读到的内容/.test(cachedView.label),
+        JSON.stringify(cachedView),
+      );
+    } catch (err) {
+      check('离线缓存端到端检查未中断', false, err && err.message);
+    } finally {
+      if (cacheProbeServer) {
+        try {
+          cacheProbeServer.close();
+        } catch {
+          /* 忽略 */
+        }
+      }
     }
 
     check('主窗口无未捕获脚本异常', shellErrors.length === 0, shellErrors.slice(0, 3).join(' | '));
