@@ -4398,6 +4398,7 @@ async function loadFootprint() {
         status.textContent = `一分钟内最多改 ${(payload.rateLimit && payload.rateLimit.max) || 10} 次；改完会立刻生效。`;
         status.className = 'hint';
       }
+      await loadSettingAudit();
       return payload;
     } catch (err) {
       if (status) {
@@ -4405,6 +4406,73 @@ async function loadFootprint() {
         status.className = 'hint is-warn';
       }
     }
+  }
+
+  /**
+   * 「谁改得多」（用户第七轮 C）：按设置项聚合动作留痕。
+   * 只读：不提供一个能从界面直接改设置的入口。
+   */
+  async function loadSettingAudit() {
+    const table = byId('agent-settings-audit-table');
+    const rows = byId('agent-settings-audit-rows');
+    const note = byId('agent-settings-audit-note');
+    if (!table || !rows || !note) return;
+    if (!window.nyx || typeof window.nyx.agentSettingsAudit !== 'function') {
+      table.hidden = true;
+      note.textContent = '当前内核不支持查看 agent 改设置的记录。';
+      note.className = 'hint is-warn';
+      return;
+    }
+    let payload = null;
+    try {
+      payload = await window.nyx.agentSettingsAudit({ limit: 20 });
+    } catch (err) {
+      table.hidden = true;
+      note.textContent = `读不出改动记录：${err && err.message ? err.message : '未知原因'}`;
+      note.className = 'hint is-warn';
+      return;
+    }
+    if (!payload || payload.ok === false) {
+      table.hidden = true;
+      note.textContent = `读不出改动记录：${(payload && payload.error) || '没有返回原因'}`;
+      note.className = 'hint is-warn';
+      return;
+    }
+    const keys = Array.isArray(payload.keys) ? payload.keys : [];
+    rows.textContent = '';
+    if (!keys.length) {
+      table.hidden = true;
+      note.textContent = payload.note || '还没有 agent 改过设置。';
+      note.className = 'hint';
+      return;
+    }
+    for (const item of keys) {
+      const tr = document.createElement('tr');
+      const cells = [
+        item.label || item.key,
+        `${item.count} 次`,
+        item.lastTime ? new Date(item.lastTime).toLocaleString() : '—',
+        describeSettingValue(item.lastValue),
+        (item.agents || []).join('、') || '—',
+      ];
+      for (const text of cells) {
+        const td = document.createElement('td');
+        td.textContent = text;
+        tr.append(td);
+      }
+      rows.append(tr);
+    }
+    table.hidden = false;
+    note.textContent = payload.note || '';
+    note.className = 'hint';
+  }
+
+  function describeSettingValue(value) {
+    if (value === undefined) return '—';
+    if (typeof value === 'boolean') return value ? '开' : '关';
+    if (value === null) return '—';
+    if (typeof value === 'object') return JSON.stringify(value);
+    return String(value);
   }
 
   // 主界面加载失败页（A4）的「打开诊断」会要求设置窗口直接落到「诊断」分区

@@ -526,6 +526,80 @@ function planSettingUndo(entries, context) {
 
 assertPresets();
 
+/**
+ * 按键聚合 agent 改设置的记录（用户第七轮 C）。
+ *
+ * 输入是审计记录的原始数组（`runtime.agentAudit.list()` 那一份）。这里只认：
+ * - `type === 'settings'`（别的动作不参与）
+ * - `decision !== 'deny'`（被拒的没改成，不能算进"改过几次"）
+ * - `ok !== false`（执行失败的没落盘）
+ * - `params.key` 是认识的键
+ *
+ * 坏记录直接跳过、不抛错：审计面宁可少一行，也不能因为一条脏数据整块渲染不出来。
+ */
+function aggregateSettingChanges(records, options) {
+  const source = Array.isArray(records) ? records : [];
+  const limit = Number.isFinite(options && options.limit) ? Math.max(1, Math.round(options.limit)) : 20;
+  const flags = (options && options.includeUndo === true) ? true : false;
+  const map = new Map();
+  let considered = 0;
+  for (const raw of source) {
+    const entry = raw && typeof raw === 'object' ? raw : null;
+    if (!entry) continue;
+    if (entry.type !== 'settings') continue;
+    if (entry.decision === 'deny') continue;
+    if (entry.ok === false) continue;
+    const params = entry.params && typeof entry.params === 'object' ? entry.params : {};
+    // 撤销是"改回去"，默认不混进改动次数里，否则一次改动 + 一次撤销会显示成改过两次
+    if (entry.undo === true || params.undo === true) {
+      if (!flags) continue;
+    }
+    let key = typeof params.key === 'string' ? params.key : '';
+    if (!key && typeof entry.target === 'string') key = entry.target;
+    if (!key) continue;
+    const known = SETTING_SCHEMA[key];
+    if (!known) continue;
+    considered += 1;
+    const ts = Number.isFinite(entry.ts) ? entry.ts : 0;
+    const agent = typeof entry.agent === 'string' && entry.agent ? entry.agent : 'local';
+    const current = map.get(key);
+    const value = Object.prototype.hasOwnProperty.call(params, 'value') ? params.value : undefined;
+    if (!current) {
+      map.set(key, {
+        key,
+        label: known.label,
+        count: 1,
+        lastAt: ts,
+        lastTime: ts ? new Date(ts).toISOString() : '',
+        lastAgent: agent,
+        lastValue: value,
+        agents: [agent],
+      });
+      continue;
+    }
+    current.count += 1;
+    if (ts >= current.lastAt) {
+      current.lastAt = ts;
+      current.lastTime = ts ? new Date(ts).toISOString() : '';
+      current.lastAgent = agent;
+      current.lastValue = value;
+    }
+    if (!current.agents.includes(agent)) current.agents.push(agent);
+  }
+  const keys = Array.from(map.values())
+    .sort((a, b) => (b.count - a.count) || (b.lastAt - a.lastAt))
+    .slice(0, limit);
+  return {
+    ok: true,
+    total: considered,
+    keys,
+    empty: considered === 0,
+    note: considered === 0
+      ? '还没有 agent 改过设置。它们改的时候会先问你要确认，改完这里会按设置项记一次。'
+      : `最近 ${considered} 次改动，涉及 ${keys.length} 个设置项。`,
+  };
+}
+
 module.exports = {
   MAX_UNDO_STEPS,
   PRESET_KEYS,
@@ -536,6 +610,7 @@ module.exports = {
   SETTING_RATE_LIMIT,
   SETTING_RATE_WINDOW_MS,
   SETTING_SCHEMA,
+  aggregateSettingChanges,
   describeSettingsSchema,
   planPresetChange,
   planSettingChange,

@@ -1125,8 +1125,21 @@
                   少一项就整组不动。
                 </p>
                 <ul class="agent-setting-list" id="agent-settings-preset-list"></ul>
-                <p class="hint" id="agent-settings-undo"></p>
                 <p class="hint" id="agent-settings-undo">撤销：还没有哪个 agent 改过设置，暂时没有可撤销的。</p>
+                <div class="info-sub" id="agent-settings-audit-block">
+                  <h4>谁改得多</h4>
+                  <p class="hint">
+                    按设置项聚合动作留痕：改过几次、最近一次是谁改的、改成了什么值。
+                    被拒绝的和执行失败的都不算，撤销默认单列不计入次数。
+                  </p>
+                  <table class="agent-audit-table" id="agent-settings-audit-table" hidden>
+                    <thead>
+                      <tr><th>设置项</th><th>改过</th><th>最近一次</th><th>改成</th><th>谁改的</th></tr>
+                    </thead>
+                    <tbody id="agent-settings-audit-rows"></tbody>
+                  </table>
+                  <p class="hint" id="agent-settings-audit-note"></p>
+                </div>
                 <p class="hint" id="agent-settings-status" role="status" aria-live="polite"></p>
               </div>
             </section>

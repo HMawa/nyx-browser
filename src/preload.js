@@ -163,6 +163,7 @@ contextBridge.exposeInMainWorld('nyx', {
   agentModeSet: (payload) => ipcRenderer.invoke('nyx:agent:mode-set', payload || {}),
   // agent 改设置（用户第 6 项）：只读 schema；修改只能走 agent 动作通道（带人工确认与留痕）
   agentSettings: () => ipcRenderer.invoke('nyx:agent:settings'),
+  agentSettingsAudit: (payload) => ipcRenderer.invoke('nyx:agent:settings-audit', payload || {}),
   // 页面摘要（清单 F）：纯抽取式，默认关；关着时 run 会回一个明确原因
   digestGet: () => ipcRenderer.invoke('nyx:digest:get'),
   digestSet: (payload) => ipcRenderer.invoke('nyx:digest:set', payload || {}),

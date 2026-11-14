@@ -866,6 +866,42 @@
   color: var(--danger-soft);
 }
 
+/* 「谁改得多」（用户第七轮 C）：只读聚合表 */
+#agent-settings-audit-block {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.agent-audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12px;
+}
+
+.agent-audit-table th,
+.agent-audit-table td {
+  padding: 5px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-soft);
+  vertical-align: top;
+}
+
+.agent-audit-table th {
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.agent-audit-table td {
+  color: var(--text-dim);
+}
+
+.agent-audit-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
 .agent-site-list .site-remove {
   flex: none;
   padding: 2px 6px;

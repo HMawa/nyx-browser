@@ -81,6 +81,7 @@ const {
   SETTING_KEYS,
   SETTING_LOCKED,
   SETTING_SCHEMA,
+  aggregateSettingChanges: aggregateAgentSettingChanges,
   describeSettingsSchema,
   planPresetChange: planAgentPresetChange,
   planSettingChange: planAgentSettingChange,
@@ -9120,6 +9121,29 @@ function registerAgentSettingsIpc() {
   // 只读：界面把"agent 能改哪些键、为什么要确认、哪些键锁死"如实列出来。
   // 真正的修改只走 agent 动作通道（dispatch → 人工确认 → 留痕），界面不给旁路。
   ipcMain.handle('nyx:agent:settings', () => agentSettingsSnapshot());
+
+  // 按键聚合：看哪个设置项被 agent 改得最多、最近是谁改的（用户第七轮 C）。
+  // 数据源就是动作留痕本身，不另存一份，免得两处说法不一致。
+  ipcMain.handle('nyx:agent:settings-audit', (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    let records = [];
+    try {
+      records = runtime.agentAudit && typeof runtime.agentAudit.list === 'function' ? runtime.agentAudit.list() : [];
+    } catch (err) {
+      console.warn('[Nyx] 读动作留痕失败，设置改动聚合按空处理：', err && err.message ? err.message : err);
+      diagnostics.warn('AGENT_SETTINGS_AUDIT_READ_FAILED', '读动作留痕失败，设置改动聚合按空处理', {
+        error: err && err.message ? err.message : String(err),
+      });
+    }
+    const aggregated = aggregateAgentSettingChanges(records, {
+      limit: Number.isFinite(input.limit) ? input.limit : 20,
+      includeUndo: input.includeUndo === true,
+    });
+    return Object.assign({}, aggregated, {
+      disclaimer: SETTING_DISCLAIMER,
+      auditedAt: Date.now(),
+    });
+  });
 }
 
 /**

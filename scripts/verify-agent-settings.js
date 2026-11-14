@@ -394,6 +394,66 @@ check('场景预设的接线：动作通道认 preset、主进程按目标列表
   return 'ok';
 });
 
+check('聚合视图：按设置项统计改过几次、最近是谁改的，被拒的与撤销的不算进次数', () => {
+  const { aggregateSettingChanges } = require('../src/core/agent-settings');
+  const records = [
+    { type: 'settings', ts: 1000, agent: 'claude', params: { key: 'theme', value: 'ink' } },
+    { type: 'settings', ts: 2000, agent: 'gpt', params: { key: 'theme', value: 'paper' } },
+    { type: 'settings', ts: 1500, agent: 'claude', params: { key: 'digestEnabled', value: true } },
+    // 被拒的不算：没改成，不能算进「改过几次」
+    { type: 'settings', ts: 2500, decision: 'deny', agent: 'gpt', params: { key: 'theme', value: 'quiet' } },
+    // 执行失败的不算
+    { type: 'settings', ts: 2600, ok: false, agent: 'gpt', params: { key: 'theme', value: 'quiet' } },
+    // 锁死键不进可改范围，也不该出现在这张表上
+    { type: 'settings', ts: 2700, agent: 'gpt', params: { key: 'mode', value: 'private' } },
+    // 别的动作不算
+    { type: 'click', ts: 2800, agent: 'gpt', params: { key: 'theme' } },
+    // 撤销默认不混进次数
+    { type: 'settings', ts: 2900, agent: 'gpt', params: { key: 'theme', value: 'ink', undo: true } },
+  ];
+  const result = aggregateSettingChanges(records, {});
+  assert(result.ok === true, '聚合要返回 ok');
+  assert(result.total === 3, `只该数真正改成的 3 次，实际 ${result.total}`);
+  assert(result.empty === false, '有记录时 empty 要是 false');
+  const theme = result.keys.find((item) => item.key === 'theme');
+  assert(theme && theme.count === 2, 'theme 改了两次');
+  assert(theme.lastAgent === 'gpt' && theme.lastValue === 'paper', '最近一次要取最新那条的 agent 与值');
+  assert(theme.agents.length === 2 && theme.agents.includes('claude'), '要记住谁改过');
+  assert(theme.label && theme.label !== 'theme', '要带上人看得懂的设置项名字');
+  assert(!result.keys.some((item) => item.key === 'mode'), '锁死键不许出现在聚合里');
+  const withUndo = aggregateSettingChanges(records, { includeUndo: true });
+  assert(withUndo.total === 4, '显式要撤销时才会多算一条');
+  const empty = aggregateSettingChanges([], {});
+  assert(empty.empty === true && empty.keys.length === 0, '空记录要明确说"还没有"');
+  assert(/还没有 agent 改过设置/.test(empty.note), `空状态要给说明：${empty.note}`);
+  const bad = aggregateSettingChanges([null, 42, { type: 'settings' }, { type: 'settings', params: null }], {});
+  assert(bad.ok === true && bad.empty === true, '坏记录要跳过而不是抛错');
+  return 'ok';
+});
+
+check('聚合视图的接线：只读 IPC + preload 方法 + 设置页表格（不给界面改设置的旁路）', () => {
+  const main = read('src/main.js');
+  assert(main.includes("ipcMain.handle('nyx:agent:settings-audit'"), '缺聚合 IPC');
+  assert(/aggregateSettingChanges: aggregateAgentSettingChanges/.test(main), '主进程要引入聚合函数');
+  assert(/aggregateAgentSettingChanges\(records, \{/.test(main), '要真的调用聚合函数');
+  assert(/runtime\.agentAudit/.test(main), '数据源是动作留痕，不是另存一份');
+  assert(main.includes('AGENT_SETTINGS_AUDIT_READ_FAILED'), '读留痕失败要留诊断');
+  const preload = read('src/preload.js');
+  assert(/agentSettingsAudit:/.test(preload), 'preload 缺只读方法');
+  const html = read('src/renderer/settings.html');
+  for (const id of ['agent-settings-audit-block', 'agent-settings-audit-table', 'agent-settings-audit-rows', 'agent-settings-audit-note']) {
+    assert(html.includes(`id="${id}"`), `设置页缺 ${id}`);
+  }
+  const js = read('src/renderer/settings.js');
+  assert(/async function loadSettingAudit\(\)/.test(js), '缺渲染函数');
+  assert(/await loadSettingAudit\(\)/.test(js), '读完之后要渲染聚合表');
+  assert(/agentSettingsAudit\(\{ limit: 20 \}\)/.test(js), '要按 limit 取');
+  // 只读：这张表不许长出改设置的按钮
+  const block = js.slice(js.indexOf('async function loadSettingAudit'), js.indexOf('function describeSettingValue'));
+  assert(!/agentSettingsSet|applyAgentSetting|agentSettingsApply/.test(block), '聚合视图不许提供改设置的入口');
+  return 'ok';
+});
+
 let passed = 0;
 let failed = 0;
 for (const item of checks) {
