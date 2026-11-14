@@ -2333,26 +2333,38 @@ async function main() {
     );
 
     // 真按键走一遍：聚焦活动标签 → 按右方向键 → 应切到下一个标签、焦点跟过去、焦点环可见
+    // 焦点类断言在 CDP 下偶发丢焦点（窗口不在前台时 :focus-visible 不成立），
+    // 所以这里重试三次，但断言本身不放宽：必须真的切了标签、焦点真的跟过去、焦点环真的有 2px。
+    await shell.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {});
     const beforeTab = await shell.eval(`(() => {
       const node = document.querySelector('.tab.active');
       node.focus();
       return { id: node.dataset.tabId };
     })()`);
-    await shell.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', windowsVirtualKeyCode: 39, nativeVirtualKeyCode: 39, key: 'ArrowRight', code: 'ArrowRight' });
-    await shell.send('Input.dispatchKeyEvent', { type: 'keyUp', windowsVirtualKeyCode: 39, nativeVirtualKeyCode: 39, key: 'ArrowRight', code: 'ArrowRight' });
-    await sleep(900);
-    const afterTab = await shell.eval(`(() => {
-      const node = document.querySelector('.tab.active');
-      const focused = document.activeElement;
-      const cs = getComputedStyle(focused);
-      return {
-        id: node ? node.dataset.tabId : '',
-        focusedTag: focused ? focused.className : '',
-        focusedId: focused && focused.dataset ? focused.dataset.tabId || '' : '',
-        focusVisible: focused && focused.matches ? focused.matches(':focus-visible') : false,
-        outlineWidth: cs.outlineWidth,
-      };
-    })()`);
+    let afterTab = null;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      await shell.eval(`(() => { const node = document.querySelector('.tab.active'); if (node) node.focus(); return true; })()`);
+      await shell.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', windowsVirtualKeyCode: 39, nativeVirtualKeyCode: 39, key: 'ArrowRight', code: 'ArrowRight' });
+      await shell.send('Input.dispatchKeyEvent', { type: 'keyUp', windowsVirtualKeyCode: 39, nativeVirtualKeyCode: 39, key: 'ArrowRight', code: 'ArrowRight' });
+      await sleep(700);
+      afterTab = await shell.eval(`(() => {
+        const node = document.querySelector('.tab.active');
+        const focused = document.activeElement;
+        const cs = getComputedStyle(focused);
+        return {
+          id: node ? node.dataset.tabId : '',
+          focusedTag: focused ? focused.className : '',
+          focusedId: focused && focused.dataset ? focused.dataset.tabId || '' : '',
+          focusVisible: focused && focused.matches ? focused.matches(':focus-visible') : false,
+          outlineWidth: cs.outlineWidth,
+          attempt: ${attempt},
+        };
+      })()`);
+      if (afterTab && afterTab.id && afterTab.id !== (beforeTab && beforeTab.id) && afterTab.focusedId === afterTab.id && afterTab.focusVisible === true) {
+        break;
+      }
+      await sleep(400);
+    }
     check(
       '右方向键能切换标签且焦点跟随并可见（v1.17.0）',
       !!afterTab &&
@@ -2539,6 +2551,8 @@ async function main() {
         return {
           port,
           actionCount: Array.isArray(caps.actions) ? caps.actions.length : 0,
+          hasSettings: (caps.actions || []).some((it) => it.type === 'settings'),
+          settingsNeedsConfirm: (caps.actions || []).find((it) => it.type === 'settings')?.confirmRequired === true,
           typeNeedsConfirm: (caps.actions || []).find((it) => it.type === 'type')?.confirmRequired === true,
           downloadRule: Boolean(caps.confirmRules && caps.confirmRules.download && caps.confirmRules.download.required),
           channel: caps.channel || '',
@@ -2554,7 +2568,12 @@ async function main() {
     })();
     check(
       '本地接口的能力清单标出「哪些动作必须人工确认」（C）',
-      agentApi.actionCount === 9 && agentApi.typeNeedsConfirm === true && agentApi.downloadRule === true && agentApi.channel === 'agent-dispatch',
+      agentApi.actionCount >= 10
+        && agentApi.hasSettings === true
+        && agentApi.settingsNeedsConfirm === true
+        && agentApi.typeNeedsConfirm === true
+        && agentApi.downloadRule === true
+        && agentApi.channel === 'agent-dispatch',
       JSON.stringify(agentApi),
     );
     check(
@@ -3408,10 +3427,17 @@ async function main() {
           const keysText = (document.getElementById('agent-settings-keys') || {}).textContent || '';
           const disclaimer = (document.getElementById('agent-settings-disclaimer') || {}).textContent || '';
           const undoLine = (document.getElementById('agent-settings-undo') || {}).textContent || '';
+          const presetRows = document.querySelectorAll('#agent-settings-preset-list li').length;
+          const presetText = (document.getElementById('agent-settings-preset-list') || {}).textContent || '';
+          const presetHint = (document.getElementById('agent-settings-presets') || {}).textContent || '';
           const badge = (document.getElementById('agent-settings-badge') || {}).textContent || '';
           return {
             ok: Boolean(api && api.ok !== false),
             apiKeys: api && Array.isArray(api.keys) ? api.keys.length : 0,
+            apiPresets: api && Array.isArray(api.presets) ? api.presets.length : 0,
+            presetRows,
+            presetText,
+            presetHint,
             apiLocked: api && Array.isArray(api.locked) ? api.locked.length : 0,
             apiDisclaimer: api && typeof api.disclaimer === 'string' ? api.disclaimer.length : 0,
             keyRows,
@@ -3453,11 +3479,63 @@ async function main() {
             && (card.undoApi.available ? /撤销/.test(card.undoLine) : /没有可撤销|暂时没有/.test(card.undoLine)),
           JSON.stringify({ undoLine: card && card.undoLine, undoApi: card && card.undoApi }),
         );
+        // 场景预设（第六轮 ④）：只列出来，不给按钮——套预设仍是 agent 的动作
+        check(
+          '设置页列出场景预设，并说清「每一项要确认的改动都得逐项确认」（第六轮 ④）',
+          card
+            && card.ok
+            && card.apiPresets >= 2
+            && card.presetRows === card.apiPresets
+            && /quiet|work|tidy/.test(card.presetText)
+            && /逐项|一条/.test(card.presetHint)
+            && !/不再确认|直接生效/.test(card.presetHint),
+          JSON.stringify({ apiPresets: card && card.apiPresets, presetRows: card && card.presetRows, hint: card && card.presetHint }),
+        );
       } catch (err) {
         check('agent 改设置卡片端到端检查未中断', false, err && err.message);
       }
     }
 
+
+    // 安装包签名状态（第六轮 ②）：界面必须如实说"这个正在跑的可执行文件签没签、证书什么时候到期"
+    if (settings) {
+      try {
+        const signing = await settings.eval(`(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          document.querySelector('[data-sec="about"]')?.click();
+          await wait(600);
+          const api = window.nyx.signingStatus ? await window.nyx.signingStatus() : null;
+          const badge = (document.getElementById('signing-badge') || {}).textContent || '';
+          const summary = (document.getElementById('signing-summary') || {}).textContent || '';
+          const gridText = (document.getElementById('signing-grid') || {}).textContent || '';
+          const rows = document.querySelectorAll('#signing-grid .kv-item').length;
+          return {
+            apiOk: Boolean(api && api.ok !== false),
+            apiLabel: (api && api.label) || '',
+            apiLevel: (api && api.level) || '',
+            apiPackaged: api ? api.packaged === true : null,
+            badge,
+            summary,
+            gridText,
+            rows,
+          };
+        })()`);
+        check(
+          '设置页如实显示这个可执行文件的签名状态，读不到就写「读不出签名」而不是装作已签（第六轮 ②）',
+          signing
+            && typeof signing.apiLevel === 'string'
+            && signing.apiLevel.length > 0
+            && typeof signing.apiLabel === 'string'
+            && signing.apiLabel.length > 0
+            && signing.badge.includes(signing.apiLabel)
+            && signing.rows >= 5
+            && /签名|没有/.test(signing.summary + signing.gridText),
+          JSON.stringify(signing),
+        );
+      } catch (err) {
+        check('安装包签名端到端检查未中断', false, err && err.message);
+      }
+    }
 
     if (settings) {
       const settingsErrors = settings.exceptions();

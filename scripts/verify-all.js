@@ -5,7 +5,7 @@
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
- *  2. scripts/verify-ui-polish.js（界面体验，117 项）
+ *  2. scripts/verify-ui-polish.js（界面体验，119 项）
  *  3. scripts/verify-link-guard.js（出站链路守卫，14 项；纯 Node，不启动 Electron）
  *  4. scripts/verify-downloads.js（下载链路，16 项；纯 Node，不启动 Electron）
  *  5. scripts/verify-gpu-policy.js（图形性能策略，14 项；纯 Node，不启动 Electron）
@@ -21,12 +21,12 @@
  * 15. scripts/verify-tab-lifecycle.js（标签生命周期判定，18 项；纯 Node，不启动 Electron）
  * 16. scripts/verify-tab-sleep.js（标签休眠与唤醒端到端，10 项）
  * 17. scripts/verify-network-state.js（断网判定与断网横幅，10 项；纯 Node，不启动 Electron）
- * 18. scripts/verify-page-cache.js（离线页面缓存、快照块结构、隐私加密与隐私站点名单、站点名单与其导入导出、坏条目清理，45 项；纯 Node，不启动 Electron）
+ * 18. scripts/verify-page-cache.js（离线页面缓存、快照块结构、隐私加密、两份站点名单（含各自的导入导出）、坏条目清理，47 项；纯 Node，不启动 Electron）
  * 19. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
  * 20. scripts/verify-runtime-compat.js（运行时兼容：剪贴板异步化与版本三处一致，9 项；纯 Node，不启动 Electron）
- * 21. scripts/verify-release-gate.js（发版门禁、安装器 e2e 接线、验签挑包与差分闸门，22 项；纯 Node，不跑安装包）
- * 22. scripts/verify-signing.js（安装包签名、密码存凭据管理器、证书有效期与打包接线，27 项；不看签名包时只跑静态守卫）
- * 23. scripts/verify-agent-settings.js（agent 改设置：白名单 / 锁死 / 确认 / 限流 / 多步撤销，18 项；纯 Node）
+ * 21. scripts/verify-release-gate.js（发版门禁、安装器 e2e 接线、验签挑包、差分闸门与 asar 差分结论，24 项；纯 Node，不跑安装包）
+ * 22. scripts/verify-signing.js（安装包签名、密码存凭据管理器、证书有效期、签名状态进界面与打包接线，35 项；不看签名包时只跑静态守卫）
+ * 23. scripts/verify-agent-settings.js（agent 改设置：白名单 / 锁死 / 确认 / 限流 / 多步撤销 / 场景预设，22 项；纯 Node）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -67,7 +67,7 @@ const STEPS = [
   {
     label: '界面体验回归',
     script: 'verify-ui-polish.js',
-    items: '117 项',
+    items: '119 项',
     timeoutMs: 360000,
   },
   {
@@ -163,7 +163,7 @@ const STEPS = [
   {
     label: '离线页面缓存',
     script: 'verify-page-cache.js',
-    items: '45 项',
+    items: '47 项',
     timeoutMs: 60000,
   },
   {
@@ -175,13 +175,13 @@ const STEPS = [
   {
     label: '发版门禁接线',
     script: 'verify-release-gate.js',
-    items: '22 项',
+    items: '24 项',
     timeoutMs: 60000,
   },
   {
     label: '代码签名',
     script: 'verify-signing.js',
-    items: '27 项',
+    items: '35 项',
     timeoutMs: 60000,
     /** 没打签名包时只跑静态守卫（脚本自己会打印「跳过真实签名检查」） */
     args: ['--no-artifact'],
@@ -189,7 +189,7 @@ const STEPS = [
   {
     label: 'agent 改设置回归',
     script: 'verify-agent-settings.js',
-    items: '18 项',
+    items: '22 项',
     timeoutMs: 60000,
   },
   {

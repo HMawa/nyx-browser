@@ -213,6 +213,23 @@ check(
   /--base/.test(read(MEASURE)) && /--target/.test(read(MEASURE)) && /DIFF_MIN_HIT_RATE|hitRate/.test(read(MEASURE)),
   'scripts/measure-delta.js 要在，下次换内核时能重新量一遍'
 );
+check(
+  'app.asar 的差分可行性有实测工具，结论不是拍脑袋',
+  (() => {
+    const file = path.join(ROOT, 'scripts', 'measure-asar-delta.js');
+    if (!fs.existsSync(file)) return false;
+    const code = read(file);
+    // 固定块与内容定义分块都要量：只量固定块会得出"差分没用"的错误结论
+    return /cdcBlocks\(/.test(code) && /平均 16K/.test(code) && /75\.11%|74\.53%/.test(code);
+  })(),
+  'scripts/measure-asar-delta.js 要在，且把 2026-11-14 的实测结论写进文件头'
+);
+check(
+  '差分这条路为什么没走，文档里写清了边界',
+  /asar/.test(read(path.join(ROOT, 'docs', '实测修复台账.md')))
+    && /内容定义分块|CDC/.test(read(path.join(ROOT, 'docs', '实测修复台账.md'))),
+  'docs/实测修复台账.md 要写明「安装包形态 0 命中、asar 上要有效必须换 CDC、以及为什么不现在做」'
+);
 
 const failed = checks.filter((item) => !item.ok);
 console.log(`\n[Nyx] 发版门禁接线检查（${checks.length} 项）`);
