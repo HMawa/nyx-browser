@@ -189,6 +189,80 @@ check('界面与 MCP 都如实说明边界（可改 / 锁死 / 免责）', () =>
   return 'ok';
 });
 
+check('撤销：没有记录时明确说没有可撤销的，不假装成功', () => {
+  const plan = settings.planSettingUndo([], { current: 'ink' });
+  assert(plan.ok === false, '没有记录时不能报成功');
+  assert(plan.code === 'NOTHING_TO_UNDO', `要报 NOTHING_TO_UNDO，实际 ${plan.code}`);
+  assert(/没有可撤销/.test(plan.error), '要给中文原因');
+  assert(plan.disclaimer === settings.SETTING_DISCLAIMER, '拒绝也要带免责');
+  assert(settings.planSettingUndo(null, {}).code === 'NOTHING_TO_UNDO', '传 null 也不能炸');
+  return plan.code;
+});
+
+check('撤销：回到上一次的旧值，而不是让 agent 再改一次回去', () => {
+  const entries = [
+    { key: 'theme', value: 'paper', previous: 'ink', at: 1 },
+    { key: 'theme', value: 'quiet', previous: 'paper', at: 2 },
+  ];
+  const plan = settings.planSettingUndo(entries, { current: 'quiet' });
+  assert(plan.ok === true, `应当允许撤销：${plan.error || ''}`);
+  assert(plan.key === 'theme', '撤销的是最近一条记录的键');
+  assert(plan.value === 'paper', `要回滚到上一次改之前的值 paper，实际 ${plan.value}`);
+  assert(plan.undo === true, '要标记这是一次撤销');
+  assert(/已撤销/.test(plan.message), '文案要说清是撤销');
+  assert(/quiet/.test(plan.value) === false, '不许回滚成当前值');
+  return plan.value;
+});
+
+check('撤销：值已经被人改回去时说清楚，不硬盖人的选择', () => {
+  const entries = [{ key: 'theme', value: 'paper', previous: 'ink', at: 1 }];
+  const plan = settings.planSettingUndo(entries, { current: 'ink' });
+  assert(plan.ok === true, '这不算错误，只是不需要撤销');
+  assert(plan.code === 'NO_CHANGE', `要报 NO_CHANGE，实际 ${plan.code}`);
+  assert(/不需要再撤销/.test(plan.message), '要说清不需要撤销');
+  return plan.code;
+});
+
+check('撤销：锁死的键、记录里不认识的键、旧值不合法都拒绝并给原因', () => {
+  const locked = settings.planSettingUndo([{ key: 'privacyLink', value: 'direct', previous: 'proxy' }], {});
+  assert(locked.ok === false && locked.code === 'LOCKED_KEY', '锁死的键不许撤销');
+  assert(locked.locked === true, '要标记 locked');
+  const unknown = settings.planSettingUndo([{ key: 'notAKey', value: 1, previous: 0 }], {});
+  assert(unknown.ok === false && unknown.code === 'UNKNOWN_KEY', '不认识的键要拒绝');
+  const bad = settings.planSettingUndo([{ key: 'tabSleepMinutes', value: 30, previous: 'abc' }], {});
+  assert(bad.ok === false && bad.code === 'BAD_VALUE', '旧值不合法要拒绝');
+  assert(/撤销不了/.test(bad.error), '要给中文原因');
+  return 'ok';
+});
+
+check('撤销接线：只走 agent 通道，撤销也要留痕、也要人工确认', () => {
+  const main = read('src/main.js');
+  assert(/planSettingUndo: planAgentSettingUndo/.test(main), 'main 要引入 planSettingUndo');
+  assert(/if \(undo\) \{/.test(main) && /planAgentSettingUndo\(entries/.test(main), 'main 要走撤销分支');
+  assert(/runtime\.agentSettingUndo\.push\(/.test(main), '成功修改要记一条可撤销记录');
+  assert(/previous/.test(main), '记录里必须有 previous（旧值）');
+  assert(main.includes('AGENT_SETTINGS_UNDONE'), '撤销要单独记一条诊断');
+  assert(/agentSettingUndo: \[\],/.test(main), '可撤销记录要用空数组初始化');
+
+  const actions = read('src/core/actions.js');
+  assert(/params\.undo === true/.test(actions), '执行器要接受 undo:true');
+
+  const dispatch = read('src/core/agent-dispatch.js');
+  assert(/undo: source\.undo === true/.test(dispatch), '留痕里要能看见这是一次撤销');
+  assert(/（撤销上一次）/.test(dispatch), '留痕的目标一栏要写清是撤销');
+
+  const html = read('src/renderer/settings.html');
+  assert(html.includes('id="agent-settings-undo"'), '设置页要如实说明撤销怎么用');
+  const js = read('src/renderer/settings.js');
+  assert(/payload\.undo/.test(js), '界面要读 undo 状态');
+  assert(/agent-settings-undo/.test(js), '界面要渲染撤销说明');
+  assert(/不给界面单独开一条路|让 agent 发一次/.test(js + html + main), '要写清撤销只能走 agent 通道');
+
+  const snapshot = read('src/main.js');
+  assert(/undo: lastUndo/.test(snapshot), '快照里要带 undo 状态');
+  return 'ok';
+});
+
 check('产品红线：这一层不许自己联网、不许调生成式接口', () => {
   const source = read('src/core/agent-settings.js');
   const code = source

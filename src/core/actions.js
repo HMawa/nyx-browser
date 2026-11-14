@@ -181,7 +181,8 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog, ge
       // 读 schema 与写改动都交给主进程注入的两个函数，判定规则在 src/core/agent-settings.js
       if (type === 'settings') {
         if (aborted()) return interrupted();
-        if (params.apply === true || params.key) {
+        // undo:true 是"撤销上一次"，它同样只走这一个入口（人工确认与留痕都在通道里做）
+        if (params.apply === true || params.key || params.undo === true) {
           if (typeof applySetting !== 'function') {
             return wrap({ ok: false, error: '当前内核不支持由 agent 改设置' });
           }

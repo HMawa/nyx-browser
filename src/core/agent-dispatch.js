@@ -179,6 +179,8 @@ function redactParams(type, params) {
           ? source.value
           : undefined,
         confirm: source.confirm === true,
+        // 撤销也要在留痕里看得见：否则"设置怎么变回去了"会变成无解的问题
+        undo: source.undo === true,
       };
     case 'download':
       return {
@@ -195,8 +197,11 @@ function redactParams(type, params) {
 /** 留痕里“目标”一栏：稳定元素 id 优先，其次选择器，最后网址 */
 function describeTarget(type, params) {
   const source = params && typeof params === 'object' ? params : {};
-  // 改设置的目标是"哪个键"，没有页面元素可指
-  if (type === 'settings') return typeof source.key === 'string' ? source.key.slice(0, 60) : '（未指定键）';
+  // 改设置的目标是"哪个键"，没有页面元素可指；撤销时键由主进程按记录决定
+  if (type === 'settings') {
+    if (source.undo === true) return '（撤销上一次）';
+    return typeof source.key === 'string' ? source.key.slice(0, 60) : '（未指定键）';
+  }
   if (typeof source.elementId === 'string' && source.elementId) return source.elementId.slice(0, 40);
   if (typeof source.selector === 'string' && source.selector) return source.selector.slice(0, 200);
   if (typeof source.url === 'string' && source.url) return redactUrl(source.url);

@@ -76,6 +76,7 @@ const {
   SETTING_SCHEMA,
   describeSettingsSchema,
   planSettingChange: planAgentSettingChange,
+  planSettingUndo: planAgentSettingUndo,
 } = require('./core/agent-settings');
 const {
   AGENT_DEBUG_PORT_FILE,
@@ -454,6 +455,10 @@ const runtime = {
   bootAgentMode: BOOT_AGENT_MODE,
   /** 外部接入的 CDP 端口（内置模式下仅作展示，不监听） */
   agentDebugPort: BOOT_AGENT_MODE_CONFIG.debugPort,
+  /** agent 改设置的限流窗口（只存时间戳，一分钟内最多 10 次） */
+  agentSettingHistory: [],
+  /** agent 改设置的成功记录（key / 新值 / 旧值 / 时间），用于「撤销上一次」 */
+  agentSettingUndo: [],
   /** agent 会话空闲计时器（清单 G）：没有新动作时用来恢复"标签可以休眠" */
   agentSessionTimer: null,
   /** 下载中心窗口（独立 BrowserWindow） */
@@ -8409,27 +8414,45 @@ function agentSettingsSnapshot() {
   const current = {};
   for (const key of SETTING_KEYS) current[key] = ui[key];
   const schema = describeSettingsSchema();
+  const undoList = Array.isArray(runtime.agentSettingUndo) ? runtime.agentSettingUndo : [];
+  const lastUndo = undoList.length ? undoList[undoList.length - 1] : null;
   return {
     ...schema,
     current,
     // 界面上"哪些键是锁死的"要和判定用的是同一份表
     lockedKeys: Object.keys(SETTING_LOCKED),
     disclaimer: SETTING_DISCLAIMER,
+    // 撤销不给界面单独开一条路：它仍是 agent 动作（带 undo:true），同样要人工确认与留痕。
+    // 这里只如实告诉界面"现在能不能撤、能撤哪一次"。
+    undo: lastUndo
+      ? { available: true, key: lastUndo.key, at: lastUndo.at, how: '让 agent 发一次 settings 动作并带上 undo:true，照样要你点确认' }
+      : { available: false, how: '还没有哪个 agent 改过设置，暂时没有可撤销的' },
   };
 }
 
 async function applyAgentSetting(params) {
   const input = params && typeof params === 'object' ? params : {};
-  const key = typeof input.key === 'string' ? input.key.trim() : '';
+  const undo = input.undo === true;
+  let key = typeof input.key === 'string' ? input.key.trim() : '';
   const ui = runtime.uiStore ? runtime.uiStore.get() : {};
   const history = Array.isArray(runtime.agentSettingHistory) ? runtime.agentSettingHistory : [];
   const now = Date.now();
   runtime.agentSettingHistory = history.filter((stamp) => now - stamp < 60 * 1000);
 
-  const plan = planAgentSettingChange(
-    { key, value: input.value, confirm: input.confirm === true },
-    { current: ui[key], history: runtime.agentSettingHistory, now },
-  );
+  // 撤销上一次（候选④）：认的是"当时记下的旧值"，不是让 agent 再改一次回去。
+  // 中间要是有人手动改过，planSettingUndo 会如实说"不需要撤销"，不会硬盖人的选择。
+  // 撤销本身仍要过人工确认与留痕，只是不占修改限流的额度（一键回退不该被限流卡住）。
+  let plan;
+  if (undo) {
+    const entries = Array.isArray(runtime.agentSettingUndo) ? runtime.agentSettingUndo : [];
+    key = entries.length ? entries[entries.length - 1].key : '';
+    plan = planAgentSettingUndo(entries, { current: key ? ui[key] : undefined });
+  } else {
+    plan = planAgentSettingChange(
+      { key, value: input.value, confirm: input.confirm === true },
+      { current: ui[key], history: runtime.agentSettingHistory, now },
+    );
+  }
 
   if (!plan.ok) {
     if (plan.code !== 'RATE_LIMITED') {
@@ -8452,7 +8475,7 @@ async function applyAgentSetting(params) {
     return {
       ok: true,
       code: 'NO_CHANGE',
-      key,
+      key: plan.key || key,
       value: plan.value,
       message: plan.message,
       disclaimer: SETTING_DISCLAIMER,
@@ -8478,6 +8501,14 @@ async function applyAgentSetting(params) {
 
   runtime.agentSettingHistory.push(now);
 
+  // 留一条可撤销的记录：只记"这次改成了什么、改之前是什么"，
+  // 不记 agent 是谁（那在动作留痕里），撤销只回滚一层，免得越撤越乱。
+  const previous = ui[key];
+  if (Array.isArray(runtime.agentSettingUndo)) {
+    runtime.agentSettingUndo.push({ key, value: plan.value, previous, at: now });
+    if (runtime.agentSettingUndo.length > 20) runtime.agentSettingUndo.splice(0, runtime.agentSettingUndo.length - 20);
+  }
+
   // 标签休眠改完要立刻生效，否则用户会以为"改了没反应"
   if (key === 'tabSleepMinutes' && runtime.tabManager && typeof runtime.tabManager.setSleepAfterMs === 'function') {
     try {
@@ -8487,7 +8518,7 @@ async function applyAgentSetting(params) {
     }
   }
 
-  diagnostics.info('AGENT_SETTINGS_CHANGED', `agent 改了设置：${key}`, {
+  diagnostics.info(undo ? 'AGENT_SETTINGS_UNDONE' : 'AGENT_SETTINGS_CHANGED', undo ? `撤销了上一次 agent 改的设置：${key}` : `agent 改了设置：${key}`, {
     key,
     value: plan.value,
     summary: plan.summary,
@@ -8496,8 +8527,8 @@ async function applyAgentSetting(params) {
   if (typeof notifyNotice === 'function') {
     notifyNotice({
       level: 'info',
-      code: 'AGENT_SETTINGS_CHANGED',
-      title: '有个 agent 改了你的设置',
+      code: undo ? 'AGENT_SETTINGS_UNDONE' : 'AGENT_SETTINGS_CHANGED',
+      title: undo ? '已撤销上一次 agent 改的设置' : '有个 agent 改了你的设置',
       message: `${plan.summary}。改了什么可以在「设置 → Agent 访问 → 动作留痕」里看到。`,
     });
   }
@@ -8506,6 +8537,7 @@ async function applyAgentSetting(params) {
     ok: true,
     key,
     value: plan.value,
+    undo,
     summary: plan.summary,
     message: plan.message,
     disclaimer: SETTING_DISCLAIMER,

@@ -216,6 +216,83 @@ function planSettingChange(request, context) {
   };
 }
 
+/**
+ * 撤销上一次由 agent 做成的修改。
+ *
+ * 为什么不让 agent 自己"再改一次回去"：那会走同一条路，但只要中间有人手动改过，
+ * "改回去"就可能把人的改动覆盖掉。所以这里认的是记录：只有 last.previous 还在，
+ * 才允许回滚；值已经被人改走，就如实说"不需要撤销"，而不是硬盖。
+ *
+ * @param {Array<{key:string,value:*,previous:*,at?:number}>} entries 成功的修改记录（越旧越前）
+ * @param {{current?:*, lockedKeys?:string[]}} [context]
+ */
+function planSettingUndo(entries, context) {
+  const ctx = context && typeof context === 'object' ? context : {};
+  const list = Array.isArray(entries) ? entries.filter((item) => item && typeof item.key === 'string') : [];
+  if (!list.length) {
+    return {
+      ok: false,
+      code: 'NOTHING_TO_UNDO',
+      error: '还没有哪个 agent 改过设置，没有可撤销的。',
+      disclaimer: SETTING_DISCLAIMER,
+    };
+  }
+
+  const last = list[list.length - 1];
+  if (SETTING_LOCKED[last.key]) {
+    return {
+      ok: false,
+      code: 'LOCKED_KEY',
+      error: `${last.key} 现在不能由 agent 改：${SETTING_LOCKED[last.key]}`,
+      locked: true,
+      disclaimer: SETTING_DISCLAIMER,
+    };
+  }
+
+  const rule = SETTING_SCHEMA[last.key];
+  if (!rule) {
+    return {
+      ok: false,
+      code: 'UNKNOWN_KEY',
+      error: `记录里的 ${last.key} 已经不在可改范围里了，撤销不了。`,
+      disclaimer: SETTING_DISCLAIMER,
+    };
+  }
+
+  const checked = validateSettingValue(last.key, last.previous);
+  if (!checked.ok) {
+    return {
+      ok: false,
+      code: 'BAD_VALUE',
+      error: `记录里这一项的旧值不合法，撤销不了：${checked.error}`,
+      disclaimer: SETTING_DISCLAIMER,
+    };
+  }
+
+  const currentKnown = Object.prototype.hasOwnProperty.call(ctx, 'current');
+  if (currentKnown && ctx.current === checked.value) {
+    return {
+      ok: true,
+      code: 'NO_CHANGE',
+      key: last.key,
+      value: checked.value,
+      message: `${rule.label} 已经回到上一次改之前的样子了，不需要再撤销。`,
+      summary: `${rule.describe(checked.value)}（无变化）`,
+      disclaimer: SETTING_DISCLAIMER,
+    };
+  }
+
+  return {
+    ok: true,
+    key: last.key,
+    value: checked.value,
+    undo: true,
+    summary: rule.describe(checked.value),
+    message: `已撤销：${rule.label} 回到 ${rule.describe(checked.value)}。`,
+    disclaimer: SETTING_DISCLAIMER,
+  };
+}
+
 module.exports = {
   SETTING_DISCLAIMER,
   SETTING_KEYS,
@@ -225,5 +302,6 @@ module.exports = {
   SETTING_SCHEMA,
   describeSettingsSchema,
   planSettingChange,
+  planSettingUndo,
   validateSettingValue,
 };

@@ -3407,6 +3407,7 @@ async function main() {
           const lockedText = (document.getElementById('agent-settings-locked') || {}).textContent || '';
           const keysText = (document.getElementById('agent-settings-keys') || {}).textContent || '';
           const disclaimer = (document.getElementById('agent-settings-disclaimer') || {}).textContent || '';
+          const undoLine = (document.getElementById('agent-settings-undo') || {}).textContent || '';
           const badge = (document.getElementById('agent-settings-badge') || {}).textContent || '';
           return {
             ok: Boolean(api && api.ok !== false),
@@ -3418,6 +3419,8 @@ async function main() {
             lockedHasPrivacy: /privacyLink/.test(lockedText),
             lockedHasMode: /(^|[^a-zA-Z])mode([^a-zA-Z]|$)/.test(lockedText),
             keysHasTheme: /theme/.test(keysText),
+            undoLine,
+            undoApi: api && api.undo ? api.undo : null,
             disclaimer,
             badge,
           };
@@ -3436,6 +3439,19 @@ async function main() {
             && /留痕/.test(card.disclaimer)
             && /键/.test(card.badge),
           JSON.stringify(card),
+        );
+        // 撤销（候选④）：界面必须如实说"能不能撤、怎么撤"，而不是给一个绕开确认的按钮
+        check(
+          '设置页如实说明「撤销上一次」怎么用，并且不给绕开人工确认的旁路（候选④）',
+          card
+            && typeof card.undoLine === 'string'
+            && /撤销/.test(card.undoLine)
+            && card.undoApi
+            && typeof card.undoApi.available === 'boolean'
+            && typeof card.undoApi.how === 'string'
+            && card.undoApi.how.length > 6
+            && (card.undoApi.available ? /撤销/.test(card.undoLine) : /没有可撤销|暂时没有/.test(card.undoLine)),
+          JSON.stringify({ undoLine: card && card.undoLine, undoApi: card && card.undoApi }),
         );
       } catch (err) {
         check('agent 改设置卡片端到端检查未中断', false, err && err.message);

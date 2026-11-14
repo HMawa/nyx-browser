@@ -4053,6 +4053,15 @@ async function loadFootprint() {
       if (disclaimer && typeof payload.disclaimer === 'string' && payload.disclaimer) {
         disclaimer.textContent = payload.disclaimer;
       }
+      // 撤销：不给界面单独开一条路（那会绕开人工确认与留痕），只如实说现在能撤哪一次、怎么撤
+      const undoLine = byId('agent-settings-undo');
+      if (undoLine) {
+        const undoInfo = payload.undo && typeof payload.undo === 'object' ? payload.undo : {};
+        undoLine.textContent = undoInfo.available
+          ? `撤销：可以撤销最近一次对「${undoInfo.key}」的修改——${undoInfo.how || '让 agent 发一次带 undo:true 的设置动作'}。`
+          : `撤销：${undoInfo.how || '还没有哪个 agent 改过设置，暂时没有可撤销的'}。`;
+        undoLine.className = 'hint';
+      }
       if (status) {
         status.textContent = `一分钟内最多改 ${(payload.rateLimit && payload.rateLimit.max) || 10} 次；改完会立刻生效。`;
         status.className = 'hint';

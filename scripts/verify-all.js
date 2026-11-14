@@ -5,7 +5,7 @@
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
- *  2. scripts/verify-ui-polish.js（界面体验，116 项）
+ *  2. scripts/verify-ui-polish.js（界面体验，117 项）
  *  3. scripts/verify-link-guard.js（出站链路守卫，14 项；纯 Node，不启动 Electron）
  *  4. scripts/verify-downloads.js（下载链路，16 项；纯 Node，不启动 Electron）
  *  5. scripts/verify-gpu-policy.js（图形性能策略，14 项；纯 Node，不启动 Electron）
@@ -26,7 +26,7 @@
  * 20. scripts/verify-runtime-compat.js（运行时兼容：剪贴板异步化与版本三处一致，9 项；纯 Node，不启动 Electron）
  * 21. scripts/verify-release-gate.js（发版门禁与安装器 e2e 接线，16 项；纯 Node，不跑安装包）
  * 22. scripts/verify-signing.js（安装包签名、打包接线与证书有效期，18 项；不看签名包时只跑静态守卫）
- * 23. scripts/verify-agent-settings.js（agent 改设置：白名单 / 锁死 / 确认 / 限流，12 项；纯 Node）
+ * 23. scripts/verify-agent-settings.js（agent 改设置：白名单 / 锁死 / 确认 / 限流 / 撤销，17 项；纯 Node）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -67,7 +67,7 @@ const STEPS = [
   {
     label: '界面体验回归',
     script: 'verify-ui-polish.js',
-    items: '116 项',
+    items: '117 项',
     timeoutMs: 360000,
   },
   {
@@ -189,7 +189,7 @@ const STEPS = [
   {
     label: 'agent 改设置回归',
     script: 'verify-agent-settings.js',
-    items: '12 项',
+    items: '17 项',
     timeoutMs: 60000,
   },
   {
