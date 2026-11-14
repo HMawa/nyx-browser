@@ -3086,10 +3086,203 @@ async function loadFootprint() {
     if (failed) failed.addEventListener('change', () => loadAgentAudit());
   }
 
+  // ---------------------------------------------------------------- 站点三层授权（清单 E）
+
+  let agentSitesWired = false;
+  let agentSitesState = null;
+
+  function renderSiteList(listId, emptyId, countId, rules, conflicts) {
+    const list = byId(listId);
+    const empty = byId(emptyId);
+    const count = byId(countId);
+    if (count) count.textContent = String(rules.length);
+    if (!list) return;
+    list.textContent = '';
+    for (const rule of rules) {
+      const li = document.createElement('li');
+      const host = document.createElement('span');
+      host.className = 'site-host';
+      host.textContent = rule.target;
+      li.appendChild(host);
+      if (conflicts.includes(rule.target)) {
+        const conflict = document.createElement('span');
+        conflict.className = 'site-conflict';
+        conflict.textContent = '同时在两张名单里：屏蔽优先';
+        li.appendChild(conflict);
+      }
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'site-remove';
+      remove.textContent = '删除';
+      remove.dataset.target = rule.target;
+      remove.setAttribute('aria-label', `从这张名单里删除 ${rule.target}`);
+      li.appendChild(remove);
+      list.appendChild(li);
+    }
+    if (empty) empty.hidden = rules.length > 0;
+  }
+
+  function renderAgentSites(payload) {
+    agentSitesState = payload || null;
+    if (!payload || payload.ok === false) {
+      const badge = byId('agent-sites-badge');
+      if (badge) {
+        badge.textContent = '读不到';
+        badge.className = 'badge bad';
+      }
+      const status = byId('agent-sites-status');
+      if (status) {
+        status.textContent = (payload && payload.error) || '站点名单读取失败。';
+        status.className = 'hint is-warn';
+      }
+      return;
+    }
+    const policy = payload.policy || { globalEnabled: true, allow: [], block: [] };
+    const global = byId('agent-sites-global');
+    if (global) global.checked = policy.globalEnabled !== false;
+
+    const badge = byId('agent-sites-badge');
+    if (badge) {
+      badge.textContent = policy.globalEnabled === false ? '已关闭' : '已开启';
+      badge.className = policy.globalEnabled === false ? 'badge warn' : 'badge ok';
+    }
+
+    const conflicts = Array.isArray(payload.conflicts) ? payload.conflicts : [];
+    renderSiteList('agent-allow-list', 'agent-allow-empty', 'agent-allow-count', policy.allow || [], conflicts);
+    renderSiteList('agent-block-list', 'agent-block-empty', 'agent-block-count', policy.block || [], conflicts);
+
+    const sessionCount = byId('agent-session-count');
+    const trusted = Array.isArray(payload.sessionTrusted) ? payload.sessionTrusted : [];
+    if (sessionCount) {
+      sessionCount.textContent = trusted.length
+        ? `本次会话信任 ${trusted.length} 个站点：${trusted.join('、')}`
+        : '本次会话信任 0 个站点';
+    }
+
+    const current = byId('agent-sites-current');
+    if (current && payload.current) {
+      const map = { allow: '放行', deny: '拒绝', ask: '进站时问你一次' };
+      current.textContent = payload.current.site
+        ? `当前站点 ${payload.current.site}：${map[payload.current.decision] || payload.current.decision}（${payload.current.layer}）`
+        : '当前标签没有可识别的站点（本地页不受名单限制，但也不会放行）。';
+    }
+  }
+
+  async function loadAgentSites() {
+    if (!window.nyx.agentSites) return;
+    try {
+      const payload = await window.nyx.agentSites({});
+      renderAgentSites(payload);
+    } catch (err) {
+      renderAgentSites({ ok: false, error: `读取站点名单失败：${err && err.message ? err.message : err}` });
+    }
+  }
+
+  async function setAgentSites(patch, okText) {
+    if (!window.nyx.agentSitesSet) return;
+    const status = byId('agent-sites-status');
+    try {
+      const payload = await window.nyx.agentSitesSet(patch || {});
+      if (payload && payload.ok === false) {
+        renderAgentSites({ ...(agentSitesState || {}), ok: true, ...payload, error: '' });
+        if (status) {
+          status.textContent = `没改成：${payload.error || '未知原因'}`;
+          status.className = 'hint is-warn';
+        }
+        return;
+      }
+      renderAgentSites(payload);
+      if (status) {
+        status.textContent = okText || '已保存';
+        status.className = 'hint is-ok';
+      }
+    } catch (err) {
+      if (status) {
+        status.textContent = `没保存成功：${err && err.message ? err.message : err}`;
+        status.className = 'hint is-warn';
+      }
+    }
+  }
+
+  function wireAgentSites() {
+    if (agentSitesWired) return;
+    agentSitesWired = true;
+
+    const global = byId('agent-sites-global');
+    if (global) {
+      global.addEventListener('change', () => {
+        const on = global.checked;
+        setAgentSites(
+          { globalEnabled: on },
+          on ? '已开启 agent 访问：未命中名单的站点会逐站问你一次' : '已关闭 agent 访问：agent 现在什么也做不了',
+        );
+      });
+    }
+
+    const addAllow = byId('btn-agent-allow-add');
+    const allowInput = byId('agent-allow-input');
+    if (addAllow && allowInput) {
+      addAllow.addEventListener('click', () => {
+        const value = allowInput.value.trim();
+        if (!value) {
+          const status = byId('agent-sites-status');
+          if (status) {
+            status.textContent = '先填一个域名，例如 example.com';
+            status.className = 'hint is-warn';
+          }
+          return;
+        }
+        setAgentSites({ addAllow: value }, `已把 ${value} 加进白名单`).then(() => {
+          allowInput.value = '';
+        });
+      });
+    }
+
+    const addBlock = byId('btn-agent-block-add');
+    const blockInput = byId('agent-block-input');
+    if (addBlock && blockInput) {
+      addBlock.addEventListener('click', () => {
+        const value = blockInput.value.trim();
+        if (!value) {
+          const status = byId('agent-sites-status');
+          if (status) {
+            status.textContent = '先填一个域名，例如 example.com';
+            status.className = 'hint is-warn';
+          }
+          return;
+        }
+        setAgentSites({ addBlock: value }, `已把 ${value} 加进屏蔽名单`).then(() => {
+          blockInput.value = '';
+        });
+      });
+    }
+
+    for (const id of ['agent-allow-list', 'agent-block-list']) {
+      const list = byId(id);
+      if (!list) continue;
+      list.addEventListener('click', (event) => {
+        const button = event.target && event.target.closest ? event.target.closest('.site-remove') : null;
+        if (!button) return;
+        const target = button.dataset.target || '';
+        const patch = id === 'agent-allow-list' ? { removeAllow: target } : { removeBlock: target };
+        setAgentSites(patch, `已从名单里删掉 ${target}`);
+      });
+    }
+
+    const clearSession = byId('btn-agent-session-clear');
+    if (clearSession) {
+      clearSession.addEventListener('click', () => {
+        setAgentSites({ clearSession: true }, '已清空本次会话的信任，之后再进这些站点会重新问你');
+      });
+    }
+  }
+
   function loadAgentSection() {
     wireAgentSection();
+    wireAgentSites();
     loadAgentStatus();
     loadAgentAudit();
+    loadAgentSites();
   }
 
   // 主界面加载失败页（A4）的「打开诊断」会要求设置窗口直接落到「诊断」分区

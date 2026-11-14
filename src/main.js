@@ -58,6 +58,15 @@ const { createActionRunner } = require('./core/actions');
 // 统一动作通道（清单 C）：所有 agent 动作唯一入口，权限/确认/留痕/急停都从这里过
 const { createDispatcher } = require('./core/agent-dispatch');
 const { AgentAudit, toCsv } = require('./core/agent-audit');
+// 站点三层授权（清单 E）：屏蔽优先、白名单免进站确认、未命中问一次、全局关着一律不动
+const {
+  addRule: addSiteRule,
+  addSessionTrust,
+  agentSitesPayload,
+  evaluateSite,
+  removeRule: removeSiteRule,
+  sanitizePolicy: sanitizeSitePolicy,
+} = require('./core/agent-sites');
 const { getRiskLog } = require('./core/risk-guard');
 const { startHttpApi } = require('./api/http-api');
 const { createModeEventLog } = require('./core/mode-events');
@@ -298,6 +307,10 @@ const runtime = {
   agentAudit: null,
   /** agent 是否已被紧急停止（停止后拒绝一切新动作，直到手动恢复） */
   agentStopped: false,
+  /** 站点三层授权（清单 E）：白名单 / 屏蔽名单 / 全局开关，落盘 agent-sites.json */
+  agentSites: null,
+  /** 本次会话信任过的域名（只在内存里，重启即失效） */
+  agentSessionTrust: [],
   /** 停止原因与时间，给界面与诊断用 */
   agentStopReason: '',
   agentStopAt: 0,
@@ -3365,6 +3378,7 @@ function registerIpc() {
   registerDownloadsIpc();
   // agent 审计面与急停（D）
   registerAgentAuditIpc();
+  registerAgentSitesIpc();
 
   registerUpdateIpc();
 
@@ -7121,22 +7135,131 @@ function currentAgentSite() {
   }
 }
 
+/** 名单落盘（清单 E）。读不懂就当没配过，但**不许**把坏文件当成"全部放行" */
+function readAgentSites() {
+  try {
+    const file = userDataFile('agent-sites.json');
+    if (!fs.existsSync(file)) return sanitizeSitePolicy(null);
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return sanitizeSitePolicy(raw);
+  } catch (err) {
+    console.warn('[Nyx] agent 站点名单读取失败，按空名单启动：', err && err.message ? err.message : err);
+    diagnostics.warn('AGENT_SITES_READ_FAILED', '站点名单读取失败，按空名单启动', {
+      error: err && err.message ? err.message : String(err),
+    });
+    return sanitizeSitePolicy(null);
+  }
+}
+
+function writeAgentSites(policy) {
+  const safe = sanitizeSitePolicy(policy);
+  runtime.agentSites = safe;
+  try {
+    fs.writeFileSync(userDataFile('agent-sites.json'), `${JSON.stringify(safe, null, 2)}\n`, 'utf8');
+  } catch (err) {
+    console.warn('[Nyx] agent 站点名单保存失败：', err && err.message ? err.message : err);
+    diagnostics.error('AGENT_SITES_SAVE_FAILED', '站点名单没能保存到磁盘', {
+      error: err && err.message ? err.message : String(err),
+    });
+  }
+  return safe;
+}
+
 /**
- * 权限判定（清单 E 会在这里换成真正的三层授权）。
- * 现在如实报告「没有策略」而不是假装做了判定——否则审计里会出现一批
- * 「好像被授权过」的假记录。
+ * 进站确认（清单 E 的第三层）。
+ * 用户勾了「这次会话信任该域名」就只记在内存里——重启 Nyx 必须重新确认，
+ * 因为"上次点过同意"不能代表"这次也想让它动"。
  */
-function authorizeAgentAction(action, ctx) {
+async function askAgentSiteTrust(input) {
+  const win = runtime.mainWindow && !runtime.mainWindow.isDestroyed() ? runtime.mainWindow : null;
+  const host = (input && input.host) || '';
+  const detail = [
+    `${host} 既不在白名单也不在屏蔽名单里。`,
+    '允许一次：只在这次动作上放行，下一个动作还会再问。',
+    '信任该域名：本次会话内这个站点不再逐次询问（重启 Nyx 后失效）。',
+    '白名单 / 屏蔽名单在「设置 → Agent 访问」里维护；屏蔽名单永远优先。',
+    '白名单只代表"站点可以操作"，输入文字、下载这类动作仍会单独问你。',
+  ].join('\n');
+
+  try {
+    const answer = await dialog.showMessageBox(win, {
+      type: 'question',
+      title: 'Nyx · agent 想在这个站点上操作',
+      message: `agent 想在 ${host} 上执行「${(input && input.label) || '动作'}」`,
+      detail,
+      buttons: ['拒绝', '允许这一次'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+      checkboxLabel: '这次会话信任该域名（重启后失效）',
+      checkboxChecked: false,
+    });
+    const approved = answer.response === 1;
+    const remember = approved && Boolean(answer.checkboxChecked);
+    diagnostics.info(
+      'AGENT_SITE_CONFIRM',
+      approved ? (remember ? `用户信任了 ${host}（本次会话）` : `用户只放行了 ${host} 的这一次动作`) : `用户拒绝了 ${host}`,
+      { host, approved, remember },
+    );
+    return {
+      approved,
+      remember,
+      reason: approved ? '' : '用户在进站确认框里选择了拒绝',
+    };
+  } catch (err) {
+    const message = err && err.message ? err.message : String(err);
+    diagnostics.error('AGENT_SITE_CONFIRM_FAILED', '进站确认框没能弹出来', { host, error: message });
+    return { approved: false, remember: false, reason: `进站确认框没能弹出来：${message}` };
+  }
+}
+
+/**
+ * 权限判定 = 站点三层授权（清单 E）。
+ * 注意：**站点放行不等于动作放行**——确认规则（输入、下载）在通道里独立执行，白名单不豁免。
+ */
+async function authorizeAgentAction(action, ctx) {
   const type = action && action.type ? action.type : '';
-  diagnostics.info('AGENT_AUTHORIZE', `${type} 放行（站点授权尚未启用）`, {
-    site: (ctx && ctx.site) || '',
-    reason: 'no-policy',
+  const site = (ctx && ctx.site) || '';
+  const verdict = evaluateSite({
+    site,
+    policy: runtime.agentSites || sanitizeSitePolicy(null),
+    sessionTrusted: runtime.agentSessionTrust || [],
   });
-  return {
-    decision: 'allow',
-    reason: '站点授权尚未启用（清单 E 待做），当前一律放行',
-    rule: 'no-policy',
-  };
+
+  if (verdict.decision === 'allow') {
+    diagnostics.info('AGENT_AUTHORIZE', `${type} 放行（${verdict.layer}）`, {
+      site: verdict.host,
+      decision: 'allow',
+      layer: verdict.layer,
+      rule: verdict.reason,
+    });
+    return { decision: 'allow', reason: verdict.message, rule: verdict.layer };
+  }
+
+  if (verdict.decision === 'deny') {
+    diagnostics.warn('AGENT_AUTHORIZE', `${type} 被拒绝（${verdict.layer}）`, {
+      site: verdict.host,
+      decision: 'deny',
+      layer: verdict.layer,
+      rule: verdict.reason,
+    });
+    return { decision: 'deny', reason: verdict.message, rule: verdict.layer };
+  }
+
+  // 未命中任何名单 → 进站问一次
+  const answer = await askAgentSiteTrust({ host: verdict.host, label: type });
+  if (!answer.approved) {
+    return { decision: 'deny', reason: answer.reason, rule: 'site-denied' };
+  }
+  if (answer.remember) {
+    runtime.agentSessionTrust = addSessionTrust(runtime.agentSessionTrust, verdict.host).hosts;
+    return {
+      decision: 'allow',
+      reason: `${verdict.host} 已被你信任（本次会话有效）`,
+      rule: 'session-trusted',
+    };
+  }
+  return { decision: 'allow', reason: `你只放行了 ${verdict.host} 上的这一次动作`, rule: 'site-approved-once' };
 }
 
 /**
@@ -7367,8 +7490,76 @@ function registerAgentAuditIpc() {
   ipcMain.handle('nyx:agent:resume', () => resumeAgent());
 }
 
+/**
+ * 站点三层授权的 IPC（清单 E）。
+ * 设置页只提交"要加/要删哪一条"，判定规则全在 `src/core/agent-sites.js` 里，
+ * 免得界面和主进程各写一套匹配逻辑、最后两边说法不一致。
+ */
+function registerAgentSitesIpc() {
+  const payloadOf = (extra) =>
+    agentSitesPayload({
+      policy: runtime.agentSites || sanitizeSitePolicy(null),
+      sessionTrusted: runtime.agentSessionTrust || [],
+      site: (extra && extra.site) || currentAgentSite(),
+    });
+
+  ipcMain.handle('nyx:agent:sites', (_event, payload) => payloadOf(payload));
+
+  ipcMain.handle('nyx:agent:sites-set', (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    const next = sanitizeSitePolicy(runtime.agentSites || null);
+
+    if (input.globalEnabled !== undefined) {
+      next.globalEnabled = input.globalEnabled !== false;
+    }
+    if (typeof input.addAllow === 'string' && input.addAllow.trim()) {
+      const result = addSiteRule(next.allow, input.addAllow);
+      if (!result.ok) return { ...payloadOf(input), ok: false, error: result.error };
+      next.allow = result.list;
+    }
+    if (typeof input.addBlock === 'string' && input.addBlock.trim()) {
+      const result = addSiteRule(next.block, input.addBlock);
+      if (!result.ok) return { ...payloadOf(input), ok: false, error: result.error };
+      next.block = result.list;
+    }
+    if (typeof input.removeAllow === 'string' && input.removeAllow.trim()) {
+      const result = removeSiteRule(next.allow, input.removeAllow);
+      if (!result.ok) return { ...payloadOf(input), ok: false, error: result.error };
+      next.allow = result.list;
+    }
+    if (typeof input.removeBlock === 'string' && input.removeBlock.trim()) {
+      const result = removeSiteRule(next.block, input.removeBlock);
+      if (!result.ok) return { ...payloadOf(input), ok: false, error: result.error };
+      next.block = result.list;
+    }
+
+    const saved = writeAgentSites(next);
+
+    if (input.trustSession && typeof input.trustSession === 'string') {
+      const trusted = addSessionTrust(runtime.agentSessionTrust || [], input.trustSession);
+      if (trusted.ok) runtime.agentSessionTrust = trusted.hosts;
+    }
+    if (input.clearSession) {
+      runtime.agentSessionTrust = [];
+    }
+
+    diagnostics.info('AGENT_SITES_UPDATED', '站点名单已更新', {
+      globalEnabled: saved.globalEnabled,
+      allow: saved.allow.length,
+      block: saved.block.length,
+      sessionTrusted: (runtime.agentSessionTrust || []).length,
+    });
+    pushAgentStatus();
+    return payloadOf(input);
+  });
+}
+
 async function startLocalApi() {
   runtime.apiToken = ensureApiToken();
+
+  // 站点授权（清单 E）：名单读盘失败时按空名单启动（即"每个站点都要问一次"），
+  // 绝不因为文件坏了就变成"全部放行"。
+  runtime.agentSites = readAgentSites();
 
   // 审计面（清单 D）：内存环形缓冲给界面，jsonl 落盘给事后翻账。
   // 落盘走 fs.appendFileSync，失败只会计数 + 打印，不会让动作本身失败。

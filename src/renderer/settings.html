@@ -845,6 +845,58 @@
           <div class="sec-scroll">
             <section class="info-card">
               <div class="info-head">
+                <h3>站点授权</h3>
+                <span class="badge" id="agent-sites-badge">—</span>
+              </div>
+              <div class="info-body">
+                <p class="hint" id="agent-sites-hint">
+                  三层授权：屏蔽名单里的站点进站直接拒绝；白名单里的站点进站默认放行；
+                  两边都没命中时，每进一个站点问你一次。屏蔽永远优先，白名单也不豁免「输入文字 / 下载」这类动作级确认。
+                </p>
+                <label class="ack-row">
+                  <input type="checkbox" id="agent-sites-global">
+                  允许 agent 访问网页（关掉后 agent 什么也做不了）
+                </label>
+
+                <div class="agent-site-block">
+                  <div class="agent-site-head">
+                    <h4>白名单</h4>
+                    <span class="badge" id="agent-allow-count">0</span>
+                  </div>
+                  <p class="hint">登记一次永久有效；子域继承（登记 example.com 也覆盖 a.example.com）。</p>
+                  <div class="agent-site-add">
+                    <input type="text" id="agent-allow-input" placeholder="example.com" aria-label="要加入白名单的域名">
+                    <button type="button" class="btn" id="btn-agent-allow-add">加入白名单</button>
+                  </div>
+                  <ul class="agent-site-list" id="agent-allow-list"></ul>
+                  <p class="hint" id="agent-allow-empty">白名单还是空的。</p>
+                </div>
+
+                <div class="agent-site-block">
+                  <div class="agent-site-head">
+                    <h4>屏蔽名单</h4>
+                    <span class="badge" id="agent-block-count">0</span>
+                  </div>
+                  <p class="hint">这里的站点一律拒绝 agent 操作，即使同时也在白名单里（屏蔽优先）。</p>
+                  <div class="agent-site-add">
+                    <input type="text" id="agent-block-input" placeholder="example.com" aria-label="要加入屏蔽名单的域名">
+                    <button type="button" class="btn" id="btn-agent-block-add">加入屏蔽名单</button>
+                  </div>
+                  <ul class="agent-site-list" id="agent-block-list"></ul>
+                  <p class="hint" id="agent-block-empty">屏蔽名单还是空的。</p>
+                </div>
+
+                <div class="sec-actions">
+                  <button type="button" class="btn" id="btn-agent-session-clear">清空本次会话的信任</button>
+                  <span class="hint" id="agent-session-count">本次会话信任 0 个站点</span>
+                </div>
+                <p class="hint" id="agent-sites-current"></p>
+                <p class="hint" id="agent-sites-status" role="status" aria-live="polite"></p>
+              </div>
+            </section>
+
+            <section class="info-card">
+              <div class="info-head">
                 <h3>紧急停止</h3>
                 <span class="badge" id="agent-badge">—</span>
               </div>

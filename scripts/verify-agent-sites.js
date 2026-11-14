@@ -1,0 +1,275 @@
+'use strict';
+
+/**
+ * 站点三层授权（清单 E）的纯 Node 回归。
+ *
+ * 这里不启动 Electron：名单匹配、优先级、脏数据清洗都是纯函数，
+ * 起窗口反而会把这些 bug 藏起来（弹窗一挡，断言根本跑不到判定）。
+ * 主进程接线（弹窗、IPC、落盘）用文件级静态检查覆盖。
+ */
+
+const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const sites = require('../src/core/agent-sites');
+const dispatch = require('../src/core/agent-dispatch');
+
+const root = path.join(__dirname, '..');
+const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
+
+const checks = [];
+function check(name, fn) {
+  try {
+    fn();
+    checks.push({ name, ok: true });
+    console.log(`✔ ${name}`);
+  } catch (err) {
+    checks.push({ name, ok: false, error: err && err.message ? err.message : String(err) });
+    console.log(`✘ ${name}`);
+    console.log(`    ${err && err.message ? err.message : err}`);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* 1. 域名归一                                                         */
+/* ------------------------------------------------------------------ */
+
+check('1. 域名归一：整条 URL、带端口、大写、末尾点都整成同一个 host', () => {
+  assert.equal(sites.normalizeHost('https://A.B.com:8443/x?y=1#z'), 'a.b.com');
+  assert.equal(sites.normalizeHost('  B.COM.  '), 'b.com');
+  assert.equal(sites.normalizeHost('example.com:443'), 'example.com');
+  assert.equal(sites.normalizeHost('localhost'), 'localhost');
+});
+
+check('2. 域名归一：拿不到合法域名时返回空串（不搞"差不多匹配"）', () => {
+  for (const bad of ['', '   ', 'not-a-host', 'a..b.com', '.b.com', 'http://', '[::1]:8080', null, undefined, 42]) {
+    assert.equal(sites.normalizeHost(bad), '', `「${String(bad)}」应该判非法`);
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* 2. 规则匹配                                                         */
+/* ------------------------------------------------------------------ */
+
+check('3. 子域继承：登记 b.com 也覆盖 a.b.com，但不会误伤 notb.com', () => {
+  const rule = sites.normalizeRule('b.com');
+  assert.equal(sites.ruleMatches(rule, 'b.com'), true);
+  assert.equal(sites.ruleMatches(rule, 'a.b.com'), true);
+  assert.equal(sites.ruleMatches(rule, 'x.y.b.com'), true);
+  assert.equal(sites.ruleMatches(rule, 'notb.com'), false);
+  assert.equal(sites.ruleMatches(rule, 'b.com.evil.net'), false);
+});
+
+check('4. 规则整形成对象时补 mode/note/addedAt，脏输入返回 null', () => {
+  const rule = sites.normalizeRule({ target: 'Example.com', mode: 'prefix', note: '测试', addedAt: 1234 }, 9999);
+  assert.equal(rule.target, 'example.com');
+  assert.equal(rule.mode, 'prefix');
+  assert.equal(rule.note, '测试');
+  assert.equal(rule.addedAt, 1234);
+  assert.equal(sites.normalizeRule({ target: 'nope' }), null);
+  assert.equal(sites.normalizeRule(null), null);
+});
+
+/* ------------------------------------------------------------------ */
+/* 3. 三层判定与优先级                                                 */
+/* ------------------------------------------------------------------ */
+
+check('5. 两边都没命中就"问一次"（并且说清楚是哪个站点）', () => {
+  const verdict = sites.evaluateSite({
+    site: 'https://shop.example.org/cart',
+    policy: { globalEnabled: true, allow: [], block: [] },
+  });
+  assert.equal(verdict.decision, 'ask');
+  assert.equal(verdict.host, 'shop.example.org');
+  assert.match(verdict.message, /需要你确认一次/);
+});
+
+check('6. 白名单进站默认放行，并在文案里说清"动作级确认不豁免"', () => {
+  const verdict = sites.evaluateSite({
+    site: 'a.b.com',
+    policy: { globalEnabled: true, allow: ['b.com'], block: [] },
+  });
+  assert.equal(verdict.decision, 'allow');
+  assert.equal(verdict.layer, sites.LAYERS.allow);
+  assert.match(verdict.message, /仍会单独问你/);
+});
+
+check('7. 屏蔽优先：同一域名同时在两张名单里时拒绝', () => {
+  const policy = { globalEnabled: true, allow: ['b.com'], block: ['b.com'] };
+  const verdict = sites.evaluateSite({ site: 'a.b.com', policy });
+  assert.equal(verdict.decision, 'deny');
+  assert.equal(verdict.layer, sites.LAYERS.block);
+  assert.equal(sites.listConflicts(policy).length, 1);
+});
+
+check('8. 屏蔽优先：屏蔽命中时即使有会话信任也拒绝', () => {
+  const verdict = sites.evaluateSite({
+    site: 'b.com',
+    policy: { globalEnabled: true, allow: [], block: ['b.com'] },
+    sessionTrusted: ['b.com'],
+  });
+  assert.equal(verdict.decision, 'deny');
+});
+
+check('9. 本次会话信任只活在内存里（传入才有，重启就没了）', () => {
+  const policy = { globalEnabled: true, allow: [], block: [] };
+  const cold = sites.evaluateSite({ site: 'b.com', policy, sessionTrusted: [] });
+  const warm = sites.evaluateSite({ site: 'b.com', policy, sessionTrusted: ['B.COM'] });
+  assert.equal(cold.decision, 'ask');
+  assert.equal(warm.decision, 'allow');
+  assert.equal(warm.layer, sites.LAYERS.session);
+});
+
+check('10. 全局关着一律不动——白名单也不能绕过', () => {
+  const verdict = sites.evaluateSite({
+    site: 'b.com',
+    policy: { globalEnabled: false, allow: ['b.com'], block: [] },
+  });
+  assert.equal(verdict.decision, 'deny');
+  assert.equal(verdict.layer, sites.LAYERS.global);
+  assert.match(verdict.message, /什么也做不了/);
+});
+
+check('11. 没有可识别站点的页面一律拒绝，并说明原因', () => {
+  const verdict = sites.evaluateSite({
+    site: 'about:blank',
+    policy: { globalEnabled: true, allow: ['b.com'], block: [] },
+  });
+  assert.equal(verdict.decision, 'deny');
+  assert.equal(verdict.layer, sites.LAYERS.noSite);
+  assert.match(verdict.message, /没有可识别的域名/);
+});
+
+/* ------------------------------------------------------------------ */
+/* 4. 名单维护                                                         */
+/* ------------------------------------------------------------------ */
+
+check('12. 加名单：非法域名把原因说清楚，重复条目不重复加', () => {
+  const bad = sites.addRule([], 'not a host');
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /不是一个域名/);
+  assert.match(bad.error, /example\.com/);
+
+  const first = sites.addRule([], 'https://b.com/x');
+  assert.equal(first.ok, true);
+  assert.equal(first.list.length, 1);
+  assert.equal(first.list[0].target, 'b.com');
+
+  const again = sites.addRule(first.list, 'B.COM');
+  assert.equal(again.ok, true);
+  assert.equal(again.already, true);
+  assert.equal(again.list.length, 1);
+});
+
+check('13. 删名单：命中就删、没命中要说"不在这张名单里"', () => {
+  const list = sites.addRule([], 'b.com').list;
+  const removed = sites.removeRule(list, 'B.com:443');
+  assert.equal(removed.ok, true);
+  assert.equal(removed.list.length, 0);
+
+  const missing = sites.removeRule(list, 'c.com');
+  assert.equal(missing.ok, false);
+  assert.match(missing.error, /不在这张名单里/);
+});
+
+check('14. 读盘清洗：脏数据只丢坏条目，不整体失效；默认全局开启', () => {
+  const policy = sites.sanitizePolicy({
+    globalEnabled: undefined,
+    allow: ['b.com', 'b.com', 'bad host', null, { target: 'c.com' }],
+    block: ['d.com'],
+  });
+  assert.equal(policy.globalEnabled, true);
+  assert.deepEqual(policy.allow.map((rule) => rule.target), ['b.com', 'c.com']);
+  assert.deepEqual(policy.block.map((rule) => rule.target), ['d.com']);
+
+  const empty = sites.sanitizePolicy(null);
+  assert.equal(empty.globalEnabled, true);
+  assert.equal(empty.allow.length, 0);
+});
+
+check('15. 会话信任：加一次只增一项，域名非法时如实报错', () => {
+  const added = sites.addSessionTrust([], 'https://b.com/x');
+  assert.equal(added.ok, true);
+  assert.deepEqual(added.hosts, ['b.com']);
+  const again = sites.addSessionTrust(added.hosts, 'b.com');
+  assert.equal(again.hosts.length, 1);
+  const bad = sites.addSessionTrust(again.hosts, 'about:blank');
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /没有可识别的域名/);
+});
+
+check('16. 状态包：带 summary、冲突与当前站点判读，设置页只渲染不判读', () => {
+  const payload = sites.agentSitesPayload({
+    policy: { globalEnabled: true, allow: ['b.com'], block: ['b.com'] },
+    sessionTrusted: ['c.com'],
+    site: 'a.b.com',
+  });
+  assert.equal(payload.ok, true);
+  assert.match(payload.summary, /白名单 1 条，屏蔽名单 1 条/);
+  assert.deepEqual(payload.conflicts, ['b.com']);
+  assert.equal(payload.current.decision, 'deny');
+  assert.equal(payload.current.layer, sites.LAYERS.block);
+  assert.deepEqual(payload.sessionTrusted, ['c.com']);
+  assert.equal(payload.limits.maxRules, sites.MAX_RULES);
+});
+
+/* ------------------------------------------------------------------ */
+/* 5. 接线静态守卫                                                     */
+/* ------------------------------------------------------------------ */
+
+check('17. 主进程接线：判定走纯函数、拒绝留痕、名单落盘、IPC 已挂', () => {
+  const main = read('src/main.js');
+  assert.ok(main.includes("require('./core/agent-sites')"), 'main.js 应 require agent-sites');
+  assert.ok(main.includes('evaluateSite({'), '判定应调 evaluateSite');
+  assert.ok(main.includes('askAgentSiteTrust('), '未命中时应弹进站确认');
+  assert.ok(main.includes("'agent-sites.json'"), '名单应落盘 agent-sites.json');
+  assert.ok(main.includes('registerAgentSitesIpc();'), 'registerIpc 里应调用 registerAgentSitesIpc');
+  assert.ok(main.includes("ipcMain.handle('nyx:agent:sites'"), '应有 nyx:agent:sites');
+  assert.ok(main.includes("ipcMain.handle('nyx:agent:sites-set'"), '应有 nyx:agent:sites-set');
+  // 判定必须能等到人工点按，否则"进站问一次"是假的
+  assert.ok(main.includes('async function authorizeAgentAction'), 'authorizeAgentAction 必须是 async');
+  assert.ok(read('src/core/agent-dispatch.js').includes('await authorize('), '通道必须 await 判定结果');
+});
+
+check('18. 白名单不豁免动作级确认：输入与下载仍在 CONFIRM_RULES 里', () => {
+  assert.ok(dispatch.CONFIRM_RULES.type, '输入文字必须每次人工确认');
+  assert.ok(dispatch.CONFIRM_RULES.download, '下载必须每次人工确认');
+  const main = read('src/main.js');
+  assert.ok(main.includes('白名单只代表'), '文案要说明白名单不等于动作放行');
+});
+
+check('19. 界面接线：设置页有名单卡与开关，preload 暴露两个方法', () => {
+  const html = read('src/renderer/settings.html');
+  for (const id of [
+    'agent-sites-badge',
+    'agent-sites-global',
+    'agent-allow-input',
+    'btn-agent-allow-add',
+    'agent-allow-list',
+    'agent-block-input',
+    'btn-agent-block-add',
+    'agent-block-list',
+    'btn-agent-session-clear',
+    'agent-sites-status',
+  ]) {
+    assert.ok(html.includes(`id="${id}"`), `settings.html 缺少 #${id}`);
+  }
+  const js = read('src/renderer/settings.js');
+  assert.ok(js.includes('loadAgentSites()'), 'settings.js 应在进分区时加载名单');
+  assert.ok(js.includes('setAgentSites('), 'settings.js 应能改名单');
+  const preload = read('src/preload.js');
+  assert.ok(preload.includes("invoke('nyx:agent:sites'"), 'preload 应暴露 agentSites');
+  assert.ok(preload.includes("invoke('nyx:agent:sites-set'"), 'preload 应暴露 agentSitesSet');
+});
+
+/* ------------------------------------------------------------------ */
+
+const failed = checks.filter((item) => !item.ok);
+const total = checks.length;
+console.log('');
+console.log(`站点三层授权（E）：${total} 项检查，${total - failed.length} 项通过，${failed.length} 项失败`);
+if (failed.length) {
+  for (const item of failed) console.log(`  ✘ ${item.name}｜${item.error}`);
+  process.exitCode = 1;
+}

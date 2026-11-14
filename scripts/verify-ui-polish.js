@@ -190,6 +190,19 @@ async function main() {
     JSON.stringify({ downloadAsk: false, downloadDir }, null, 2),
     'utf8',
   );
+  // agent 站点授权（清单 E）默认「未命中名单就进站问一次」，而自动化里没人点那个
+  // 确认框，agent 动作会被挂住。这里按真实用法把本脚本会访问的测试站点登记进
+  // 白名单——白名单只免掉「进站要不要问」，动作级确认（输入/下载）仍然照旧生效；
+  // 「未命中就问」这条路本身由 verify-agent-sites.js 的纯函数断言负责覆盖。
+  fs.writeFileSync(
+    path.join(userData, 'agent-sites.json'),
+    JSON.stringify(
+      { globalEnabled: true, allow: ['127.0.0.1', 'localhost', 'example.com', 'example.org'], block: [] },
+      null,
+      2,
+    ),
+    'utf8',
+  );
 
   // 扩展在线检查 / 全部更新 / 版本历史都读隔离 userData 的 updates/extensions.json：
   // 仓库本身不随包分发扩展，这里不种任何扩展；没有 extensions.json 时相关用例按跳过处理。
@@ -2365,21 +2378,42 @@ async function main() {
     /* ---------- C（通道）：真实运行时的 agent 动作确实走统一通道 ---------- */
     // 静态守卫在 verify-agent-dispatch.js 里；这里用真实进程的本地接口验一次，
     // 证明"接口拿到的是通道"不是纸面约定。
+    // 本地接口是启动后才起来的：端口文件先落盘、服务可能还差几十毫秒，所以先等 /health。
+    // 所有请求都带超时：通道里如果有人在等人工确认，fetch 会一直不返回，没有超时的话
+    // 整条回归就卡死在这里，看不出是"谁在等谁"。
+    const API_TIMEOUT_MS = 15000;
+    const apiFetch = (url, options = {}) =>
+      fetch(url, { ...options, signal: AbortSignal.timeout(API_TIMEOUT_MS) });
+    const waitLocalApi = async (token, port, tries = 20) => {
+      const base = `http://127.0.0.1:${port}`;
+      const headers = { 'X-Nyx-Token': token, 'Content-Type': 'application/json' };
+      for (let i = 0; i < tries; i += 1) {
+        try {
+          const res = await apiFetch(`${base}/health`, { headers });
+          if (res.ok) return { base, headers };
+        } catch {
+          // 还没起来，继续等
+        }
+        await sleep(250);
+      }
+      return null;
+    };
     const agentApi = await (async () => {
       try {
         const token = fs.readFileSync(path.join(userData, 'api-token.txt'), 'utf8').trim();
         const port = fs.readFileSync(path.join(userData, 'api-port.txt'), 'utf8').trim();
-        const base = `http://127.0.0.1:${port}`;
-        const headers = { 'X-Nyx-Token': token, 'Content-Type': 'application/json' };
-        const capsRes = await fetch(`${base}/capabilities`, { headers });
+        const ready = await waitLocalApi(token, port);
+        if (!ready) throw new Error('本地接口在 10 秒内没有起来（/health 不通）');
+        const { base, headers } = ready;
+        const capsRes = await apiFetch(`${base}/capabilities`, { headers });
         const caps = await capsRes.json();
-        const badRes = await fetch(`${base}/action`, {
+        const badRes = await apiFetch(`${base}/action`, {
           method: 'POST',
           headers,
           body: JSON.stringify({ type: 'rm-rf', params: {} }),
         });
         const bad = await badRes.json();
-        const stateRes = await fetch(`${base}/action`, {
+        const stateRes = await apiFetch(`${base}/action`, {
           method: 'POST',
           headers,
           body: JSON.stringify({ type: 'state', params: {} }),
@@ -2417,8 +2451,10 @@ async function main() {
       try {
         const token = fs.readFileSync(path.join(userData, 'api-token.txt'), 'utf8').trim();
         const port = fs.readFileSync(path.join(userData, 'api-port.txt'), 'utf8').trim();
+        const ready = await waitLocalApi(token, port);
+        if (!ready) throw new Error('本地接口在 10 秒内没有起来（/health 不通）');
         const call = async (body) => {
-          const res = await fetch(`http://127.0.0.1:${port}/action`, {
+          const res = await apiFetch(`http://127.0.0.1:${port}/action`, {
             method: 'POST',
             headers: { 'X-Nyx-Token': token, 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
@@ -2575,6 +2611,113 @@ async function main() {
         exportError: agentAuditView.exportError,
         csvHead: auditFileText.slice(0, 32),
       }),
+    );
+
+    /* ---------- E（站点三层授权）：卡片渲染 + 屏蔽优先 + 全局关闭 + 非法域名被拒 ---------- */
+    const sitesCard = await settings.eval(`(async () => {
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const nav = document.querySelector('.nav-item[data-sec="agent"]');
+      if (nav) nav.click();
+      await wait(900);
+      const byId = (id) => document.getElementById(id);
+      const titles = Array.from(document.querySelectorAll('.sec-panel[data-sec="agent"] .info-card h3'))
+        .map((h) => (h.textContent || '').trim());
+      const badge = byId('agent-sites-badge');
+      const global = byId('agent-sites-global');
+      return {
+        titles,
+        badgeText: badge ? (badge.textContent || '').trim() : '',
+        badgeClass: badge ? badge.className : '',
+        globalChecked: global ? global.checked : null,
+        allowHintHidden: byId('agent-allow-empty') ? byId('agent-allow-empty').hidden : null,
+        blockHintHidden: byId('agent-block-empty') ? byId('agent-block-empty').hidden : null,
+        allowRows: document.querySelectorAll('#agent-allow-list li').length,
+        blockRows: document.querySelectorAll('#agent-block-list li').length,
+        statusExists: Boolean(byId('agent-sites-status')),
+      };
+    })()`);
+    check(
+      '设置里有「站点授权」卡片：全局开关默认开，名单空不空与空状态提示一致（E）',
+      sitesCard.titles.includes('站点授权')
+        && sitesCard.badgeText === '已开启'
+        && sitesCard.globalChecked === true
+        // 预置的 userData 里有白名单条目，所以这里不比"空状态必须显示"，
+        // 而是比"空状态提示是否与名单是否为空一致"——两条都得成立。
+        && sitesCard.allowHintHidden === (sitesCard.allowRows > 0)
+        && sitesCard.blockHintHidden === (sitesCard.blockRows > 0)
+        && sitesCard.statusExists === true,
+      JSON.stringify(sitesCard),
+    );
+
+    const sitesFlow = await shell.eval(`(async () => {
+      const step = {};
+      // 判读必须针对同一个站点看，否则会读到"当前标签"的判读，测了个寂寞
+      const SITE = 'https://example.com/x';
+      const read = () => window.nyx.agentSites({ site: SITE });
+      // 预置的 userData 里已经有 127.0.0.1（测试站点自己），所以这里一律看
+      // 「example.com 在不在名单里」，不数总条数——数总条数会把预置数据算进来。
+      const has = (list, target) => Array.isArray(list) && list.some((r) => r && r.target === target);
+      const allow = await window.nyx.agentSitesSet({ site: SITE, addAllow: 'https://example.com/x' });
+      step.afterAllow = {
+        ok: allow.ok,
+        hasExample: has(allow.policy && allow.policy.allow, 'example.com'),
+        decision: allow.current ? allow.current.decision : '',
+        layer: allow.current ? allow.current.layer : '',
+      };
+      const blocked = await window.nyx.agentSitesSet({ site: SITE, addBlock: 'example.com' });
+      step.afterBlock = {
+        ok: blocked.ok,
+        hasExample: has(blocked.policy && blocked.policy.block, 'example.com'),
+        conflicts: blocked.conflicts || [],
+        decision: blocked.current ? blocked.current.decision : '',
+        layer: blocked.current ? blocked.current.layer : '',
+      };
+      const off = await window.nyx.agentSitesSet({ site: SITE, globalEnabled: false });
+      step.globalOff = { decision: off.current ? off.current.decision : '', layer: off.current ? off.current.layer : '' };
+      const on = await window.nyx.agentSitesSet({
+        site: SITE,
+        globalEnabled: true,
+        removeAllow: 'example.com',
+        removeBlock: 'example.com',
+      });
+      step.restored = {
+        decision: on.current ? on.current.decision : '',
+        hasAllow: has(on.policy && on.policy.allow, 'example.com'),
+        hasBlock: has(on.policy && on.policy.block, 'example.com'),
+      };
+      const bad = await window.nyx.agentSitesSet({ site: SITE, addBlock: 'not a host' });
+      step.bad = {
+        ok: bad.ok,
+        error: bad.error || '',
+        hasBlock: has(bad.policy && bad.policy.block, 'example.com'),
+        hasBadHost: has(bad.policy && bad.policy.block, 'not a host'),
+      };
+      const summary = await read();
+      step.persisted = { hasAllow: has(summary.policy && summary.policy.allow, 'example.com') };
+      return step;
+    })()`);
+    check(
+      '名单按域名生效：白名单放行、加入屏蔽名单独即变拒绝（屏蔽优先），全局关掉后一律拒绝（E）',
+      sitesFlow.afterAllow.ok === true
+        && sitesFlow.afterAllow.hasExample === true
+        && sitesFlow.afterAllow.decision === 'allow'
+        && sitesFlow.afterBlock.hasExample === true
+        && sitesFlow.afterBlock.conflicts.includes('example.com')
+        && sitesFlow.afterBlock.decision === 'deny'
+        && sitesFlow.globalOff.decision === 'deny'
+        && sitesFlow.globalOff.layer === '全局开关'
+        && sitesFlow.restored.hasAllow === false
+        && sitesFlow.restored.hasBlock === false,
+      JSON.stringify(sitesFlow),
+    );
+    check(
+      '非法域名不会被写进名单，并给出中文原因（E）',
+      sitesFlow.bad.ok === false
+        && /不是一个域名/.test(sitesFlow.bad.error)
+        && sitesFlow.bad.hasBlock === false
+        && sitesFlow.bad.hasBadHost === false
+        && sitesFlow.persisted.hasAllow === false,
+      JSON.stringify(sitesFlow.bad),
     );
 
     /* ---------- 运行时无脚本异常 ---------- */

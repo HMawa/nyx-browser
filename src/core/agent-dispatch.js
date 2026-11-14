@@ -217,7 +217,7 @@ function normalizeDecision(raw) {
  *
  * @param {object} options
  * @param {{ run: (action: object, ctx?: { signal?: AbortSignal }) => Promise<object> }} options.runner 纯执行器
- * @param {(action: object, ctx: object) => {decision?: 'allow'|'confirm'|'deny', reason?: string, rule?: string}} [options.authorize]
+ * @param {(action: object, ctx: object) => ({decision?: 'allow'|'confirm'|'deny', reason?: string, rule?: string}|Promise<object>)} [options.authorize]
  * @param {(request: object) => Promise<{approved: boolean, remember?: boolean, reason?: string}>} [options.confirm]
  * @param {(entry: object) => void} [options.audit] 审计写入（D 会把这里换成环形缓冲 + jsonl）
  * @param {() => string} [options.mode] 当前 agent 模式（A 会接上 builtin / external）
@@ -404,12 +404,13 @@ function createDispatcher(options) {
       return refuse(entry, CODES.UNKNOWN_ACTION, `不支持的动作类型：${type}`, started);
     }
 
-    // ② 权限判定
+    // ② 权限判定（清单 E 的进站确认要在这里等一次人工点按，所以判定允许是异步的）
     let decision = { decision: 'allow', reason: '', rule: 'default' };
     if (authorize) {
       try {
         decision = normalizeDecision(
-          authorize(action, { mode: modeOf(), site: siteOf(), sensitive: entryBase.sensitive, type }),
+          // eslint-disable-next-line no-await-in-loop
+          await authorize(action, { mode: modeOf(), site: siteOf(), sensitive: entryBase.sensitive, type }),
         );
       } catch (err) {
         decision = {

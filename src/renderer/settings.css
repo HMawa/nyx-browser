@@ -626,6 +626,116 @@
   word-break: break-all;
 }
 
+/* 站点三层授权（清单 E） */
+.agent-site-block {
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--bg-code) 45%, transparent);
+}
+
+.agent-site-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-site-head h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.agent-site-add {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 6px;
+}
+
+.agent-site-add input[type='text'] {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-input);
+  color: var(--text-main);
+  font-size: 12px;
+}
+
+.agent-site-add input[type='text']:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+  box-shadow: var(--ring);
+}
+
+.agent-site-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.agent-site-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm);
+  background: var(--bg-tab);
+  font-size: 12px;
+  color: var(--text-main);
+}
+
+.agent-site-list .site-host {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.agent-site-list .site-conflict {
+  font-size: 11px;
+  color: var(--danger-soft);
+}
+
+.agent-site-list .site-remove {
+  flex: none;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.agent-site-list .site-remove:hover {
+  color: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+.agent-site-list .site-remove:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+  box-shadow: var(--ring);
+}
+
+#agent-sites-status.is-warn {
+  color: var(--danger-soft);
+}
+
+#agent-sites-status.is-ok {
+  color: var(--accent-soft);
+}
+
+
 /* 置顶导入 / 导出行（v1.15.0）：按钮与说明文字同一行时垂直居中，说明不挤压按钮 */
 #pinned-io-row {
   align-items: center;

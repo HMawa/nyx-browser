@@ -147,6 +147,12 @@ contextBridge.exposeInMainWorld('nyx', {
     return () => ipcRenderer.removeListener('nyx:agent:status', listener);
   },
 
+  /** 站点三层授权（E）：读名单、当前站点的判读、会话信任列表 */
+  agentSites: (payload) => ipcRenderer.invoke('nyx:agent:sites', payload || {}),
+
+  /** 站点三层授权（E）：改全局开关、加/删白名单与屏蔽名单、信任/清空会话 */
+  agentSitesSet: (payload) => ipcRenderer.invoke('nyx:agent:sites-set', payload || {}),
+
 
   /** 权限决策轨迹（默认最近 50 条） */
   listPermissionDecisions: (limit) => ipcRenderer.invoke('nyx:permissions:list', limit),
