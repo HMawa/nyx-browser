@@ -173,7 +173,7 @@ const STEPS = [
   {
     label: '发版门禁接线',
     script: 'verify-release-gate.js',
-    items: '13 项',
+    items: '16 项',
     timeoutMs: 60000,
   },
   {

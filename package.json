@@ -15,6 +15,7 @@
     "dist:dir": "electron-builder --win nsis --dir",
     "dist:signed": "node scripts/build-signed.js",
     "sign:cert": "node scripts/make-signing-cert.js",
+    "sync:legacy": "node scripts/sync-legacy.js",
     "release": "node scripts/make-release.js",
     "verify": "node scripts/verify-all.js",
     "verify:integrity": "node scripts/verify-integrity.js dist\\win-unpacked"

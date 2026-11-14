@@ -134,6 +134,28 @@ check(
   '汇总里 SKIP 与 PASS 必须分开'
 );
 
+// 8) 归档轮换脚本：手抄一份旧包不算常态化
+const SYNC = path.join(ROOT, 'scripts', 'sync-legacy.js');
+const syncCode = read(SYNC);
+check(
+  '有归档轮换脚本，能把留档里的旧包同步进 dist\\legacy',
+  Boolean(syncCode) &&
+    /updates-archive/.test(syncCode) &&
+    /copyFileSync/.test(syncCode) &&
+    /LEGACY_DIR/.test(syncCode),
+  'scripts/sync-legacy.js 必须能从 updates-archive 复制到 dist/legacy'
+);
+check(
+  '同名不同大小的包不许被静默覆盖',
+  /conflicts\.push/.test(syncCode) && /没有覆盖/.test(syncCode),
+  '同名不同字节会让升级判定混乱，必须显式失败'
+);
+check(
+  '轮换默认保留最老的几份，删包必须显式 --prune',
+  /--prune/.test(syncCode) && /keep/.test(syncCode) && /slice\(0, keep\)/.test(syncCode),
+  '跨两版要的就是最老那份；默认不删'
+);
+
 const failed = checks.filter((item) => !item.ok);
 console.log(`\n[Nyx] 发版门禁接线检查（${checks.length} 项）`);
 for (const item of checks) {
