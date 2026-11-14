@@ -10,6 +10,7 @@
 - 发布出去的安装包（`dist/Nyx-Setup-<版本>.exe`）由 `npm run dist` 产出，**未签名**。Windows 会显示「未知发布者」，SmartScreen 可能拦一道。
 - 仓库里新增了另一条打包路径 `npm run dist:signed`：它用**本机生成的自签名证书**给 `Nyx.exe` 与安装包签名，默认输出到 `dist-sign/`，不覆盖已发布的 `dist/`。
 - 证书不进仓库：私钥、证书、密码都在 `build/signing/`（已被 `.gitignore` 忽略）。换一台机器要重新生成，签名指纹也就变了。
+- **本机已实跑过一次**（2026-11-14）：`node scripts/build-signed.js` → `dist-sign\Nyx-Setup-1.17.3.exe` **127,166,232 字节**，`Get-AuthenticodeSignature` 结果为 `Status=Valid`、`Subject=CN=Nyx Self-Signed, O=Nyx contributors, OU=local build`、指纹 `256F208A5D31782DAF9DA041CF1D7A2A382931D0`；同一个脚本对未签名文件跑出来是 `Status=NotSigned`（所以「验过」不是空话）。
 
 ## 2. 自签名能证明什么、不能证明什么
 
