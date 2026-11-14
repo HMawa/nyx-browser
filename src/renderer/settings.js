@@ -4144,8 +4144,9 @@ async function loadFootprint() {
       const undoLine = byId('agent-settings-undo');
       if (undoLine) {
         const undoInfo = payload.undo && typeof payload.undo === 'object' ? payload.undo : {};
+        const depth = Number(undoInfo.depth) || 0;
         undoLine.textContent = undoInfo.available
-          ? `撤销：可以撤销最近一次对「${undoInfo.key}」的修改——${undoInfo.how || '让 agent 发一次带 undo:true 的设置动作'}。`
+          ? `撤销：可以撤销最近一次对「${undoInfo.key}」的修改（现在能连撤 ${depth} 步，一次最多 ${undoInfo.maxSteps || 5} 步）——${undoInfo.how || '让 agent 发一次带 undo:true 的设置动作'}。`
           : `撤销：${undoInfo.how || '还没有哪个 agent 改过设置，暂时没有可撤销的'}。`;
         undoLine.className = 'hint';
       }

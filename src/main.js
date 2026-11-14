@@ -70,6 +70,7 @@ const {
   sanitizePolicy: sanitizeSitePolicy,
 } = require('./core/agent-sites');
 const {
+  MAX_UNDO_STEPS,
   SETTING_DISCLAIMER,
   SETTING_KEYS,
   SETTING_LOCKED,
@@ -8579,8 +8580,17 @@ function agentSettingsSnapshot() {
     // 撤销不给界面单独开一条路：它仍是 agent 动作（带 undo:true），同样要人工确认与留痕。
     // 这里只如实告诉界面"现在能不能撤、能撤哪一次"。
     undo: lastUndo
-      ? { available: true, key: lastUndo.key, at: lastUndo.at, how: '让 agent 发一次 settings 动作并带上 undo:true，照样要你点确认' }
-      : { available: false, how: '还没有哪个 agent 改过设置，暂时没有可撤销的' },
+      ? {
+          available: true,
+          key: lastUndo.key,
+          at: lastUndo.at,
+          depth: undoList.length,
+          maxSteps: MAX_UNDO_STEPS,
+          how:
+            '让 agent 发一次 settings 动作并带上 undo:true（可选 steps 一次撤多步），照样要你点确认；' +
+            '撤销只回退不重做，连撤会一路回到最早一条',
+        }
+      : { available: false, depth: 0, how: '还没有哪个 agent 改过设置，暂时没有可撤销的' },
   };
 }
 
@@ -8593,14 +8603,20 @@ async function applyAgentSetting(params) {
   const now = Date.now();
   runtime.agentSettingHistory = history.filter((stamp) => now - stamp < 60 * 1000);
 
-  // 撤销上一次（候选④）：认的是"当时记下的旧值"，不是让 agent 再改一次回去。
+  // 撤销（候选④）：认的是"当时记下的旧值"，不是让 agent 再改一次回去。
   // 中间要是有人手动改过，planSettingUndo 会如实说"不需要撤销"，不会硬盖人的选择。
-  // 撤销本身仍要过人工确认与留痕，只是不占修改限流的额度（一键回退不该被限流卡住）。
+  // 支持一次撤多步（steps），但仍要过人工确认与留痕，只是不占修改限流的额度。
   let plan;
+  let undoPicked = [];
   if (undo) {
     const entries = Array.isArray(runtime.agentSettingUndo) ? runtime.agentSettingUndo : [];
+    const stepsInput = Number(input.steps);
+    const steps = Number.isFinite(stepsInput) && stepsInput >= 1 ? Math.floor(stepsInput) : 1;
     key = entries.length ? entries[entries.length - 1].key : '';
-    plan = planAgentSettingUndo(entries, { current: key ? ui[key] : undefined });
+    const currents = {};
+    for (const entry of entries) currents[entry.key] = ui[entry.key];
+    plan = planAgentSettingUndo(entries, { currents, steps });
+    if (plan.ok && Array.isArray(plan.changes)) undoPicked = plan.changes;
   } else {
     plan = planAgentSettingChange(
       { key, value: input.value, confirm: input.confirm === true },
@@ -8626,6 +8642,10 @@ async function applyAgentSetting(params) {
   }
 
   if (plan.code === 'NO_CHANGE') {
+    // 撤销时也要把这条没用的记录拿走，否则连着撤会一直停在同一条上
+    if (undo && plan.consumed > 0 && Array.isArray(runtime.agentSettingUndo)) {
+      runtime.agentSettingUndo.splice(Math.max(0, runtime.agentSettingUndo.length - plan.consumed));
+    }
     return {
       ok: true,
       code: 'NO_CHANGE',
@@ -8640,41 +8660,67 @@ async function applyAgentSetting(params) {
     return { ok: false, code: 'STORE_UNAVAILABLE', error: '设置存储还没就绪，这次没有改。', disclaimer: SETTING_DISCLAIMER };
   }
 
-  // 关掉离线缓存时要把已存的正文一起清掉——和界面上手动关掉是同一条路径，
-  // 免得"agent 关掉了但旧快照还躺在磁盘上"。
-  if (key === 'offlineCacheEnabled' && plan.value === false) {
-    clearPageCache('agent-disabled');
+  // 撤销可能一次改多项，所以这里按"目标列表"落盘；普通修改只有一项。
+  const targets = undo
+    ? undoPicked.map((item) => ({ key: item.key, value: item.value, summary: item.summary }))
+    : [{ key, value: plan.value, summary: plan.summary }];
+  const applied = [];
+  for (const item of targets) {
+    // 关掉离线缓存时要把已存的正文一起清掉——和界面上手动关掉是同一条路径，
+    // 免得"agent 关掉了但旧快照还躺在磁盘上"。
+    if (item.key === 'offlineCacheEnabled' && item.value === false) {
+      clearPageCache('agent-disabled');
+    }
+    const saved = runtime.uiStore.set(item.key, item.value);
+    if (!saved || saved.ok === false) {
+      const reason = (saved && saved.error) || '写入失败';
+      diagnostics.error('AGENT_SETTINGS_SAVE_FAILED', `agent 改设置没能保存：${item.key}`, {
+        key: item.key,
+        reason,
+        applied,
+      });
+      return {
+        ok: false,
+        code: 'SAVE_FAILED',
+        error:
+          applied.length > 0
+            ? `没能保存 ${item.key}：${reason}（已经改成了 ${applied.join('、')}，剩下这几项没动）`
+            : `没能保存 ${item.key}：${reason}`,
+        applied,
+        disclaimer: SETTING_DISCLAIMER,
+      };
+    }
+    applied.push(item.key);
+    // 标签休眠改完要立刻生效，否则用户会以为"改了没反应"
+    if (item.key === 'tabSleepMinutes' && runtime.tabManager && typeof runtime.tabManager.setSleepAfterMs === 'function') {
+      try {
+        runtime.tabManager.setSleepAfterMs(sleepMinutesToMs(item.value));
+      } catch (err) {
+        console.warn('[Nyx] 应用标签休眠设置失败：', err && err.message);
+      }
+    }
   }
 
-  const saved = runtime.uiStore.set(key, plan.value);
-  if (!saved || saved.ok === false) {
-    const reason = (saved && saved.error) || '写入失败';
-    diagnostics.error('AGENT_SETTINGS_SAVE_FAILED', `agent 改设置没能保存：${key}`, { key, reason });
-    return { ok: false, code: 'SAVE_FAILED', error: `没能保存 ${key}：${reason}`, disclaimer: SETTING_DISCLAIMER };
-  }
+  // 撤销不占修改额度（一键回退不该被限流卡住），普通修改才记一次
+  if (!undo) runtime.agentSettingHistory.push(now);
 
-  runtime.agentSettingHistory.push(now);
-
-  // 留一条可撤销的记录：只记"这次改成了什么、改之前是什么"，
-  // 不记 agent 是谁（那在动作留痕里），撤销只回滚一层，免得越撤越乱。
-  const previous = ui[key];
-  if (Array.isArray(runtime.agentSettingUndo)) {
+  if (undo) {
+    // 撤销把用掉的记录一起拿走：连按撤销会一路回到最早一条；想再改回去就让 agent 重设一次
+    if (Array.isArray(runtime.agentSettingUndo) && plan.consumed > 0) {
+      runtime.agentSettingUndo.splice(Math.max(0, runtime.agentSettingUndo.length - plan.consumed));
+    }
+  } else if (Array.isArray(runtime.agentSettingUndo)) {
+    // 留一条可撤销的记录：只记"这次改成了什么、改之前是什么"，
+    // 不记 agent 是谁（那在动作留痕里）。
+    const previous = ui[key];
     runtime.agentSettingUndo.push({ key, value: plan.value, previous, at: now });
     if (runtime.agentSettingUndo.length > 20) runtime.agentSettingUndo.splice(0, runtime.agentSettingUndo.length - 20);
   }
 
-  // 标签休眠改完要立刻生效，否则用户会以为"改了没反应"
-  if (key === 'tabSleepMinutes' && runtime.tabManager && typeof runtime.tabManager.setSleepAfterMs === 'function') {
-    try {
-      runtime.tabManager.setSleepAfterMs(sleepMinutesToMs(plan.value));
-    } catch (err) {
-      console.warn('[Nyx] 应用标签休眠设置失败：', err && err.message);
-    }
-  }
-
-  diagnostics.info(undo ? 'AGENT_SETTINGS_UNDONE' : 'AGENT_SETTINGS_CHANGED', undo ? `撤销了上一次 agent 改的设置：${key}` : `agent 改了设置：${key}`, {
+  diagnostics.info(undo ? 'AGENT_SETTINGS_UNDONE' : 'AGENT_SETTINGS_CHANGED', undo ? `撤销了 ${applied.length} 项 agent 改的设置` : `agent 改了设置：${key}`, {
     key,
     value: plan.value,
+    keys: applied,
     summary: plan.summary,
   });
   if (typeof pushAgentStatus === 'function') pushAgentStatus();
@@ -8692,6 +8738,8 @@ async function applyAgentSetting(params) {
     key,
     value: plan.value,
     undo,
+    keys: applied,
+    steps: undo ? applied.length : 1,
     summary: plan.summary,
     message: plan.message,
     disclaimer: SETTING_DISCLAIMER,

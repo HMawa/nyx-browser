@@ -26,7 +26,7 @@
  * 20. scripts/verify-runtime-compat.js（运行时兼容：剪贴板异步化与版本三处一致，9 项；纯 Node，不启动 Electron）
  * 21. scripts/verify-release-gate.js（发版门禁、安装器 e2e 接线与验签挑包，20 项；纯 Node，不跑安装包）
  * 22. scripts/verify-signing.js（安装包签名、密码存凭据管理器、证书有效期与打包接线，27 项；不看签名包时只跑静态守卫）
- * 23. scripts/verify-agent-settings.js（agent 改设置：白名单 / 锁死 / 确认 / 限流 / 撤销，17 项；纯 Node）
+ * 23. scripts/verify-agent-settings.js（agent 改设置：白名单 / 锁死 / 确认 / 限流 / 多步撤销，18 项；纯 Node）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -189,7 +189,7 @@ const STEPS = [
   {
     label: 'agent 改设置回归',
     script: 'verify-agent-settings.js',
-    items: '17 项',
+    items: '18 项',
     timeoutMs: 60000,
   },
   {

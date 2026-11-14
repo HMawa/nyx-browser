@@ -235,6 +235,45 @@ check('撤销：锁死的键、记录里不认识的键、旧值不合法都拒�
   return 'ok';
 });
 
+check('撤销：一次能连着撤多步，按栈从最新往前回滚', () => {
+  const entries = [
+    { key: 'theme', value: 'aurora', previous: 'ink', at: 1 },
+    { key: 'showLinkBadge', value: false, previous: true, at: 2 },
+    { key: 'tabSleepMinutes', value: 10, previous: 30, at: 3 },
+  ];
+  const currents = { theme: 'aurora', showLinkBadge: false, tabSleepMinutes: 10 };
+  const two = settings.planSettingUndo(entries, { currents, steps: 2 });
+  assert(two.ok === true && two.undo === true, '撤两步要成功');
+  assert(two.steps === 2 && two.changes.length === 2, '要真的回滚两项');
+  assert(two.changes[0].key === 'tabSleepMinutes' && two.changes[0].value === 30, '先撤最新那一条');
+  assert(two.changes[1].key === 'showLinkBadge' && two.changes[1].value === true, '再撤上一条');
+  assert(two.consumed === 2, '要告诉调用方用掉了几条记录');
+  assert(/撤销 2 项/.test(two.message), '中文说明要写清撤了几项');
+
+  // 步数上限：给一个夸张的 steps 也只撤 MAX_UNDO_STEPS 条，不许把历史整个翻回去
+  const many = [];
+  for (let i = 0; i < 20; i += 1) many.push({ key: 'showLinkBadge', value: i % 2 === 0, previous: true, at: i });
+  const capped = settings.planSettingUndo(many, { currents: { showLinkBadge: false }, steps: 99 });
+  assert(capped.ok === true && capped.steps <= settings.MAX_UNDO_STEPS, '步数要被 MAX_UNDO_STEPS 卡住');
+  assert(capped.consumed <= settings.MAX_UNDO_STEPS, '消费的记录数同样要有上限');
+
+  // 整体成功或整体不动：要撤的几条里有一条非法就一条都不改
+  const dirty = settings.planSettingUndo(
+    [
+      { key: 'theme', value: 'aurora', previous: 'ink', at: 1 },
+      { key: 'tabSleepMinutes', value: 10, previous: 'abc', at: 2 },
+    ],
+    { currents, steps: 2 },
+  );
+  assert(dirty.ok === false && dirty.code === 'BAD_VALUE', '有一条非法就整体拒绝');
+  assert(!dirty.changes, '拒绝时不许带任何已改结果（否则会出现改一半的状态）');
+
+  // 连着撤到没有为止：全部撤完后再撤一次要说清"没有可撤销的"
+  const drained = settings.planSettingUndo([], { currents });
+  assert(drained.ok === false && drained.code === 'NOTHING_TO_UNDO', '撤完了要明确说没有可撤销的');
+  return 'ok';
+});
+
 check('撤销接线：只走 agent 通道，撤销也要留痕、也要人工确认', () => {
   const main = read('src/main.js');
   assert(/planSettingUndo: planAgentSettingUndo/.test(main), 'main 要引入 planSettingUndo');
@@ -243,6 +282,9 @@ check('撤销接线：只走 agent 通道，撤销也要留痕、也要人工确
   assert(/previous/.test(main), '记录里必须有 previous（旧值）');
   assert(main.includes('AGENT_SETTINGS_UNDONE'), '撤销要单独记一条诊断');
   assert(/agentSettingUndo: \[\],/.test(main), '可撤销记录要用空数组初始化');
+  assert(/undoPicked/.test(main), '撤销要按"目标列表"落盘（能一次改多项）');
+  assert(/runtime\.agentSettingUndo\.splice\(/.test(main), '撤销要把用掉的记录从栈里拿走');
+  assert(/MAX_UNDO_STEPS/.test(main), '快照里要告诉界面能撤几步');
 
   const actions = read('src/core/actions.js');
   assert(/params\.undo === true/.test(actions), '执行器要接受 undo:true');

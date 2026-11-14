@@ -216,15 +216,24 @@ function planSettingChange(request, context) {
   };
 }
 
+/** 一次最多能连着撤几步：给个上限，免得一次调用把 20 条历史整个翻回去 */
+const MAX_UNDO_STEPS = 5;
+
 /**
- * 撤销上一次由 agent 做成的修改。
+ * 撤销由 agent 做成的修改（支持一次撤多步）。
  *
- * 为什么不让 agent 自己"再改一次回去"：那会走同一条路，但只要中间有人手动改过，
- * "改回去"就可能把人的改动覆盖掉。所以这里认的是记录：只有 last.previous 还在，
- * 才允许回滚；值已经被人改走，就如实说"不需要撤销"，而不是硬盖。
+ * 为什么认"记录里的旧值"而不是让 agent 再改一次回去：改回去走的是同一条路，
+ * 但只要中间有人手动动过，就会把人的选择覆盖掉。这里只回滚记录里记下的旧值。
+ *
+ * 多步撤销的两条约束：
+ *   1. **整体成功或整体不动**：要撤的几条里只要有一条锁死/非法，就一条都不改，
+ *      免得撤一半留下一个既不是改前也不是改后的状态。
+ *   2. **只回退、不重做**：撤销会把记录一起拿走，所以连着撤会一路回到最早一条；
+ *      想再改回去就让 agent 重新设一次（那样每次都得过确认与留痕）。
  *
  * @param {Array<{key:string,value:*,previous:*,at?:number}>} entries 成功的修改记录（越旧越前）
- * @param {{current?:*, lockedKeys?:string[]}} [context]
+ * @param {{currents?:Object, current?:*, steps?:number}} [context]
+ *        currents 是"每个键现在是什么值"的映射；current 只用于单键场景（兼容旧调用）
  */
 function planSettingUndo(entries, context) {
   const ctx = context && typeof context === 'object' ? context : {};
@@ -238,62 +247,109 @@ function planSettingUndo(entries, context) {
     };
   }
 
-  const last = list[list.length - 1];
-  if (SETTING_LOCKED[last.key]) {
-    return {
-      ok: false,
-      code: 'LOCKED_KEY',
-      error: `${last.key} 现在不能由 agent 改：${SETTING_LOCKED[last.key]}`,
-      locked: true,
-      disclaimer: SETTING_DISCLAIMER,
-    };
+  const currents = ctx.currents && typeof ctx.currents === 'object' ? ctx.currents : null;
+  const rawSteps = Number(ctx.steps);
+  const steps = Number.isFinite(rawSteps) && rawSteps >= 1 ? Math.min(Math.floor(rawSteps), MAX_UNDO_STEPS) : 1;
+
+  // 从最新一条往前取，最多 steps 条（栈顶先撤）
+  const picked = list.slice(Math.max(0, list.length - steps)).reverse();
+
+  // 先整体校验，任何一条不合格就一条都不动
+  for (const entry of picked) {
+    if (SETTING_LOCKED[entry.key]) {
+      return {
+        ok: false,
+        code: 'LOCKED_KEY',
+        key: entry.key,
+        error: `${entry.key} 现在不能由 agent 改：${SETTING_LOCKED[entry.key]}`,
+        locked: true,
+        disclaimer: SETTING_DISCLAIMER,
+      };
+    }
+    if (!SETTING_SCHEMA[entry.key]) {
+      return {
+        ok: false,
+        code: 'UNKNOWN_KEY',
+        key: entry.key,
+        error: `记录里的 ${entry.key} 已经不在可改范围里了，撤销不了。`,
+        disclaimer: SETTING_DISCLAIMER,
+      };
+    }
+    const checked = validateSettingValue(entry.key, entry.previous);
+    if (!checked.ok) {
+      return {
+        ok: false,
+        code: 'BAD_VALUE',
+        key: entry.key,
+        error: `记录里这一项的旧值不合法，撤销不了：${checked.error}`,
+        disclaimer: SETTING_DISCLAIMER,
+      };
+    }
   }
 
-  const rule = SETTING_SCHEMA[last.key];
-  if (!rule) {
-    return {
-      ok: false,
-      code: 'UNKNOWN_KEY',
-      error: `记录里的 ${last.key} 已经不在可改范围里了，撤销不了。`,
-      disclaimer: SETTING_DISCLAIMER,
-    };
+  const changes = [];
+  const unchanged = [];
+  for (const entry of picked) {
+    const rule = SETTING_SCHEMA[entry.key];
+    const checked = validateSettingValue(entry.key, entry.previous);
+    const known = currents
+      ? Object.prototype.hasOwnProperty.call(currents, entry.key)
+      : Object.prototype.hasOwnProperty.call(ctx, 'current');
+    const nowValue = currents ? currents[entry.key] : ctx.current;
+    if (known && nowValue === checked.value) {
+      // 已经是原样了：不必再写一次，但也有可能同键还有更早的一步要撤
+      unchanged.push({ key: entry.key, value: checked.value, label: rule.label });
+      continue;
+    }
+    changes.push({
+      key: entry.key,
+      value: checked.value,
+      from: known ? nowValue : undefined,
+      label: rule.label,
+      summary: rule.describe(checked.value),
+      at: entry.at,
+    });
   }
 
-  const checked = validateSettingValue(last.key, last.previous);
-  if (!checked.ok) {
-    return {
-      ok: false,
-      code: 'BAD_VALUE',
-      error: `记录里这一项的旧值不合法，撤销不了：${checked.error}`,
-      disclaimer: SETTING_DISCLAIMER,
-    };
-  }
-
-  const currentKnown = Object.prototype.hasOwnProperty.call(ctx, 'current');
-  if (currentKnown && ctx.current === checked.value) {
+  if (!changes.length) {
+    const only = picked[0];
+    const rule = SETTING_SCHEMA[only.key];
     return {
       ok: true,
       code: 'NO_CHANGE',
-      key: last.key,
-      value: checked.value,
+      key: only.key,
+      value: validateSettingValue(only.key, only.previous).value,
+      changes: [],
+      consumed: picked.length,
+      unchanged: unchanged.length,
       message: `${rule.label} 已经回到上一次改之前的样子了，不需要再撤销。`,
-      summary: `${rule.describe(checked.value)}（无变化）`,
+      summary: `${rule.describe(validateSettingValue(only.key, only.previous).value)}（无变化）`,
       disclaimer: SETTING_DISCLAIMER,
     };
   }
 
+  const first = changes[0];
+  const extra = changes.length > 1 ? `，另外还撤了 ${changes.length - 1} 项` : '';
   return {
     ok: true,
-    key: last.key,
-    value: checked.value,
+    key: first.key,
+    value: first.value,
     undo: true,
-    summary: rule.describe(checked.value),
-    message: `已撤销：${rule.label} 回到 ${rule.describe(checked.value)}。`,
+    steps: changes.length,
+    changes,
+    consumed: picked.length,
+    unchanged: unchanged.length,
+    summary: changes.map((item) => item.summary).join('；'),
+    message:
+      changes.length === 1
+        ? `已撤销：${first.label} 回到「${first.summary}」。`
+        : `已撤销 ${changes.length} 项：${first.label} 回到「${first.summary}」${extra}。`,
     disclaimer: SETTING_DISCLAIMER,
   };
 }
 
 module.exports = {
+  MAX_UNDO_STEPS,
   SETTING_DISCLAIMER,
   SETTING_KEYS,
   SETTING_LOCKED,
