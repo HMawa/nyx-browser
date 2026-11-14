@@ -310,6 +310,10 @@ contextBridge.exposeInMainWorld('nyx', {
   offlineCachePrivateReset: () => ipcRenderer.invoke('nyx:offline:private-reset'),
   offlineCacheSites: () => ipcRenderer.invoke('nyx:offline:sites'),
   offlineCacheSitesSet: (payload) => ipcRenderer.invoke('nyx:offline:sites-set', payload || {}),
+  // 隐私名单的「只存这些」模板（模板只并进现有名单，不替换）
+  offlineCachePrivateTemplates: () => ipcRenderer.invoke('nyx:offline:private-templates'),
+  offlineCachePrivateTemplateApply: (payload) =>
+    ipcRenderer.invoke('nyx:offline:private-template-apply', payload || {}),
   offlineCacheSitesExport: (payload) => ipcRenderer.invoke('nyx:offline:sites-export', payload || {}),
   offlineCacheSitesImport: (payload) => ipcRenderer.invoke('nyx:offline:sites-import', payload || {}),
 

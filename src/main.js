@@ -108,7 +108,9 @@ const {
 } = require('./core/page-digest');
 const {
   CACHE_SITE_MODES,
+  applySiteTemplate,
   decideCacheSite,
+  describeSiteTemplates,
   exportCacheSites,
   importCacheSites,
   normalizeSiteList,
@@ -7268,6 +7270,50 @@ function registerOfflineCacheIpc() {
       });
     }
     return { ok: true, ...next, private: privateSitePolicy() };
+  });
+
+  /**
+   * 隐私模式名单的「只存这些」模板。
+   *
+   * 两条硬规矩写在这里而不是界面里：
+   *   1. 模板只能并进现有名单（merge），绝不静默替换用户手写的那份；
+   *   2. 套上模板会同时把模式切到「只存名单里的」，所以返回体要把 added / skipped 分开，
+   *      界面必须逐项显示加了哪些，不能只弹一句「已应用」。
+   */
+  ipcMain.handle('nyx:offline:private-templates', () => ({
+    ok: true,
+    templates: describeSiteTemplates(),
+    current: privateSitePolicy(),
+  }));
+
+  ipcMain.handle('nyx:offline:private-template-apply', (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    const key = String(input.key || '');
+    const result = applySiteTemplate(privateSitePolicy(), key);
+    if (!result.ok) {
+      return { ok: false, code: result.code, error: result.error, private: privateSitePolicy() };
+    }
+    const saved = saveCacheSitePolicy(result.policy, 'private');
+    if (!saved.ok) {
+      return { ok: false, error: saved.error, private: privateSitePolicy() };
+    }
+    if (runtime.diagnostics) {
+      runtime.diagnostics.info('PRIVATE_CACHE_TEMPLATE_APPLIED', '隐私模式名单套用了模板', {
+        template: result.template.key,
+        added: result.added.length,
+        skipped: result.skipped.length,
+        modeChanged: result.modeChanged,
+      });
+    }
+    return {
+      ok: true,
+      template: result.template,
+      added: result.added,
+      skipped: result.skipped,
+      modeChanged: result.modeChanged,
+      message: result.message,
+      private: privateSitePolicy(),
+    };
   });
 
   /**

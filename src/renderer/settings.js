@@ -1375,6 +1375,85 @@
     }
   }
 
+  /**
+   * 「只存这些」模板：每个模板一行，站点逐项列出来（不折叠成"等 N 个"），
+   * 点「并进名单」才写盘，写之前不碰任何已有内容。
+   */
+  async function loadPrivateTemplates() {
+    const list = byId('offline-private-template-list');
+    if (!list) return;
+    if (!window.nyx || typeof window.nyx.offlineCachePrivateTemplates !== 'function') {
+      list.textContent = '当前内核不支持套模板。';
+      return;
+    }
+    let res = null;
+    try {
+      res = await window.nyx.offlineCachePrivateTemplates();
+    } catch (err) {
+      list.textContent = `读取模板失败：${err && err.message ? err.message : '未知原因'}`;
+      return;
+    }
+    const templates = (res && Array.isArray(res.templates) && res.templates) || [];
+    if (!templates.length) {
+      list.textContent = '没有可用的模板。';
+      return;
+    }
+    list.textContent = '';
+    for (const template of templates) {
+      const row = document.createElement('div');
+      row.className = 'template-row';
+      const head = document.createElement('div');
+      head.className = 'template-head';
+      const title = document.createElement('strong');
+      title.textContent = template.label;
+      const count = document.createElement('span');
+      count.className = 'template-count';
+      count.textContent = `${template.count} 个站点`;
+      const apply = document.createElement('button');
+      apply.type = 'button';
+      apply.className = 'btn btn-mini';
+      apply.textContent = '并进名单';
+      apply.setAttribute('aria-label', `把「${template.label}」的 ${template.count} 个站点并进隐私模式名单`);
+      apply.addEventListener('click', async () => {
+        apply.disabled = true;
+        try {
+          const applied = await window.nyx.offlineCachePrivateTemplateApply({ key: template.key }).catch(() => null);
+          const status = byId('offline-private-template-status');
+          if (!applied || applied.ok === false) {
+            if (status) {
+              status.className = 'hint is-warn';
+              status.textContent = `没有套上：${(applied && applied.error) || '主进程没有响应'}`;
+            }
+            setOfflineStatus('套模板失败', true);
+            return;
+          }
+          if (status) {
+            const added = Array.isArray(applied.added) ? applied.added : [];
+            const skipped = Array.isArray(applied.skipped) ? applied.skipped : [];
+            status.className = 'hint is-ok';
+            status.textContent =
+              `${applied.message}` +
+              (added.length ? `\n新加：${added.join('、')}` : '') +
+              (skipped.length ? `\n本来就在：${skipped.join('、')}` : '');
+          }
+          renderCacheSites({ ok: true, mode: applied.private ? applied.private.mode : 'allowlist', allow: applied.private ? applied.private.allow : [], block: applied.private ? applied.private.block : [], private: applied.private });
+          setOfflineStatus('模板已并入隐私模式名单');
+        } finally {
+          apply.disabled = false;
+        }
+      });
+      head.append(title, count, apply);
+      const summaryText = document.createElement('p');
+      summaryText.className = 'hint';
+      summaryText.textContent = template.summary;
+      const sites = document.createElement('p');
+      sites.className = 'hint template-sites';
+      sites.textContent = (template.sites || []).join('、');
+      row.append(head, summaryText, sites);
+      list.append(row);
+    }
+  }
+
   function wireCacheSites() {
     const mode = byId('offline-site-mode');
     if (mode) {
@@ -1498,6 +1577,7 @@
     }
     if (!offlineCacheWired) wireOfflineCache();
     await loadCacheSites();
+    await loadPrivateTemplates();
     wireCacheSites();
   }
 

@@ -392,6 +392,95 @@ function siteMatches(host, rule) {
 }
 
 /**
+ * 「只存这些」的模板：几组常见站点的起点名单。
+ *
+ * 两条自我约束：
+ *   1. 模板只是**起点**，套上去之后用户还能逐条删、逐条加——不提供"锁死的推荐名单"；
+ *   2. 套用一律走 merge（并进现有名单），绝不静默替换用户已经手写的那份。
+ * 换句话说：模板负责省打字，不负责替用户做决定。
+ */
+const SITE_TEMPLATES = [
+  {
+    key: 'docs',
+    label: '文档与手册',
+    summary: '查资料最常打开的几家中英文文档站；这类页面文字多，离线留着最有用。',
+    sites: ['developer.mozilla.org', 'docs.python.org', 'learn.microsoft.com', 'doc.rust-lang.org', 'devdocs.io'],
+  },
+  {
+    key: 'reference',
+    label: '百科与参考',
+    summary: '百科与标准文档；页面结构规整，快照读起来干净。',
+    sites: ['wikipedia.org', 'zh.wikipedia.org', 'w3.org', 'rfc-editor.org'],
+  },
+  {
+    key: 'news',
+    label: '新闻与通讯',
+    summary: '只列了几家通讯社与公共广播；商业新闻站的付费墙与追踪器多，要不要留请你自己判断。',
+    sites: ['reuters.com', 'apnews.com', 'bbc.com', 'npr.org'],
+  },
+];
+
+function describeSiteTemplates() {
+  return SITE_TEMPLATES.map((item) => ({
+    key: item.key,
+    label: item.label,
+    summary: item.summary,
+    sites: normalizeSiteList(item.sites),
+    count: normalizeSiteList(item.sites).length,
+  }));
+}
+
+/**
+ * 把一个模板并进现有名单。
+ * 返回 { ok, policy, template, added, skipped, message }：
+ * added 是真正写进去的站点（逐项可显示），skipped 是已经在名单里的——
+ * 界面要把这两个数分开说，否则用户会以为"套了模板但没变化"是我们坏了。
+ */
+function applySiteTemplate(rawPolicy, key) {
+  const policy = normalizeSitePolicy(rawPolicy);
+  const template = SITE_TEMPLATES.find((item) => item.key === String(key || ''));
+  if (!template) {
+    return {
+      ok: false,
+      code: 'UNKNOWN_TEMPLATE',
+      error: `没有叫「${String(key || '')}」的模板。`,
+      policy,
+    };
+  }
+  const sites = normalizeSiteList(template.sites);
+  const existing = new Set(policy.allow);
+  const added = [];
+  const skipped = [];
+  for (const site of sites) {
+    if (existing.has(site)) {
+      skipped.push(site);
+      continue;
+    }
+    existing.add(site);
+    added.push(site);
+  }
+  const next = normalizeSitePolicy({
+    // 套模板的意图就是"只存这些"，所以模式一起切到 allowlist
+    mode: 'allowlist',
+    allow: [...policy.allow, ...added],
+    block: policy.block,
+  });
+  const message = added.length
+    ? `已把「${template.label}」的 ${added.length} 个站点并进名单${skipped.length ? `（${skipped.length} 个本来就在）` : ''}，模式已切到「只存名单里的」。`
+    : `「${template.label}」里的 ${skipped.length} 个站点本来就在名单里，模式已切到「只存名单里的」。`;
+  return {
+    ok: true,
+    policy: next,
+    template: { key: template.key, label: template.label },
+    added,
+    skipped,
+    modeChanged: policy.mode !== 'allowlist',
+    message,
+  };
+}
+
+
+/**
  * 这一页要不要存快照。
  * 返回 { cache, layer, host, reason }：layer 是命中的那一层，reason 是中文说明，
  * 界面与日志直接用，不许自己再编一套话。
@@ -584,10 +673,12 @@ module.exports = {
   CACHE_TEXT_MAX,
   CACHE_VERSION,
   attachImageData,
+  applySiteTemplate,
   buildCaptureScript,
   cacheKeyOf,
   decideCacheSite,
   describeCachedPage,
+  describeSiteTemplates,
   exportCacheSites,
   getSnapshot,
   imageTargets,

@@ -761,6 +761,61 @@
   margin: 8px 0 2px;
 }
 
+/* 「只存这些」模板（隐私名单）：一行一个模板，站点逐条列，不折成"等 N 个" */
+#offline-private-template-block {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.template-row {
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--bg-input) 60%, transparent);
+}
+
+.template-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.template-head strong {
+  font-size: 13px;
+}
+
+.template-count {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.template-head .btn {
+  margin-left: auto;
+}
+
+.template-row .hint {
+  margin: 4px 0 0;
+}
+
+.template-sites {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.template-head .btn:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+}
+
 /* 让 agent 改设置（用户第 6 项）：两列并排，窄屏自动落成上下两段 */
 .agent-setting-cols {
   display: grid;

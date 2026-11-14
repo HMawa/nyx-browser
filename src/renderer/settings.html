@@ -458,6 +458,15 @@
                 </label>
                 <textarea id="offline-private-site-block" rows="2" spellcheck="false" placeholder="bank.example.com"></textarea>
                 <p class="hint" id="offline-private-site-facts"></p>
+                <div class="info-sub" id="offline-private-template-block">
+                  <h4>「只存这些」模板</h4>
+                  <p class="hint">
+                    套模板只会把站点**并进**现有名单，不会替换你手写的那份；套上之后模式会切成「只存名单里的」，
+                    加了哪几条、哪几条本来就在，下面会逐条列出来。
+                  </p>
+                  <div class="template-list" id="offline-private-template-list"></div>
+                  <p class="hint" id="offline-private-template-status" role="status" aria-live="polite"></p>
+                </div>
                 <div class="agent-site-tools">
                   <button type="button" class="btn btn-mini" id="btn-offline-private-sites-export">
                     导出隐私名单

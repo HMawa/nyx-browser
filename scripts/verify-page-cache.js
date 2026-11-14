@@ -831,6 +831,74 @@ check('46. 接线：两份名单各有自己的导出/导入入口与结果行',
   assert.ok(js.includes("wireSiteIo('private', 'offline-private-sites'"), '隐私那套也要接上');
 });
 
+check('47. 「只存这些」模板：模板本身是干净的，站点没有重复也没有写坏的域名', () => {
+  const cache = require('../src/core/page-cache');
+  const templates = cache.describeSiteTemplates();
+  assert.ok(Array.isArray(templates) && templates.length >= 3, '至少要有三组模板');
+  for (const template of templates) {
+    assert.ok(template.key && template.label && template.summary, `模板 ${template.key} 要有人能看懂的名字与说明`);
+    assert.ok(template.sites.length > 0, `模板 ${template.key} 不能是空名单`);
+    assert.strictEqual(template.sites.length, template.count, 'count 与 sites 长度要一致');
+    assert.strictEqual(new Set(template.sites).size, template.sites.length, `模板 ${template.key} 里站点有重复`);
+    for (const site of template.sites) {
+      assert.strictEqual(site, cache.normalizeSiteText(site), `模板 ${template.key} 里的 ${site} 不是规范域名`);
+    }
+  }
+});
+
+check('48. 套模板只并进现有名单、不替换用户手写的那份，并把模式切到「只存名单里的」', () => {
+  const cache = require('../src/core/page-cache');
+  const before = { mode: 'all', allow: ['my.internal.example'], block: ['bank.example'] };
+  const result = cache.applySiteTemplate(before, 'docs');
+  assert.ok(result.ok === true, `套模板应该成功：${result.error || ''}`);
+  assert.ok(result.policy.allow.includes('my.internal.example'), '用户原有条目不许被清掉');
+  assert.deepStrictEqual(result.policy.block, ['bank.example'], '黑名单也要原样保留');
+  assert.strictEqual(result.policy.mode, 'allowlist', '套模板的意图是"只存这些"，模式要一起切');
+  assert.ok(result.added.length > 0, '第一次套要能报出新增了哪些');
+  assert.strictEqual(result.modeChanged, true, '模式变了要如实回报');
+  assert.ok(/并进名单/.test(result.message), '消息要说清是"并进"而不是"替换"');
+});
+
+check('49. 重复套同一个模板不会重复加，也不报成失败、不报成新增', () => {
+  const cache = require('../src/core/page-cache');
+  const once = cache.applySiteTemplate({ mode: 'all', allow: [], block: [] }, 'docs');
+  const twice = cache.applySiteTemplate(once.policy, 'docs');
+  assert.ok(twice.ok === true, '第二次套应该正常返回');
+  assert.strictEqual(twice.added.length, 0, '第二次没有新增');
+  assert.strictEqual(twice.skipped.length, once.added.length, '第一次加进去的这次都算"本来就在"');
+  assert.strictEqual(twice.policy.allow.length, once.policy.allow.length, '名单长度不许变');
+  assert.strictEqual(twice.modeChanged, false, '模式已经是 allowlist，不该说成变了');
+  assert.ok(/本来就在/.test(twice.message), '要说清是本来就在，不是没生效');
+});
+
+check('50. 认不出的模板名字要明确拒绝，且不动现有名单', () => {
+  const cache = require('../src/core/page-cache');
+  const before = { mode: 'allowlist', allow: ['a.example'], block: [] };
+  const bad = cache.applySiteTemplate(before, 'nope');
+  assert.strictEqual(bad.ok, false);
+  assert.strictEqual(bad.code, 'UNKNOWN_TEMPLATE');
+  assert.ok(/没有叫/.test(bad.error), `错误文案要指名道姓：${bad.error}`);
+  assert.deepStrictEqual(bad.policy.allow, ['a.example'], '拒绝时名单必须原样返回');
+});
+
+check('51. 接线：模板列表与套用各一个 IPC，界面把站点逐项列出来', () => {
+  const main = read('src/main.js');
+  const preload = read('src/preload.js');
+  const html = read('src/renderer/settings.html');
+  const js = read('src/renderer/settings.js');
+  assert.ok(main.includes("ipcMain.handle('nyx:offline:private-templates'"), '缺模板列表 IPC');
+  assert.ok(main.includes("ipcMain.handle('nyx:offline:private-template-apply'"), '缺套用 IPC');
+  assert.ok(/applySiteTemplate\(privateSitePolicy\(\), key\)/.test(main), '套用要走纯函数，不能现写一套');
+  assert.ok(/saveCacheSitePolicy\(result\.policy, 'private'\)/.test(main), '套完要落进隐私那份名单');
+  assert.ok(main.includes('PRIVATE_CACHE_TEMPLATE_APPLIED'), '套用要有诊断记录');
+  assert.ok(/offlineCachePrivateTemplateApply/.test(preload), 'preload 缺套用方法');
+  assert.ok(html.includes('id="offline-private-template-list"'), '设置页缺模板列表容器');
+  assert.ok(html.includes('id="offline-private-template-status"'), '设置页缺模板结果行');
+  assert.ok(/async function loadPrivateTemplates\(\)/.test(js), '缺渲染函数');
+  assert.ok(/\(template\.sites \|\| \[\]\)\.join\('、'\)/.test(js), '站点要逐项列出，不许折成"等 N 个"');
+  assert.ok(/await loadPrivateTemplates\(\)/.test(js), '进分区时要加载模板');
+});
+
 /* ------------------------------------------------------------------ */
 const failed = checks.filter((item) => !item.ok);
 const total = checks.length;
