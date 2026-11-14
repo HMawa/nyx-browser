@@ -71,6 +71,7 @@ const MODES = ['全新安装', '升级安装', '修复安装', '降级安装'];
 const results = [];
 let group = '预检';
 let installerPath = null;
+let olderInstallerPath = null;
 let didBackup = false;
 let preflightOnly = false;
 
@@ -87,9 +88,18 @@ class AssertFailure extends Error {}
 
 function record(name, pass, detail) {
   const ok = !!pass;
-  results.push({ group, name, pass: ok, detail: detail == null ? '' : String(detail) });
+  results.push({ group, name, pass: ok, skipped: false, detail: detail == null ? '' : String(detail) });
   console.log(`  ${ok ? '✔ PASS' : '✘ FAIL'} ${name}${detail ? ` ｜ ${clip(detail, 300)}` : ''}`);
   return ok;
+}
+
+/**
+ * 跳过要显式记一条：清单要求「静默跳过也算缺陷」。
+ * 所以跳过既不算通过也不算失败，单独计数并在汇总里列出来，附带怎么才能真跑的说明。
+ */
+function skip(name, detail) {
+  results.push({ group, name, pass: true, skipped: true, detail: detail == null ? '' : String(detail) });
+  console.log(`  – SKIP ${name}${detail ? ` ｜ ${clip(detail, 300)}` : ''}`);
 }
 
 function expect(name, pass, detail) {
@@ -302,6 +312,7 @@ function findLatestInstaller() {
 function parseArgs() {
   const args = process.argv.slice(2);
   let value = null;
+  let from = null;
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (arg === '--help' || arg === '-h') {
@@ -313,11 +324,16 @@ function parseArgs() {
       continue;
     }
     if (arg.startsWith('--installer=')) value = arg.slice('--installer='.length);
+    else if (arg.startsWith('--from=')) from = arg.slice('--from='.length);
     else if (arg === '--installer' && args[i + 1]) {
       value = args[i + 1];
       i += 1;
+    } else if (arg === '--from' && args[i + 1]) {
+      from = args[i + 1];
+      i += 1;
     }
   }
+  if (from) olderInstallerPath = path.resolve(from.replace(/^"|"$/g, ''));
   if (value) {
     installerPath = path.resolve(value.replace(/^"|"$/g, ''));
     return;
@@ -366,6 +382,37 @@ function stageInstaller(round) {
   const copy = path.join(STAGE, `setup-round${round}.exe`);
   fs.copyFileSync(STAGE_MASTER, copy); // 安装器装完会自删，每次都跑新副本
   return copy;
+}
+
+/** 旧版安装包副本（升级 / 降级路径要用两个版本才测得出来）。 */
+function stageOlderInstaller(round) {
+  if (!olderInstallerPath) return null;
+  fs.mkdirSync(STAGE, { recursive: true });
+  const copy = path.join(STAGE, `setup-old${round}.exe`);
+  fs.copyFileSync(olderInstallerPath, copy);
+  return copy;
+}
+
+/** 从 Nyx-Setup-1.17.0.exe 这样的文件名里取版本号，取不到就返回空串。 */
+function versionFromName(file) {
+  const match = /Nyx-Setup-(\d+\.\d+\.\d+)\.exe$/i.exec(path.basename(file || ''));
+  return match ? match[1] : '';
+}
+
+/** 读 exe 的 FileVersion（产品版本号写在这里，升级/降级后必须对得上）。 */
+function exeVersion(file) {
+  if (!exists(file)) return '';
+  const res = spawnSync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      `(Get-Item -LiteralPath '${file.replace(/'/g, "''")}').VersionInfo.FileVersion`,
+    ],
+    { encoding: 'utf8', windowsHide: true, timeout: 30000 },
+  );
+  return String(res.stdout || '').trim();
 }
 
 function runSetup(exePath, installDir) {
@@ -444,6 +491,36 @@ function preflight() {
   );
 
   expect('测试工作目录尚未被占用', !exists(WORK) && !exists(STAGE) && !exists(ARCHIVE), `${WORK}；${STAGE}；${ARCHIVE}`);
+
+  if (olderInstallerPath) {
+    expect(
+      '旧版安装包存在且是文件（--from）',
+      exists(olderInstallerPath) && fs.statSync(olderInstallerPath).isFile(),
+      olderInstallerPath,
+    );
+    expect(
+      '旧版与新版不是同一个文件（同版本测不出升级/降级）',
+      path.resolve(olderInstallerPath) !== path.resolve(installerPath),
+      `${path.basename(olderInstallerPath)} ／ ${path.basename(installerPath)}`,
+    );
+    const oldVersion = versionFromName(olderInstallerPath);
+    const newVersion = versionFromName(installerPath);
+    expect(
+      '两个安装包文件名里都能读出 x.y.z 版本号',
+      !!oldVersion && !!newVersion,
+      `旧 ${oldVersion || '（读不出）'} ／ 新 ${newVersion || '（读不出）'}`,
+    );
+    expect(
+      '两个版本号不相同',
+      oldVersion !== newVersion,
+      `${oldVersion} ／ ${newVersion}`,
+    );
+  } else {
+    skip(
+      '升级安装 / 降级安装路径（需要 --from=<旧版安装包>）',
+      '只给一个安装包时无法真跑「旧→新」「新→旧」，本次只测全新安装 / 修复安装 / 保留数据卸载 / 完全卸载',
+    );
+  }
 
   const free = freeBytes(TEMP);
   expect('临时目录所在磁盘剩余空间 ≥ 2 GB', free >= MIN_FREE_BYTES, `剩余 ${formatGB(free)}（需要 ${formatGB(MIN_FREE_BYTES)}）`);
@@ -670,9 +747,80 @@ async function step1FreshInstall() {
   expect('安装报告模式 = 全新安装', modeIs(report, '全新安装'), modeDetail(report));
 }
 
-async function step2RepairInstall() {
-  group = '步骤 2｜覆盖安装（修复）';
-  console.log(`\n${'-'.repeat(72)}\n[步骤 2] 写用户数据标记后同版本覆盖安装，应判定为修复安装`);
+/**
+ * 降级：新版装完后，用旧版安装包覆盖。安装器应当判成「降级安装」并保留个人数据。
+ * 这条路径以前从来没测过——只测同版本覆盖（修复）是看不出降级判定的。
+ */
+async function step2DowngradeToOlder() {
+  group = '步骤 2｜覆盖安装（降级：旧版覆盖新版）';
+  const oldVersion = versionFromName(olderInstallerPath);
+  console.log(`\n${'-'.repeat(72)}\n[步骤 2] 用旧版安装包覆盖新版，应判定为降级安装（目标 ${oldVersion}）`);
+
+  fs.mkdirSync(APP_DATA, { recursive: true });
+  fs.writeFileSync(MARKER, `nyx-installer-e2e marker\npid=${PID}\ntime=${new Date().toISOString()}\n`, 'utf8');
+  expect('写入用户数据标记 %APPDATA%\\Nyx\\e2e-marker.txt', exists(MARKER), MARKER);
+
+  const setup = stageOlderInstaller(2);
+  const res = runSetup(setup, INSTALL_DIR);
+  expect(
+    '降级安装返回 0',
+    res.status === 0,
+    `exit=${res.status}，用时 ${res.ms}ms${res.error ? `，错误：${res.error}` : ''}${res.stderr ? `，stderr：${clip(res.stderr, 200)}` : ''}`,
+  );
+
+  await waitFor(() => exists(NYX_EXE), 60000);
+  expect('降级后 Nyx.exe 仍在', exists(NYX_EXE), NYX_EXE);
+  expect('降级后用户数据标记仍在（个人数据不被覆盖）', exists(MARKER), MARKER);
+
+  await waitFor(() => exists(REPORT), 15000);
+  const report = readReportText(REPORT);
+  console.log('  [安装报告]');
+  printReport(report);
+  expect('安装报告模式 = 降级安装', modeIs(report, '降级安装'), modeDetail(report));
+
+  const version = exeVersion(NYX_EXE);
+  expect('降级后程序版本回到旧版', !!oldVersion && version.includes(oldVersion), `FileVersion=${version}，期望含 ${oldVersion}`);
+}
+
+/** 升级：旧版装完后用新版覆盖，应当判成「升级安装」。 */
+async function step3UpgradeBackToNew() {
+  group = '步骤 3｜覆盖安装（升级：新版覆盖旧版）';
+  const newVersion = versionFromName(installerPath);
+  const oldVersion = versionFromName(olderInstallerPath);
+  console.log(`\n${'-'.repeat(72)}\n[步骤 3] 用新版覆盖旧版，应判定为升级安装（${oldVersion} → ${newVersion}）`);
+
+  const setup = stageInstaller(3);
+  const res = runSetup(setup, INSTALL_DIR);
+  expect(
+    '升级安装返回 0',
+    res.status === 0,
+    `exit=${res.status}，用时 ${res.ms}ms${res.error ? `，错误：${res.error}` : ''}${res.stderr ? `，stderr：${clip(res.stderr, 200)}` : ''}`,
+  );
+
+  await waitFor(() => exists(NYX_EXE), 60000);
+  expect('升级后 Nyx.exe 仍在', exists(NYX_EXE), NYX_EXE);
+  expect('升级后用户数据标记仍在（个人数据不被覆盖）', exists(MARKER), MARKER);
+
+  await waitFor(() => exists(REPORT), 15000);
+  const report = readReportText(REPORT);
+  console.log('  [安装报告]');
+  printReport(report);
+  expect('安装报告模式 = 升级安装', modeIs(report, '升级安装'), modeDetail(report));
+
+  const version = exeVersion(NYX_EXE);
+  expect('升级后程序版本是新版', !!newVersion && version.includes(newVersion), `FileVersion=${version}，期望含 ${newVersion}`);
+
+  const verify = runVerifyIntegrity(NYX_EXE);
+  expect(
+    '升级后的程序自检（--verify-integrity）退出 0',
+    verify.status === 0,
+    `exit=${verify.status}${verify.error ? `，错误：${verify.error}` : ''}${verify.stderr ? `，stderr：${clip(verify.stderr, 200)}` : ''}`,
+  );
+}
+
+async function step2RepairInstall(label) {
+  group = label || '步骤 2｜覆盖安装（修复）';
+  console.log(`\n${'-'.repeat(72)}\n[修复] 写用户数据标记后同版本覆盖安装，应判定为修复安装`);
 
   fs.mkdirSync(APP_DATA, { recursive: true });
   fs.writeFileSync(MARKER, `nyx-installer-e2e marker\npid=${PID}\ntime=${new Date().toISOString()}\n`, 'utf8');
@@ -761,7 +909,7 @@ function printSummary() {
     String(index + 1),
     item.group,
     item.name,
-    item.pass ? 'PASS' : 'FAIL',
+    item.skipped ? 'SKIP' : item.pass ? 'PASS' : 'FAIL',
     clip(item.detail || '', 60),
   ]);
   const head = ['#', '步骤', '断言', '结果', '关键值'];
@@ -770,15 +918,21 @@ function printSummary() {
   const divider = `├${widths.map((width) => '─'.repeat(width + 2)).join('┼')}┤`;
 
   console.log(`\n${'='.repeat(78)}`);
-  console.log('  测试汇总（PASS / FAIL）');
+  console.log('  测试汇总（PASS / FAIL / SKIP）');
   console.log(`┌${widths.map((width) => '─'.repeat(width + 2)).join('┬')}┐`);
   console.log(line(head));
   console.log(divider);
   for (const row of rows) console.log(line(row));
   console.log(`└${widths.map((width) => '─'.repeat(width + 2)).join('┴')}┘`);
 
+  const skipped = results.filter((item) => item.skipped);
   const failed = results.filter((item) => !item.pass);
-  console.log(`共 ${results.length} 项断言：通过 ${results.length - failed.length} 项，失败 ${failed.length} 项`);
+  const passed = results.filter((item) => item.pass && !item.skipped);
+  console.log(`共 ${results.length} 项断言：通过 ${passed.length} 项，失败 ${failed.length} 项，跳过 ${skipped.length} 项`);
+  if (skipped.length) {
+    console.log('跳过项（不是通过，是没测）：');
+    for (const item of skipped) console.log(`  · [${item.group}] ${item.name}｜${clip(item.detail, 200)}`);
+  }
   if (failed.length) {
     console.log('失败项：');
     for (const item of failed) console.log(`  · [${item.group}] ${item.name}｜${clip(item.detail, 200)}`);
@@ -789,6 +943,9 @@ function printUsage() {
   console.log('用法：');
   console.log('  node scripts/test-installer-e2e.js --installer=<安装包绝对路径>');
   console.log('  node scripts/test-installer-e2e.js          # 自动取 dist 下最新的 Nyx-Setup-*.exe');
+  console.log('  node scripts/test-installer-e2e.js --installer=dist\\Nyx-Setup-1.17.1.exe --from=dist\\Nyx-Setup-1.17.0.exe');
+  console.log('       加 --from 才会真跑「升级安装」（旧→新）与「降级安装」（新→旧）两条路径；');
+  console.log('       不给我会显式记成 SKIP 并说明原因——静默跳过不算测过。');
   console.log('  node scripts/test-installer-e2e.js --preflight-only   # 只跑环境检查，不做任何改动');
   console.log('');
   console.log('说明：会静默安装到 %TEMP%\\nyx-e2e-<pid>\\install，测试前自动备份并迁移 %APPDATA%\\Nyx、');
@@ -797,7 +954,7 @@ function printUsage() {
 
 async function main() {
   console.log('='.repeat(78));
-  console.log('  Nyx 安装器端到端测试：全新安装 / 修复安装 / 静默卸载 / 完全卸载');
+  console.log('  Nyx 安装器端到端测试：全新安装 / 升级安装 / 降级安装 / 修复安装 / 两种卸载');
   console.log('='.repeat(78));
 
   try {
@@ -809,7 +966,13 @@ async function main() {
       backupUserEnv();
       didBackup = true;
       await step1FreshInstall();
-      await step2RepairInstall();
+      if (olderInstallerPath) {
+        await step2DowngradeToOlder();
+        await step3UpgradeBackToNew();
+        await step2RepairInstall('步骤 4｜覆盖安装（修复）');
+      } else {
+        await step2RepairInstall('步骤 2｜覆盖安装（修复）');
+      }
       await step3UninstallKeepData();
       await step4UninstallDeleteData();
     }
@@ -829,11 +992,16 @@ async function main() {
   }
 
   const failed = results.filter((item) => !item.pass);
+  const skipped = results.filter((item) => item.skipped);
   if (failed.length) {
     console.log('\n[结果] 存在失败断言，退出码 1。');
     process.exitCode = 1;
+  } else if (preflightOnly) {
+    console.log('\n[结果] 预检通过（--preflight-only：只检查环境，没有做任何安装/卸载）。');
+  } else if (skipped.length) {
+    console.log(`\n[结果] 已测路径全部通过，但有 ${skipped.length} 项因缺少材料跳过（不算测过）。`);
   } else {
-    console.log('\n[结果] 全部断言通过：安装、修复、保留数据卸载与完全卸载均符合预期。');
+    console.log('\n[结果] 全部断言通过：全新安装、升级安装、降级安装、修复安装、保留数据卸载与完全卸载均符合预期。');
   }
 }
 
