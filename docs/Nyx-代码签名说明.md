@@ -47,9 +47,28 @@ node scripts/make-signing-cert.js --force
 | --- | --- | --- |
 | `nyx-self-signed.pfx` | 私钥 + 证书（打包时用） | **绝对不能** |
 | `nyx-self-signed.cer` | 公钥证书（给别的机器信任用） | 可以，但只该给自己的机器 |
-| `password.txt` | 私钥密码（打包脚本读） | **绝对不能** |
+| `password.txt` | 私钥密码（**只在凭据管理器写不进去时才出现**） | **绝对不能** |
 
 密码由脚本随机生成，全程只通过环境变量交给 electron-builder，不进命令行参数（否则会出现在进程列表与 shell 历史里）。
+
+### 3.1 密码存在哪儿：Windows 凭据管理器（默认）
+
+早期版本把密码明文写在 `build/signing/password.txt`，只靠 `.gitignore` 挡着——一旦有人把 `build/` 整个目录复制走、或者备份脚本顺手带上，私钥就等于泄露。现在默认改成存进 **Windows 凭据管理器**（`advapi32` 的 `CredWrite`，凭据名 `Nyx/SelfSignedCodeSigning`），密钥由**当前用户账户**派生：
+
+```powershell
+# 看密码现在存在哪儿（只报"有/没有"，不打印密码）
+node scripts/signing-secret.js --status
+
+# 把老机器上的明文密码搬进凭据管理器，成功后删掉明文文件
+node scripts/signing-secret.js --store --purge-file
+
+# 从凭据管理器删掉（例如要重生成证书）
+node scripts/signing-secret.js --clear
+```
+
+打包时按这个顺序找密码：**凭据管理器 → 环境变量 `NYX_SIGN_PASSWORD` → 明文文件 → 没有**。退回到后两种时脚本每次都会打印警告，不会静默——明文退路留着只是为了让老机器还能打包，不是推荐做法。
+
+边界（必须知道）：凭据是**当前用户**级别的，换账户、换机器都用不了；这只防"文件被复制"，不防"同一个账户下的恶意程序"。
 
 ## 4. 信任证书（在**要安装的那台**机器上做）
 

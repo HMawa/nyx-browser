@@ -273,6 +273,109 @@ check(
   '改用 X509Certificate2 读 pfx；--status 打印剩余有效期',
 );
 
+// ---------- 密码存放位置（凭据管理器优先，明文只作退路） ----------
+
+const {
+  SOURCE_CREDENTIAL,
+  SOURCE_ENV,
+  SOURCE_FILE,
+  SOURCE_NONE,
+  decideSigningSecret,
+  describeSigningSecret,
+} = require('./lib/signing-secret');
+const credScript = read('scripts/lib/win-credential.js');
+const secretCli = read('scripts/signing-secret.js');
+
+const pickCredential = decideSigningSecret({ credential: 'from-cred', envValue: 'from-env', fileValue: 'from-file' });
+const pickEnv = decideSigningSecret({ envValue: 'from-env', fileValue: 'from-file' });
+const pickFile = decideSigningSecret({ fileValue: 'from-file' });
+const pickNone = decideSigningSecret({});
+
+check(
+  '密码来源有明确优先级：凭据管理器 → 环境变量 → 明文文件 → 没有',
+  pickCredential.source === SOURCE_CREDENTIAL &&
+    pickCredential.secret === 'from-cred' &&
+    pickCredential.warning === '' &&
+    pickEnv.source === SOURCE_ENV &&
+    pickFile.source === SOURCE_FILE &&
+    pickNone.source === SOURCE_NONE &&
+    pickNone.ok === false,
+  `${pickCredential.source} / ${pickEnv.source} / ${pickFile.source} / ${pickNone.source}`,
+);
+
+check(
+  '退回到明文或环境变量时每次都要说出来，不许静默',
+  /明文/.test(pickFile.warning) &&
+    pickFile.warning.includes('--purge-file') &&
+    /环境变量/.test(pickEnv.warning) &&
+    pickCredential.warning === '',
+  `file=${pickFile.warning.slice(0, 18)}…｜env=${pickEnv.warning.slice(0, 18)}…`,
+);
+
+check(
+  '读不到密码时报错点名三条来源与两条出路',
+  pickNone.ok === false &&
+    ['凭据管理器', 'NYX_SIGN_PASSWORD', 'password.txt', 'make-signing-cert.js --force', 'npm run dist'].every(
+      (word) => pickNone.error.includes(word),
+    ),
+  '错误文案含三来源 + 两条出路',
+);
+
+check(
+  '凭据读写走 Windows 凭据管理器（advapi32 的 CredRead/CredWrite/CredDelete），不是自己造加密',
+  credScript.includes('advapi32.dll') &&
+    credScript.includes('CredWrite') &&
+    credScript.includes('CredRead') &&
+    credScript.includes('CredDelete') &&
+    credScript.includes("Nyx/SelfSignedCodeSigning"),
+  'advapi32 + CredWrite/CredRead/CredDelete',
+);
+
+check(
+  '密码只通过环境变量递给 PowerShell，不拼进脚本正文',
+  credScript.includes('NYX_CRED_SECRET') &&
+    !/script\s*\+\s*secret/.test(credScript) &&
+    !/\$\{secret\}/.test(credScript) &&
+    !/secret\s*\}\s*`/.test(credScript),
+  'NYX_CRED_SECRET 只出现在 env 里',
+);
+
+check(
+  '生成证书时先存凭据管理器，写不进去才明说地退回明文文件',
+  certScript.includes('writeCredential(password)') &&
+    certScript.includes('passwordFileWritten') &&
+    certScript.includes('凭据管理器写入失败'),
+  '先 writeCredential，失败才 fs.writeFileSync 并说明',
+);
+
+check(
+  '打包脚本也从凭据管理器取密码（不是只改生成端）',
+  buildScript.includes('readCredential()') &&
+    buildScript.includes('decideSigningSecret') &&
+    buildScript.includes('decided.sourceLabel'),
+  'build-signed 走同一套来源判定',
+);
+
+check(
+  '--status 只说密码存在哪儿，不打印密码本身',
+  describeSigningSecret({ credential: 'SECRET-XYZ', credentialTarget: 'Nyx/SelfSignedCodeSigning' }).includes('有密码') &&
+    !describeSigningSecret({ credential: 'SECRET-XYZ', credentialTarget: 'Nyx/SelfSignedCodeSigning' }).includes(
+      'SECRET-XYZ',
+    ) &&
+    secretCli.includes('--purge-file') &&
+    secretCli.includes('--clear') &&
+    !/console\.log\([^)]*secret\s*\)/.test(secretCli),
+  '状态里只出现"有密码/没有"',
+);
+
+check(
+  '凭据管理器这条路径有 npm 脚本入口，且有文档说明边界',
+  pkg.scripts['sign:secret'] === 'node scripts/signing-secret.js' &&
+    docText.includes('凭据管理器') &&
+    (docText.includes('换账户') || docText.includes('当前用户')),
+  pkg.scripts['sign:secret'] || '缺 sign:secret',
+);
+
 // ---------- 真实验签 ----------
 
 if (process.argv.includes('--no-artifact')) {

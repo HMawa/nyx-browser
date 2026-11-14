@@ -21,6 +21,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { describeCertValidity } = require('./lib/cert-validity');
+const { readCredential } = require('./lib/win-credential');
+const { decideSigningSecret } = require('./lib/signing-secret');
 
 const ROOT = path.join(__dirname, '..');
 const SIGN_DIR = path.join(ROOT, 'build', 'signing');
@@ -40,21 +42,26 @@ function fail(text) {
 }
 
 function readPassword() {
-  let raw = '';
+  // 来源优先级写在 lib/signing-secret.js 里：凭据管理器 → 环境变量 → 明文文件。
+  const credential = readCredential();
+  if (!credential.ok) {
+    say(`注意：读凭据管理器失败（${credential.error}），继续看后面的来源。`);
+  }
+  let fileValue = '';
   try {
-    raw = fs.readFileSync(PASSWORD_PATH, 'utf8');
-  } catch (error) {
-    fail(
-      '读不到自签名证书的密码文件 build/signing/password.txt。\n' +
-        '  先运行 `node scripts/make-signing-cert.js` 生成证书；' +
-        '如果只想打未签名的包，用 `npm run dist`。',
-    );
+    fileValue = fs.readFileSync(PASSWORD_PATH, 'utf8');
+  } catch {
+    fileValue = '';
   }
-  const password = raw.replace(/^\uFEFF/, '').trim();
-  if (!password) {
-    fail('build/signing/password.txt 是空的，证书不可用。重新生成：node scripts/make-signing-cert.js --force');
-  }
-  return password;
+  const decided = decideSigningSecret({
+    credential: credential.ok && credential.found ? credential.secret : '',
+    envValue: process.env.NYX_SIGN_PASSWORD || '',
+    fileValue,
+  });
+  if (!decided.ok) fail(decided.error);
+  if (decided.warning) say(`注意：${decided.warning}`);
+  say(`私钥密码来自「${decided.sourceLabel}」。`);
+  return decided.secret;
 }
 
 /**

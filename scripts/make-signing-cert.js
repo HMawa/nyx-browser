@@ -6,7 +6,8 @@
  * 为什么要有这一步：Nyx 的安装包目前是未签名的，Windows 会显示「未知发布者」，
  * SmartScreen 也会拦一道。买公信证书需要实名与费用，所以这里提供自签名方案：
  *   - 证书只留在本机 `build/signing/`（已在 .gitignore 里），**不进仓库、不进安装包**；
- *   - 私钥密码写同目录的 `password.txt`，只给本机打包脚本读；
+ *   - 私钥密码优先存进 **Windows 凭据管理器**（加密存储，密钥由当前用户派生）；
+ *     只有凭据管理器写不进去时才退回到同目录的 `password.txt`，并且会大声说明；
  *   - 信任与否由用户决定：`--trust` 才会写进当前用户的「受信任的根证书颁发机构」
  *     与「受信任的发布者」，不写系统级存储（不需要管理员）。
  *
@@ -26,6 +27,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { describeCertValidity } = require('./lib/cert-validity');
+const { CRED_TARGET, deleteCredential, readCredential, writeCredential } = require('./lib/win-credential');
+const { decideSigningSecret } = require('./lib/signing-secret');
 
 const ROOT = path.join(__dirname, '..');
 const SIGN_DIR = path.join(ROOT, 'build', 'signing');
@@ -69,7 +72,21 @@ function runPowerShell(script, extraEnv) {
   return String(result.stdout || '').trim();
 }
 
-function readPassword() {
+/**
+ * 密码现在优先来自 Windows 凭据管理器；明文文件只作为老机器的退路。
+ * 这里不去"猜"——三种来源都空就返回空串，由调用处决定怎么报错。
+ */
+function resolvePassword() {
+  const credential = readCredential();
+  const decided = decideSigningSecret({
+    credential: credential.ok && credential.found ? credential.secret : '',
+    envValue: process.env.NYX_SIGN_PASSWORD || '',
+    fileValue: readFilePassword(),
+  });
+  return decided;
+}
+
+function readFilePassword() {
   try {
     return fs.readFileSync(PASSWORD_PATH, 'utf8').replace(/^\uFEFF/, '').trim();
   } catch {
@@ -77,11 +94,23 @@ function readPassword() {
   }
 }
 
+function describePasswordSource() {
+  const credential = readCredential();
+  if (credential.ok && credential.found) {
+    return `Windows 凭据管理器（${CRED_TARGET}）`;
+  }
+  if (!credential.ok) {
+    return `读凭据管理器失败（${credential.error}），退回到 build/signing/password.txt`;
+  }
+  if (readFilePassword()) return '明文文件 build/signing/password.txt（建议存进凭据管理器）';
+  return '还没有密码（先运行本脚本生成证书）';
+}
+
 function describeExisting() {
   const parts = [];
   parts.push(`  证书文件：${path.relative(ROOT, CER_PATH)}`);
   parts.push(`  私钥文件：${path.relative(ROOT, PFX_PATH)}`);
-  parts.push(`  密码文件：${path.relative(ROOT, PASSWORD_PATH)}`);
+  parts.push(`  密码存放：${describePasswordSource()}`);
   let notAfter = '';
   // 注意：Windows PowerShell 5.1 的 Get-PfxCertificate **没有 -Password 参数**，
   // 早先那版就这么写了，结果 --status 一直打印 Thumbprint= 与 Subject= 空值且不报错。
@@ -92,7 +121,7 @@ function describeExisting() {
       'Write-Output ("Thumbprint=" + $c.Thumbprint); Write-Output ("NotAfter=" + $c.NotAfter.ToString("yyyy-MM-dd")); ' +
       'Write-Output ("NotAfterIso=" + $c.NotAfter.ToString("o")); ' +
       'Write-Output ("Subject=" + $c.Subject)',
-    { NYX_SIGN_PFX: PFX_PATH, NYX_SIGN_PASSWORD: readPassword() },
+    { NYX_SIGN_PFX: PFX_PATH, NYX_SIGN_PASSWORD: resolvePassword().secret },
   );
   for (const line of thumb.split(/\r?\n/)) {
     if (!line.trim()) continue;
@@ -133,7 +162,16 @@ function trustCert() {
 function generate() {
   fs.mkdirSync(SIGN_DIR, { recursive: true });
   const password = crypto.randomBytes(24).toString('base64url');
-  fs.writeFileSync(PASSWORD_PATH, `${password}\n`, 'utf8');
+  // 密码先进凭据管理器；写不进去才退回到明文文件，并且必须说出来——
+  // 「静默退回到明文」正是这一项要消灭的东西。
+  const stored = writeCredential(password);
+  let passwordFileWritten = false;
+  if (!stored.ok) {
+    fs.writeFileSync(PASSWORD_PATH, `${password}\n`, 'utf8');
+    passwordFileWritten = true;
+    say(`凭据管理器写入失败（${stored.error}），已退回到明文文件 build/signing/password.txt。`);
+    say('  这不是理想状态：这个文件一旦被复制走，私钥就等于泄露。方便时请重试存进凭据管理器。');
+  }
 
   say('正在生成自签名代码签名证书（RSA 3072 / SHA-256 / 5 年）…');
   const script =
@@ -158,7 +196,11 @@ function generate() {
     fail('证书文件没有落盘，生成失败。');
   }
   say(`证书已生成：${path.relative(ROOT, CER_PATH)}（指纹 ${thumbprint || '未知'}）`);
-  say('私钥密码已写进 build/signing/password.txt，只在本机打包时使用。');
+  say(
+    passwordFileWritten
+      ? '私钥密码退回到了 build/signing/password.txt（明文），建议尽快存进凭据管理器。'
+      : `私钥密码已存进 Windows 凭据管理器（${CRED_TARGET}），不在任何明文文件里。`,
+  );
   return thumbprint;
 }
 
@@ -189,6 +231,13 @@ function main() {
       }
     }
     say('已删除旧证书文件。');
+    // 旧密码留在凭据管理器里只会误导下一个读它的人：证书都换了，那把锁已经没用了。
+    const removed = deleteCredential();
+    if (removed.ok && removed.removed) {
+      say(`已清掉凭据管理器里的旧密码（${CRED_TARGET}）。`);
+    } else if (!removed.ok) {
+      say(`没能清掉凭据管理器里的旧密码（${removed.error}），生成新证书后会用新的覆盖它。`);
+    }
   }
 
   generate();
