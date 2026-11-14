@@ -1309,34 +1309,49 @@
     }
   }
 
-  /** 站点黑白名单（用户第 5 项）：三件小事——模式、只缓存、永不缓存 */
-  function renderCacheSites(payload) {
-    const data = payload && payload.ok !== false ? payload : { mode: 'all', allow: [], block: [] };
-    const mode = byId('offline-site-mode');
+  /**
+   * 站点名单渲染。普通模式与隐私模式两份名单字段相同、规则相同，
+   * 只有落盘的键名和文案不同，所以共用一个渲染函数、传前缀区分。
+   */
+  function renderSiteGroup(prefix, data, wording) {
+    const mode = byId(`${prefix}-mode`);
     if (mode) mode.value = data.mode === 'allowlist' ? 'allowlist' : 'all';
-    const allow = byId('offline-site-allow');
+    const allow = byId(`${prefix}-allow`);
     if (allow && document.activeElement !== allow) allow.value = (data.allow || []).join('\n');
-    const block = byId('offline-site-block');
+    const block = byId(`${prefix}-block`);
     if (block && document.activeElement !== block) block.value = (data.block || []).join('\n');
-    const facts = byId('offline-site-facts');
+    const facts = byId(`${prefix}-facts`);
     if (facts) {
       const allowCount = (data.allow || []).length;
       const blockCount = (data.block || []).length;
       facts.textContent =
         (data.mode === 'allowlist'
-          ? `只缓存名单里的 ${allowCount} 个站点`
-          : '所有站点都缓存（除非在黑名单里）') +
-        (blockCount ? ` · 永不缓存 ${blockCount} 个站点：${(data.block || []).join('、')}` : '');
+          ? `${wording.only} ${allowCount} 个站点`
+          : `${wording.all}（除非在黑名单里）`) +
+        (blockCount ? ` · ${wording.never} ${blockCount} 个站点：${(data.block || []).join('、')}` : '');
     }
   }
 
-  async function saveCacheSites(patch, okText) {
+  function renderCacheSites(payload) {
+    const data = payload && payload.ok !== false ? payload : { mode: 'all', allow: [], block: [] };
+    renderSiteGroup('offline-site', data, { only: '只缓存名单里的', all: '所有站点都缓存', never: '永不缓存' });
+    const priv = data.private && typeof data.private === 'object' ? data.private : { mode: 'all', allow: [], block: [] };
+    renderSiteGroup('offline-private-site', priv, {
+      only: '隐私模式只存名单里的',
+      all: '隐私模式所有站点都存（加密）',
+      never: '隐私模式永不存',
+    });
+  }
+
+  async function saveCacheSites(patch, okText, scope) {
     if (!window.nyx || typeof window.nyx.offlineCacheSitesSet !== 'function') {
       setOfflineStatus('当前内核不支持修改站点名单。', true);
       return;
     }
     try {
-      const res = await window.nyx.offlineCacheSitesSet(patch);
+      const body = Object.assign({}, patch);
+      if (scope === 'private') body.scope = 'private';
+      const res = await window.nyx.offlineCacheSitesSet(body);
       if (!res || res.ok === false) {
         setOfflineStatus(`没有改成：${(res && res.error) || '未知原因'}`, true);
         renderCacheSites(res);
@@ -1365,7 +1380,18 @@
         saveCacheSites({ mode: mode.value }, mode.value === 'allowlist' ? '已切成「只缓存名单里的站点」。' : '已切成「所有站点都缓存」。');
       });
     }
-    const bindList = (id, key, label) => {
+    // 隐私模式那一份：同一个保存通道，只是多带 scope
+    const privMode = byId('offline-private-site-mode');
+    if (privMode) {
+      privMode.addEventListener('change', () => {
+        saveCacheSites(
+          { mode: privMode.value },
+          privMode.value === 'allowlist' ? '隐私模式已切成「只存名单里的站点」。' : '隐私模式已切成「所有站点都存（加密）」。',
+          'private',
+        );
+      });
+    }
+    const bindList = (id, key, label, scope) => {
       const box = byId(id);
       if (!box) return;
       // 用 change（失焦/回车触发），不用 input —— 每敲一个字就写盘会把磁盘打满
@@ -1374,11 +1400,13 @@
           .split(/\r?\n/)
           .map((item) => item.trim())
           .filter(Boolean);
-        saveCacheSites({ [key]: list }, `已保存${label}：${list.length} 个站点。`);
+        saveCacheSites({ [key]: list }, `已保存${label}：${list.length} 个站点。`, scope);
       });
     };
     bindList('offline-site-allow', 'allow', '「只缓存」名单');
     bindList('offline-site-block', 'block', '「永不缓存」名单');
+    bindList('offline-private-site-allow', 'allow', '隐私模式「只存」名单', 'private');
+    bindList('offline-private-site-block', 'block', '隐私模式「永不存」名单', 'private');
 
     // 名单搬走 / 搬回来（候选⑤）
     const setIo = (text, bad) => {

@@ -77,6 +77,20 @@ const UI_PREF_DEFAULTS = {
   cacheSiteMode: 'all',
   cacheSiteAllow: [],
   cacheSiteBlock: [],
+
+  /**
+   * 隐私模式的快照按站点收窄（本轮新增）。
+   *
+   * 为什么另开一份而不是复用上面的名单：两份名单回答的是两个问题——
+   * 上面那份管「普通模式要不要留明文正文」，这份管「隐私模式要不要留加密快照」。
+   * 一个人完全可能希望「普通模式全存、隐私模式只存几个自己查资料的站点」，
+   * 共用一个名单就会被其中一边的选择绑架。
+   *
+   * 语义与普通模式保持一致：block 永远优先，allowlist 模式下只存名单里的站点。
+   */
+  privateSiteMode: 'all',
+  privateSiteAllow: [],
+  privateSiteBlock: [],
 };
 
 /** 枚举型偏好的合法取值（键 → 允许值）。
@@ -86,6 +100,7 @@ const UI_PREF_ENUMS = {
   privacyLink: ['proxy', 'direct'],
   gpuPolicy: ['low-power', 'high-performance', 'auto'],
   cacheSiteMode: ['all', 'allowlist'],
+  privateSiteMode: ['all', 'allowlist'],
 };
 
 class UiStore {

@@ -438,6 +438,26 @@
                   <button type="button" class="btn btn-mini" id="btn-offline-sites-import">导入名单</button>
                 </div>
                 <p class="hint" id="offline-site-io" role="status" aria-live="polite"></p>
+                <label class="ack-row" for="offline-private-site-mode">
+                  <span>隐私模式的快照只存这些站点：</span>
+                  <select id="offline-private-site-mode">
+                    <option value="all">所有站点都存（加密）</option>
+                    <option value="allowlist">只存名单里的站点</option>
+                  </select>
+                </label>
+                <p class="hint">
+                  这一份与上面的普通模式名单分开存：普通模式管「要不要留明文正文」，这份管「要不要留加密快照」。
+                  黑名单同样优先。
+                </p>
+                <label class="ack-row" for="offline-private-site-allow">
+                  <span>隐私模式只存的站点（每行一个域名）</span>
+                </label>
+                <textarea id="offline-private-site-allow" rows="2" spellcheck="false" placeholder="example.com"></textarea>
+                <label class="ack-row" for="offline-private-site-block">
+                  <span>隐私模式永不存的站点</span>
+                </label>
+                <textarea id="offline-private-site-block" rows="2" spellcheck="false" placeholder="bank.example.com"></textarea>
+                <p class="hint" id="offline-private-site-facts"></p>
                 <p class="hint" id="offline-status" role="status" aria-live="polite"></p>
               </div>
             </section>

@@ -723,6 +723,69 @@ check('40. 解不开时既说清原因，也给出「一键清掉」的出口', 
   assert.ok(/已清掉 \$\{dropped\} 条解不开的快照/.test(js), '清完要如实报清了几条');
 });
 
+check('41. 隐私模式另有一份站点名单：默认值与枚举都独立于普通模式', () => {
+  const store = read('src/core/ui-store.js');
+  assert.ok(/privateSiteMode: 'all'/.test(store), '默认全存');
+  assert.ok(/privateSiteAllow: \[\]/.test(store), '默认空白名单');
+  assert.ok(/privateSiteBlock: \[\]/.test(store), '默认空黑名单');
+  assert.ok(/privateSiteMode: \['all', 'allowlist'\]/.test(store), '枚举要与普通模式一致（两个值）');
+  assert.ok(/cacheSiteMode: 'all'/.test(store), '普通模式那份还要在（两份是不同的键）');
+});
+
+check('42. 隐私模式保存快照前先按自己的名单判定，黑名单优先', () => {
+  const cache = require('../src/core/page-cache');
+  const policy = { mode: 'allowlist', allow: ['example.com', 'docs.test'], block: ['bank.example.com'] };
+  const allowed = cache.decideCacheSite('https://example.com/a', policy);
+  const blocked = cache.decideCacheSite('https://bank.example.com/x', policy);
+  const outside = cache.decideCacheSite('https://other.test/', policy);
+  assert.strictEqual(allowed.cache, true, '名单里的站点要存');
+  assert.strictEqual(blocked.cache, false, '黑名单压过白名单');
+  assert.strictEqual(outside.cache, false, '名单外的站点不存');
+  assert.ok(outside.reason.length > 0, '不存时要给出中文原因');
+
+  const main = read('src/main.js');
+  assert.ok(/function privateSitePolicy\(\)/.test(main), '主进程要有一份隐私模式的策略读取');
+  assert.ok(/decideCacheSite\(String\(snapshot && snapshot\.url/.test(main), '保存前要按站点判定');
+  const saveStart = main.indexOf('function savePrivatePageCache(');
+  const saveEnd = main.indexOf('function getPrivateCachedPage(');
+  const body = main.slice(saveStart, saveEnd > saveStart ? saveEnd : saveStart + 4000);
+  assert.ok(
+    body.indexOf('decideCacheSite(') > -1 && body.indexOf('decideCacheSite(') < body.indexOf('encryptString('),
+    '判定必须在加密之前——不该留的站点连密文都不该生成',
+  );
+  assert.ok(body.includes('PRIVATE_CACHE_SITE_SKIPPED'), '跳过时要记诊断（含 layer 与 host）');
+});
+
+check('43. 名单 IPC 支持 scope，两份名单各写各的键', () => {
+  const main = read('src/main.js');
+  assert.ok(/private: privateSitePolicy\(\)/.test(main), '状态包里要同时带上两份');
+  assert.ok(/input\.scope === 'private'/.test(main), 'sites-set 要认 scope');
+  assert.ok(/function saveCacheSitePolicy\(policy, scope\)/.test(main), '保存函数要按 scope 选键');
+  assert.ok(/privateSiteMode/.test(main) && /privateSiteAllow/.test(main) && /privateSiteBlock/.test(main), '隐私模式写自己那三个键');
+  assert.ok(main.includes('PRIVATE_CACHE_SITES_UPDATED'), '改隐私名单也要记诊断');
+  const preload = read('src/preload.js');
+  assert.ok(preload.includes('offlineCacheSitesSet'), 'preload 复用同一个入口（不新开方法）');
+});
+
+check('44. 界面：隐私模式的名单单独一块，且说清「两份分开存」', () => {
+  const html = read('src/renderer/settings.html');
+  for (const id of [
+    'offline-private-site-mode',
+    'offline-private-site-allow',
+    'offline-private-site-block',
+    'offline-private-site-facts',
+  ]) {
+    assert.ok(html.includes(`id="${id}"`), `设置页缺 ${id}`);
+  }
+  assert.ok(/两份|分开存/.test(html), '要说明这两份名单为什么要分开');
+  const js = read('src/renderer/settings.js');
+  assert.ok(/function renderSiteGroup\(/.test(js), '两种名单共用一个渲染函数');
+  assert.ok(js.includes("renderSiteGroup('offline-private-site'"), '隐私那一块要被渲染');
+  assert.ok(/'private'/.test(js), '保存时要带 scope');
+  assert.ok(js.includes("bindList('offline-private-site-allow'"), '隐私白名单要能改');
+  assert.ok(js.includes("bindList('offline-private-site-block'"), '隐私黑名单要能改');
+});
+
 /* ------------------------------------------------------------------ */
 const failed = checks.filter((item) => !item.ok);
 const total = checks.length;

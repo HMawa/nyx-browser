@@ -1167,16 +1167,39 @@ function cacheSitePolicy() {
 }
 
 /**
+ * 隐私模式快照的站点名单：与普通模式那份**分开存**。
+ * 理由是这两个问题不一样——普通模式管「要不要留明文正文」，隐私模式管「要不要留加密快照」。
+ */
+function privateSitePolicy() {
+  if (!runtime.uiStore) return normalizeSitePolicy(null);
+  const prefs = runtime.uiStore.get();
+  return normalizeSitePolicy({
+    mode: prefs.privateSiteMode,
+    allow: prefs.privateSiteAllow,
+    block: prefs.privateSiteBlock,
+  });
+}
+
+/**
  * 写回站点名单：三个键逐个落盘，哪一步失败就立刻报出来（不静默丢一半）。
  * 手动改名单和导入名单都走这里，免得两边落盘逻辑各写一套。
+ * scope='private' 时写的是隐私模式那一份（字段名不同，规则完全相同）。
  */
-function saveCacheSitePolicy(policy) {
+function saveCacheSitePolicy(policy, scope) {
+  const which = scope === 'private' ? 'private' : 'normal';
   const next = normalizeSitePolicy(policy);
-  const writes = [
-    ['cacheSiteMode', next.mode],
-    ['cacheSiteAllow', next.allow],
-    ['cacheSiteBlock', next.block],
-  ];
+  const writes =
+    which === 'private'
+      ? [
+          ['privateSiteMode', next.mode],
+          ['privateSiteAllow', next.allow],
+          ['privateSiteBlock', next.block],
+        ]
+      : [
+          ['cacheSiteMode', next.mode],
+          ['cacheSiteAllow', next.allow],
+          ['cacheSiteBlock', next.block],
+        ];
   for (const [key, value] of writes) {
     try {
       const saved = runtime.uiStore ? runtime.uiStore.set(key, value) : { ok: false, error: '偏好存储还没就绪' };
@@ -1252,6 +1275,18 @@ function savePrivatePageCache(snapshot) {
       runtime.diagnostics.warn('PRIVATE_CACHE_SKIPPED', '隐私模式的快照没有保存', { reason: decision.reason });
     }
     pendingPrivateCacheNotice = decision.reason;
+    return false;
+  }
+  // 站点名单：隐私模式另有自己那一份（block 优先、allowlist 只存名单里的）。
+  // 判断放在加密之前——不该留下的站点，连内存里的密文都不该出现。
+  const siteDecision = decideCacheSite(String(snapshot && snapshot.url ? snapshot.url : ''), privateSitePolicy());
+  if (!siteDecision.cache) {
+    if (runtime.diagnostics) {
+      runtime.diagnostics.info('PRIVATE_CACHE_SITE_SKIPPED', '这个站点按名单不存隐私快照', {
+        layer: siteDecision.layer,
+        host: siteDecision.host,
+      });
+    }
     return false;
   }
   const prepared = preparePrivateRecord(snapshot, { now: Date.now(), hash: privateHash });
@@ -6907,34 +6942,38 @@ function registerOfflineCacheIpc() {
   ipcMain.handle('nyx:offline:sites', () => ({
     ok: true,
     ...cacheSitePolicy(),
+    private: privateSitePolicy(),
     modes: CACHE_SITE_MODES,
   }));
 
   ipcMain.handle('nyx:offline:sites-set', (_event, payload) => {
     const input = payload && typeof payload === 'object' ? payload : {};
-    const current = cacheSitePolicy();
+    const scope = input.scope === 'private' ? 'private' : 'normal';
+    const current = scope === 'private' ? privateSitePolicy() : cacheSitePolicy();
     const next = normalizeSitePolicy({
       mode: input.mode === undefined ? current.mode : input.mode,
       allow: input.allow === undefined ? current.allow : normalizeSiteList(input.allow),
       block: input.block === undefined ? current.block : normalizeSiteList(input.block),
     });
+    if (scope === 'private') {
+      const saved = saveCacheSitePolicy(next, 'private');
+      if (!saved.ok) return { ok: false, error: saved.error, ...cacheSitePolicy(), private: privateSitePolicy() };
+      if (runtime.diagnostics) {
+        runtime.diagnostics.info('PRIVATE_CACHE_SITES_UPDATED', '隐私模式快照的站点名单已更新', {
+          mode: next.mode,
+          allow: next.allow.length,
+          block: next.block.length,
+        });
+      }
+      return { ok: true, ...cacheSitePolicy(), private: privateSitePolicy() };
+    }
     const writes = [
       ['cacheSiteMode', next.mode],
       ['cacheSiteAllow', next.allow],
       ['cacheSiteBlock', next.block],
     ];
-    for (const [key, value] of writes) {
-      try {
-        const saved = runtime.uiStore ? runtime.uiStore.set(key, value) : { ok: false, error: '偏好存储还没就绪' };
-        if (saved && saved.ok === false) {
-          if (runtime.diagnostics) runtime.diagnostics.error('PAGE_CACHE_SITE_SAVE_FAILED', '站点名单没能保存', { key, error: saved.error });
-          return { ok: false, error: `没能保存 ${key}：${saved.error}`, ...cacheSitePolicy() };
-        }
-      } catch (err) {
-        if (runtime.diagnostics) runtime.diagnostics.error('PAGE_CACHE_SITE_SAVE_FAILED', '站点名单没能保存', { key, error: String(err && err.message ? err.message : err) });
-        return { ok: false, error: `没能保存 ${key}：${err && err.message ? err.message : err}`, ...cacheSitePolicy() };
-      }
-    }
+    const saved = saveCacheSitePolicy(next, 'normal');
+    if (!saved.ok) return { ok: false, error: saved.error, ...cacheSitePolicy(), private: privateSitePolicy() };
     if (runtime.diagnostics) {
       runtime.diagnostics.info('PAGE_CACHE_SITES_UPDATED', '离线缓存的站点名单已更新', {
         mode: next.mode,
@@ -6942,7 +6981,7 @@ function registerOfflineCacheIpc() {
         block: next.block.length,
       });
     }
-    return { ok: true, ...next };
+    return { ok: true, ...next, private: privateSitePolicy() };
   });
 
   /**
