@@ -3146,6 +3146,36 @@ async function loadFootprint() {
     if (paths) {
       paths.textContent = `更新源：${updates.path || '—'}\n留档：${archive.path || '—'}`;
     }
+    renderDeltaReport(res.delta || null);
+  }
+
+  /** 把「上次量的差分命中率」画进卡片（没量过就说明怎么量，不假装有数字） */
+  function renderDeltaReport(report) {
+    const grid = byId('delta-grid');
+    const text = byId('delta-text');
+    if (!grid || !text) return;
+    if (!report) {
+      grid.textContent = '';
+      text.className = 'hint';
+      text.textContent = '差分命中率还没量过：点下面的「实测一次」，用留档里的上一版和当前版本量一遍。';
+      return;
+    }
+    if (report.ok === false) {
+      grid.textContent = '';
+      text.className = 'hint is-warn';
+      text.textContent = `上次没量成：${report.error || '未知原因'}`;
+      return;
+    }
+    renderKvGrid(grid, [
+      ['命中率', report.hitRateText || '—'],
+      ['块大小 / 块数', `${formatBytes(report.blockSize)} · ${report.blocks} 块`],
+      ['基线 → 目标', `${(report.base && report.base.version) || '？'} → ${(report.target && report.target.version) || '？'}`],
+    ]);
+    text.className = report.level === 'diff' ? 'hint is-ok' : 'hint';
+    text.textContent = report.text || '';
+    if (report.at) {
+      text.textContent += `（${new Date(report.at).toLocaleString('zh-CN')} 实测）`;
+    }
   }
 
   const footprintOpen = byId('btn-footprint-open');
@@ -3199,6 +3229,38 @@ async function loadFootprint() {
         setStatus('清理命令已复制到剪贴板');
       } finally {
         footprintCopy.disabled = false;
+      }
+    });
+  }
+
+  const deltaCheck = byId('btn-delta-check');
+  if (deltaCheck && !deltaCheck.dataset.wired) {
+    deltaCheck.dataset.wired = '1';
+    deltaCheck.addEventListener('click', async () => {
+      if (typeof window.nyx.updateDeltaCheck !== 'function') {
+        setStatus('当前内核不支持实测差分命中率', true);
+        return;
+      }
+      const hint = byId('delta-text');
+      deltaCheck.disabled = true;
+      if (hint) {
+        hint.className = 'hint';
+        hint.textContent = '正在量：要把两个安装包各切一遍块，可能要十几秒，别关窗口。';
+      }
+      try {
+        const res = await window.nyx.updateDeltaCheck({}).catch(() => null);
+        if (!res) {
+          if (hint) {
+            hint.className = 'hint is-warn';
+            hint.textContent = '实测失败：主进程没有响应。';
+          }
+          setStatus('实测差分命中率失败', true);
+          return;
+        }
+        renderDeltaReport(res);
+        setStatus(res.ok === false ? '实测差分失败，原因见卡片' : '差分命中率已更新', res.ok === false);
+      } finally {
+        deltaCheck.disabled = false;
       }
     });
   }

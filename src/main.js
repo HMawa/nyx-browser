@@ -22,6 +22,12 @@ const crypto = require('node:crypto');
 const { execFile } = require('node:child_process');
 // Edge Cookie 导入模块：复制 Cookies 库 + ABE/DPAPI 解密 + node:sqlite 读取
 const edgeCookieImport = require('./core/edge-cookie-import');
+const {
+  normalizeBlockSize,
+  normalizeDeltaReport,
+  planDeltaMeasure,
+  summarizeDeltaMeasure,
+} = require('./core/delta-stats');
 // Node 原生 net 模块（等价于 require('net')，显式带 node: 前缀与文件内其他 require 保持一致）。
 // 用于 isProxyReachable() 做 TCP 可达性探测，必须在模块顶层声明，否则启动路径会抛 ReferenceError。
 const net = require('node:net');
@@ -6496,6 +6502,8 @@ function updateFootprint() {
     updates: { path: updates.path, bytes: updates.bytes, files: updates.files },
     archive: { path: archive.path, bytes: archive.bytes, dirs: archive.dirs, files: archive.files },
     total: updates.bytes + archive.bytes,
+    // 上次实测的差分命中率：卡片一打开就能看到，不用每次再问人
+    delta: readDeltaReport(),
   };
 }
 
@@ -6503,6 +6511,179 @@ function updateFootprint() {
 function updateCleanCommand() {
   return 'node scripts/make-release.js --clean-updates --target both --keep-n 1 --yes';
 }
+
+/* ------------------------------------------------------------------ */
+/* 差分命中率实测（设置页「更新源占用」卡片里那个按钮）                     */
+/* ------------------------------------------------------------------ */
+
+const DELTA_REPORT_FILE = 'delta-report.json';
+const DELTA_MAX_BYTES = 512 * 1024 * 1024;
+
+function deltaReportPath() {
+  return path.join(app.getPath('userData'), DELTA_REPORT_FILE);
+}
+
+function readDeltaReport() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(deltaReportPath(), 'utf8').replace(/^\uFEFF/, ''));
+    return normalizeDeltaReport(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writeDeltaReport(report) {
+  try {
+    fs.writeFileSync(deltaReportPath(), JSON.stringify(report, null, 2), 'utf8');
+    return true;
+  } catch (err) {
+    diagnostics.warn('DELTA_REPORT_SAVE_FAILED', '差分实测结果没能保存到磁盘', { error: err && err.message });
+    return false;
+  }
+}
+
+/** 在目录里找一个安装包（新→旧按文件名排序，取第一个能读出大小的） */
+function findInstallerFile(dir, version) {
+  const wanted = String(version || '').trim();
+  let names = [];
+  try {
+    names = fs.readdirSync(dir).filter((name) => /^Nyx-Setup-[\d.]+\.exe$/i.test(name));
+  } catch {
+    return null;
+  }
+  if (!names.length) return null;
+  if (wanted) {
+    const exact = names.find((name) => name.includes(`-${wanted}.exe`));
+    if (exact) names = [exact];
+  }
+  names.sort().reverse();
+  for (const name of names) {
+    const full = path.join(dir, name);
+    try {
+      const stat = fs.statSync(full);
+      if (stat.isFile() && stat.size > 0) {
+        const matched = /-([\d.]+)\.exe$/i.exec(name);
+        return { path: full, bytes: stat.size, version: matched ? matched[1] : '' };
+      }
+    } catch {
+      /* 读不到就试下一个 */
+    }
+  }
+  return null;
+}
+
+/**
+ * 取一对包：目标 = 更新源里当前版本的安装包；基线 = 留档里比它小的最新一版。
+ * 没有留档就用留档目录里最新的一份——量出来的数字依然是真的，只是版本跨度大一点。
+ */
+function pickDeltaPair() {
+  const updatesDir = updatesDirPath();
+  const archiveRoot = archiveDirPath();
+  let currentVersion = '';
+  try {
+    const latest = JSON.parse(fs.readFileSync(path.join(updatesDir, 'latest.json'), 'utf8').replace(/^\uFEFF/, ''));
+    currentVersion = String(latest.version || '');
+  } catch {
+    currentVersion = '';
+  }
+  const target = findInstallerFile(updatesDir, currentVersion);
+  let versions = [];
+  try {
+    versions = fs
+      .readdirSync(archiveRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+  } catch {
+    versions = [];
+  }
+  const candidates = versions.filter((name) => name !== currentVersion);
+  let base = null;
+  for (let index = candidates.length - 1; index >= 0 && !base; index -= 1) {
+    base = findInstallerFile(path.join(archiveRoot, candidates[index]), candidates[index]);
+  }
+  return { base, target, currentVersion, archiveVersions: versions };
+}
+
+/** 把文件按固定块切开逐个算 sha256（流式，避免一次读进内存） */
+function hashFileBlocks(filePath, blockSize, limitBytes, onProgress) {
+  return new Promise((resolve, reject) => {
+    const hashes = [];
+    let pending = Buffer.alloc(0);
+    let read = 0;
+    const stream = fs.createReadStream(filePath, { highWaterMark: blockSize, start: 0, end: limitBytes - 1 });
+    stream.on('data', (chunk) => {
+      read += chunk.length;
+      pending = pending.length ? Buffer.concat([pending, chunk]) : chunk;
+      while (pending.length >= blockSize) {
+        hashes.push(crypto.createHash('sha256').update(pending.subarray(0, blockSize)).digest('hex'));
+        pending = pending.subarray(blockSize);
+      }
+      if (typeof onProgress === 'function') onProgress(read);
+    });
+    stream.on('error', (err) => reject(err));
+    stream.on('end', () => {
+      if (pending.length) {
+        hashes.push(crypto.createHash('sha256').update(pending).digest('hex'));
+      }
+      resolve(hashes);
+    });
+  });
+}
+
+/**
+ * 实测一次差分命中率：把两个安装包按同一块大小切开，逐块比哈希。
+ * 这是设置页那个「实测一次」按钮背后真正干活的地方——只在用户点击时跑，不占启动路径。
+ */
+async function measureDeltaHitRate(input) {
+  const blockSize = normalizeBlockSize(input && input.blockSize);
+  const pair = pickDeltaPair();
+  const plan = planDeltaMeasure({ base: pair.base || {}, target: pair.target || {}, blockSize });
+  if (!plan.ok) {
+    const failure = summarizeDeltaMeasure({ base: pair.base || {}, target: pair.target || {}, blockSize: plan.blockSize || blockSize });
+    writeDeltaReport(failure);
+    diagnostics.warn('DELTA_MEASURE_SKIPPED', plan.error, { code: plan.code });
+    return failure;
+  }
+  try {
+    const baseHashes = new Set(await hashFileBlocks(pair.base.path, plan.blockSize, DELTA_MAX_BYTES));
+    const targetHashes = await hashFileBlocks(pair.target.path, plan.blockSize, DELTA_MAX_BYTES);
+    let hits = 0;
+    for (const hash of targetHashes) {
+      if (baseHashes.has(hash)) hits += 1;
+    }
+    const savedBytes = Math.round((hits / targetHashes.length) * (Number(pair.target.bytes) || 0));
+    const report = summarizeDeltaMeasure({
+      base: pair.base,
+      target: pair.target,
+      blockSize: plan.blockSize,
+      blocks: targetHashes.length,
+      hits,
+      savedBytes,
+      at: Date.now(),
+    });
+    writeDeltaReport(report);
+    diagnostics.info('DELTA_MEASURED', `差分实测：${report.hitRateText}`, {
+      blocks: report.blocks,
+      hits: report.hits,
+      blockSize: report.blockSize,
+      base: pair.base.version || '',
+      target: pair.target.version || '',
+    });
+    return report;
+  } catch (err) {
+    const failure = {
+      ok: false,
+      code: 'MEASURE_FAILED',
+      error: `量差分时读文件失败：${err && err.message ? err.message : String(err)}`,
+      at: Date.now(),
+    };
+    writeDeltaReport(failure);
+    diagnostics.error('DELTA_MEASURE_FAILED', '差分命中率实测失败', { error: err && err.message });
+    return failure;
+  }
+}
+
 
 /* ------------------------------------------------------------------ */
 /* 扩展版本历史与回滚（v1.16.0）                                          */
@@ -7779,6 +7960,14 @@ function registerUpdateIpc() {
 
   /** 更新源 + 留档的体积快照，设置页「关于与更新」里展示 */
   ipcMain.handle('nyx:update:footprint', () => updateFootprint());
+
+  /**
+   * 差分命中率实测：只在用户点「实测一次」时跑（要读两个约 120 MB 的安装包），
+   * 结果落 `<userData>/delta-report.json`，下次打开卡片直接显示上次的数字。
+   */
+  ipcMain.handle('nyx:update:delta-check', async (_event, payload) =>
+    measureDeltaHitRate({ blockSize: payload && payload.blockSize }),
+  );
 
   /** 打开更新源目录（不存在时先建出来，避免 explorer 报错） */
   ipcMain.handle('nyx:update:open-source', async () => {

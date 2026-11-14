@@ -1245,9 +1245,12 @@
                 </p>
                 <div class="kv-grid" id="update-footprint-grid"></div>
                 <p class="hint footprint-paths" id="footprint-paths"></p>
+                <div class="kv-grid" id="delta-grid"></div>
+                <p class="hint" id="delta-text">差分命中率还没量过：点下面的「实测一次」，用留档里的上一版和当前版本量一遍。</p>
                 <div class="sec-actions">
                   <button type="button" class="btn" id="btn-footprint-open">打开更新源文件夹</button>
                   <button type="button" class="btn btn-mini" id="btn-footprint-copy">复制清理命令</button>
+                  <button type="button" class="btn btn-mini" id="btn-delta-check" title="用留档里的上一版与当前版本各切一遍块，算命中率；要读两个约 120 MB 的包，可能要十几秒">实测一次差分命中率</button>
                 </div>
                 <p class="hint footprint-cmd" id="footprint-hint">点「复制清理命令」把发版机上的清理命令复制到剪贴板。</p>
               </div>

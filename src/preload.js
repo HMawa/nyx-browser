@@ -536,6 +536,8 @@ contextBridge.exposeInMainWorld('nyx', {
 
   /** 更新源与留档的体积快照：{ ok, updates, archive, total } */
   updateFootprint: () => ipcRenderer.invoke('nyx:update:footprint'),
+  // 差分命中率实测（只在用户点按钮时跑，结果落盘）
+  updateDeltaCheck: (payload) => ipcRenderer.invoke('nyx:update:delta-check', payload || {}),
 
   /** 在资源管理器里打开更新源目录 */
   updateOpenSource: () => ipcRenderer.invoke('nyx:update:open-source'),

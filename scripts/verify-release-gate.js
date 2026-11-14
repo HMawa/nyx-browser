@@ -231,6 +231,129 @@ check(
   'docs/实测修复台账.md 要写明「安装包形态 0 命中、asar 上要有效必须换 CDC、以及为什么不现在做」'
 );
 
+/* ---- 差分命中率实测（设置页那个按钮背后的纯逻辑与接线）---- */
+
+const deltaStats = require(path.join(ROOT, 'src', 'core', 'delta-stats.js'));
+
+check(
+  '差分判定：一块没命中就明说「这次整包下载」，不许装作还有优化',
+  (() => {
+    const described = deltaStats.describeDeltaRate({ blocks: 243, hits: 0, savedBytes: 0, blockSize: 512 * 1024 });
+    return described.level === 'none' && /整包下载/.test(described.text) && described.hitRate === 0;
+  })(),
+  'describeDeltaRate(hits=0) → level none + 文案含「整包下载」'
+);
+
+check(
+  '差分判定：低于 20% 闸门仍走整包，高于闸门才说能省多少',
+  (() => {
+    const low = deltaStats.describeDeltaRate({ blocks: 100, hits: 5, savedBytes: 1024 * 1024, blockSize: 512 * 1024 });
+    const high = deltaStats.describeDeltaRate({ blocks: 100, hits: 60, savedBytes: 8 * 1024 * 1024, blockSize: 512 * 1024 });
+    return low.level === 'gate' && /仍走整包下载/.test(low.text)
+      && high.level === 'diff' && /可以走差分/.test(high.text) && Math.abs(high.hitRate - 0.6) < 1e-9;
+  })(),
+  '5%/60% 两种命中率要分别落在 gate 与 diff 两个结论上'
+);
+
+check(
+  '差分实测的前置校验：缺包、零字节、超大都要给中文原因，不是静默返回 0',
+  (() => {
+    const noBase = deltaStats.planDeltaMeasure({ target: { path: 'b.exe', bytes: 10 } });
+    const noTarget = deltaStats.planDeltaMeasure({ base: { path: 'a.exe', bytes: 10 } });
+    const badBase = deltaStats.planDeltaMeasure({ base: { path: 'a.exe', bytes: 0 }, target: { path: 'b.exe', bytes: 10 } });
+    const big = deltaStats.planDeltaMeasure({
+      base: { path: 'a.exe', bytes: 400 * 1024 * 1024 },
+      target: { path: 'b.exe', bytes: 400 * 1024 * 1024 },
+    });
+    return noBase.code === 'NO_BASE' && noTarget.code === 'NO_TARGET'
+      && badBase.code === 'BAD_BASE' && big.code === 'TOO_LARGE'
+      && [noBase, noTarget, badBase, big].every((item) => item.ok === false && /[\u4e00-\u9fa5]/.test(item.error));
+  })(),
+  '四种不满足前提的情形都要 ok:false + 中文原因'
+);
+
+check(
+  '差分报告能落盘也能读回来：坏数据返回 null，不把 0 当成「量过了」',
+  (() => {
+    const good = deltaStats.summarizeDeltaMeasure({
+      base: { path: 'a.exe', bytes: 100, version: '1.17.4' },
+      target: { path: 'b.exe', bytes: 100, version: '1.17.5' },
+      blockSize: 512 * 1024,
+      blocks: 10,
+      hits: 0,
+      savedBytes: 0,
+      at: Date.UTC(2026, 10, 14),
+    });
+    const back = deltaStats.normalizeDeltaReport(JSON.parse(JSON.stringify(good)));
+    return good.ok === true && back && back.ok === true && back.level === 'none'
+      && back.base.version === '1.17.4' && deltaStats.normalizeDeltaReport(null) === null
+      && deltaStats.normalizeDeltaReport({}) === null;
+  })(),
+  'summarizeDeltaMeasure → JSON → normalizeDeltaReport 要等价；null/{} 一律 null'
+);
+
+check(
+  '设置页能显示上次的实测结果，也能一键再量（接线四处都在）',
+  (() => {
+    const mainCode = read(path.join(ROOT, 'src', 'main.js'));
+    const preloadCode = read(path.join(ROOT, 'src', 'preload.js'));
+    const htmlCode = read(path.join(ROOT, 'src', 'renderer', 'settings.html'));
+    const settingsCode = read(path.join(ROOT, 'src', 'renderer', 'settings.js'));
+    return /nyx:update:delta-check/.test(mainCode)
+      && /measureDeltaHitRate\(\{ blockSize/.test(mainCode)
+      && /delta: readDeltaReport\(\)/.test(mainCode)
+      && /writeDeltaReport\(report\)/.test(mainCode)
+      && /updateDeltaCheck/.test(preloadCode)
+      && /id="btn-delta-check"/.test(htmlCode) && /id="delta-text"/.test(htmlCode)
+      && /function renderDeltaReport\(/.test(settingsCode)
+      && /updateDeltaCheck\(\{\}\)/.test(settingsCode);
+  })(),
+  'main 的 IPC + 落盘 + footprint 带 delta、preload 方法、html 按钮与文案、settings 的渲染与点击'
+);
+
+
+check(
+  '夜间 e2e：默认只打印计划，要真跑必须显式 --run，注册任务只打印命令不代跑',
+  (() => {
+    const code = read(path.join(ROOT, 'scripts', 'nightly-e2e.js'));
+    return /const options = \{ run: false/.test(code)
+      && /if \(!options\.run\) \{[\s\S]{0,160}没有 --run，按计划什么都没做/.test(code)
+      && /schtasks \/Create \/TN/.test(code)
+      && /我不代跑|要你自己执行/.test(code)
+      && !/spawnSync\(\s*[^)]*schtasks/.test(code);
+  })(),
+  '默认 dry-run + --run 才动 + schtasks 只打印不执行'
+);
+
+check(
+  '夜间 e2e：先轮换归档再 --cross，结果追加到记录表，失败以非零退出',
+  (() => {
+    const code = read(path.join(ROOT, 'scripts', 'nightly-e2e.js'));
+    // 只看 plan() 里的步骤顺序，不能拿全文 indexOf 比：注释里先提到 --cross，会误判顺序
+    const planStart = code.indexOf('function plan()');
+    const planBlock = planStart >= 0 ? code.slice(planStart, code.indexOf('function registerCommand')) : '';
+    const orderOk = planBlock.indexOf('sync-legacy.js') >= 0 && planBlock.indexOf('sync-legacy.js') < planBlock.indexOf('test-installer-e2e.js --cross');
+    return orderOk
+      && /安装器e2e夜间记录\.md/.test(code)
+      && /function appendRecord\(/.test(code)
+      && /parseCrossSummary\(/.test(code)
+      && /process\.exitCode = main\(\)/.test(code)
+      && /return 1;/.test(code);
+  })(),
+  'plan() 里 sync-legacy → --cross 的顺序、记录表、非零退出都在'
+);
+
+check(
+  '夜间 e2e 的产物不进 Git：temp 里的日志被忽略，记录表本身要能提交',
+  (() => {
+    const ignore = read(path.join(ROOT, '.gitignore'));
+    const tempIgnored = /^temp\/?$/m.test(ignore) || /^temp\/\*$/m.test(ignore) || /temp\//.test(ignore);
+    const docsKept = !/^docs\/?$/m.test(ignore) && !/安装器e2e夜间记录/.test(ignore);
+    return tempIgnored && docsKept;
+  })(),
+  'temp 忽略、docs 记录表不被忽略'
+);
+
 const failed = checks.filter((item) => !item.ok);
 console.log(`\n[Nyx] 发版门禁接线检查（${checks.length} 项）`);
 for (const item of checks) {

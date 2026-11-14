@@ -21,12 +21,12 @@
  * 15. scripts/verify-tab-lifecycle.js（标签生命周期判定，18 项；纯 Node，不启动 Electron）
  * 16. scripts/verify-tab-sleep.js（标签休眠与唤醒端到端，10 项）
  * 17. scripts/verify-network-state.js（断网判定与断网横幅，10 项；纯 Node，不启动 Electron）
- * 18. scripts/verify-page-cache.js（离线页面缓存、快照块结构、隐私加密、两份站点名单（含各自的导入导出）、坏条目清理，47 项；纯 Node，不启动 Electron）
+ * 18. scripts/verify-page-cache.js（离线页面缓存、快照块结构、隐私加密、两份站点名单（含各自的导入导出与「只存这些」模板）、坏条目清理，52 项；纯 Node，不启动 Electron）
  * 19. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
  * 20. scripts/verify-runtime-compat.js（运行时兼容：剪贴板异步化与版本三处一致，9 项；纯 Node，不启动 Electron）
- * 21. scripts/verify-release-gate.js（发版门禁、安装器 e2e 接线、验签挑包、差分闸门与 asar 差分结论，24 项；纯 Node，不跑安装包）
+ * 21. scripts/verify-release-gate.js（发版门禁、安装器 e2e 接线、验签挑包、差分命中率实测与 asar 差分结论、夜间 e2e，32 项；纯 Node，不跑安装包）
  * 22. scripts/verify-signing.js（安装包签名、密码存凭据管理器、证书有效期、签名状态进界面与打包接线，35 项；不看签名包时只跑静态守卫）
- * 23. scripts/verify-agent-settings.js（agent 改设置：白名单 / 锁死 / 确认 / 限流 / 多步撤销 / 场景预设，22 项；纯 Node）
+ * 23. scripts/verify-agent-settings.js（agent 改设置：白名单 / 锁死 / 确认 / 限流 / 多步撤销 / 场景预设 / 改动聚合视图，24 项；纯 Node）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -163,7 +163,7 @@ const STEPS = [
   {
     label: '离线页面缓存',
     script: 'verify-page-cache.js',
-    items: '47 项',
+    items: '52 项',
     timeoutMs: 60000,
   },
   {
@@ -175,7 +175,7 @@ const STEPS = [
   {
     label: '发版门禁接线',
     script: 'verify-release-gate.js',
-    items: '24 项',
+    items: '32 项',
     timeoutMs: 60000,
   },
   {
@@ -189,7 +189,7 @@ const STEPS = [
   {
     label: 'agent 改设置回归',
     script: 'verify-agent-settings.js',
-    items: '22 项',
+    items: '24 项',
     timeoutMs: 60000,
   },
   {
