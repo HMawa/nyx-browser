@@ -123,7 +123,7 @@ const STEPS = [
   {
     label: 'agent 站点授权回归',
     script: 'verify-agent-sites.js',
-    items: '30 项',
+    items: '34 项',
     timeoutMs: 60000,
   },
   {

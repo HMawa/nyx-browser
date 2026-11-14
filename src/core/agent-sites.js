@@ -356,18 +356,97 @@ function describePolicy(policy) {
   return `agent 访问已开启；白名单 ${safe.allow.length} 条，屏蔽名单 ${safe.block.length} 条`;
 }
 
+/** 导出格式版本。变大时必须在 migrateParsedPolicy 里补一步，否则老文件会静默丢字段 */
+const EXPORT_VERSION = 2;
+
+function isoOf(value) {
+  const stamp = Number(value);
+  return new Date(Number.isFinite(stamp) && stamp > 0 ? stamp : Date.now()).toISOString();
+}
+
 /** 导出成可读的 JSON（给用户自己备份 / 换机器用，不是内部落盘格式） */
 function exportPolicy(policy, now) {
   const safe = sanitizePolicy(policy);
+  const exportedAt = isoOf(now);
   return {
     app: 'nyx',
     kind: 'agent-sites',
-    version: 1,
-    exportedAt: new Date(Number(now) || Date.now()).toISOString(),
+    version: EXPORT_VERSION,
+    exportedAt,
     globalEnabled: safe.globalEnabled,
-    allow: safe.allow.map((rule) => ({ target: rule.target, mode: rule.mode, note: rule.note })),
-    block: safe.block.map((rule) => ({ target: rule.target, mode: rule.mode, note: rule.note })),
+    allow: safe.allow.map((rule) => ({ target: rule.target, mode: rule.mode, note: rule.note, addedAt: isoOf(rule.addedAt) })),
+    block: safe.block.map((rule) => ({ target: rule.target, mode: rule.mode, note: rule.note, addedAt: isoOf(rule.addedAt) })),
   };
+}
+
+/**
+ * 把任意版本的导出文件升到当前格式。
+ * 目的很具体：老文件不能因为"少个字段"就被当成坏文件丢掉，也不能被"猜"成别的意思——
+ * 每一步迁移都要能说出它做了什么，用户才敢把备份导回来。
+ */
+function migrateParsedPolicy(parsed, now) {
+  const stamp = Number(now) || Date.now();
+  const steps = [];
+  const warnings = [];
+  const rawVersion = parsed && parsed.version;
+  const declared = Number(rawVersion);
+  const fromVersion = Number.isFinite(declared) && declared > 0 ? declared : 1;
+  if (rawVersion === undefined || rawVersion === null) {
+    warnings.push('文件里没写格式版本，按最早的 v1 处理');
+  }
+  if (fromVersion > EXPORT_VERSION) {
+    return {
+      ok: false,
+      fromVersion,
+      toVersion: EXPORT_VERSION,
+      steps,
+      warnings,
+      data: null,
+      error: `这份名单来自更新版本的 Nyx（格式 v${fromVersion}），当前只认到 v${EXPORT_VERSION}。请先升级 Nyx 再导入。`,
+    };
+  }
+
+  const normalizeEntries = (list, label) => {
+    const items = Array.isArray(list) ? list : [];
+    const out = [];
+    let strings = 0;
+    let missingAt = 0;
+    for (const raw of items) {
+      if (typeof raw === 'string') {
+        // v1 手写文件里最常见的样子：纯字符串数组。
+        strings += 1;
+        out.push({ target: raw, mode: RULE_MODES.host, note: '', addedAt: stamp });
+        continue;
+      }
+      if (!raw || typeof raw !== 'object') {
+        out.push(raw);
+        continue;
+      }
+      const next = { ...raw };
+      if (typeof next.target === 'string' && !next.mode) next.mode = RULE_MODES.host;
+      if (!next.addedAt) {
+        missingAt += 1;
+        next.addedAt = stamp;
+      }
+      out.push(next);
+    }
+    if (strings) steps.push(`${label}：${strings} 条纯字符串规则按「域名」补成对象`);
+    if (missingAt) steps.push(`${label}：${missingAt} 条没写添加时间，按导入时间补齐`);
+    return out;
+  };
+
+  let data = {
+    globalEnabled: parsed ? parsed.globalEnabled : undefined,
+    allow: normalizeEntries(parsed && parsed.allow, '白名单'),
+    block: normalizeEntries(parsed && parsed.block, '屏蔽名单'),
+  };
+
+  if (fromVersion < 2) {
+    // v1 → v2：只是补字段，不改语义。
+    steps.push(`格式从 v${fromVersion} 升到 v${EXPORT_VERSION}`);
+  }
+
+  return { ok: true, fromVersion, toVersion: EXPORT_VERSION, steps, warnings, data, error: '' };
 }
 
 /**
@@ -390,18 +469,32 @@ function importPolicy(rawText, current, options) {
   if (parsed.kind && parsed.kind !== 'agent-sites') {
     return { ok: false, error: `这份文件的类型是「${parsed.kind}」，不是 agent 站点名单。`, policy: sanitizePolicy(current) };
   }
+  // 老版本导出的文件要先迁移再校验——否则"少个字段"会被当成坏文件丢掉。
+  const migrated = migrateParsedPolicy(parsed, now);
+  if (!migrated.ok) {
+    return {
+      ok: false,
+      error: migrated.error,
+      policy: sanitizePolicy(current),
+      fromVersion: migrated.fromVersion,
+      toVersion: migrated.toVersion,
+    };
+  }
+  const source = migrated.data;
+  // 是否存在名单要看文件本身：迁移器给缺失的字段补了空数组，
+  // 用补过的结果判断会把「只写了 kind 的空文件」当成合法名单。
   const hasAllow = Array.isArray(parsed.allow);
   const hasBlock = Array.isArray(parsed.block);
   if (!hasAllow && !hasBlock) {
     return { ok: false, error: '文件里既没有 allow 也没有 block 名单。', policy: sanitizePolicy(current) };
   }
 
-  const base = mode === 'replace' ? sanitizePolicy({ globalEnabled: parsed.globalEnabled, allow: [], block: [] }) : sanitizePolicy(current);
+  const base = mode === 'replace' ? sanitizePolicy({ globalEnabled: source.globalEnabled, allow: [], block: [] }) : sanitizePolicy(current);
   const nextAllow = mode === 'replace' ? [] : base.allow.slice();
   const nextBlock = mode === 'replace' ? [] : base.block.slice();
   // 全局开关跟着文件走：备份里记着"agent 访问已关闭"，导入后就必须是关闭。
   // 反过来（保留当前的开）等于把安全设置悄悄放宽，是最不该静默发生的事。
-  const adoptGlobal = typeof parsed.globalEnabled === 'boolean' ? parsed.globalEnabled : base.globalEnabled;
+  const adoptGlobal = typeof source.globalEnabled === 'boolean' ? source.globalEnabled : base.globalEnabled;
   const globalChanged = adoptGlobal !== base.globalEnabled;
   let added = 0;
   let duplicates = 0;
@@ -425,8 +518,8 @@ function importPolicy(rawText, current, options) {
     }
   };
 
-  absorb(parsed.allow, nextAllow, '白名单');
-  absorb(parsed.block, nextBlock, '屏蔽名单');
+  absorb(source.allow, nextAllow, '白名单');
+  absorb(source.block, nextBlock, '屏蔽名单');
 
   const policy = sanitizePolicy({
     globalEnabled: adoptGlobal,
@@ -435,6 +528,7 @@ function importPolicy(rawText, current, options) {
   });
 
   const globalText = globalChanged ? `；全局开关已按文件改成「${adoptGlobal ? '开启' : '关闭'}」` : '';
+  const versionText = migrated.fromVersion !== EXPORT_VERSION ? `；格式已从 v${migrated.fromVersion} 升到 v${EXPORT_VERSION}` : '';
 
   return {
     ok: true,
@@ -443,9 +537,14 @@ function importPolicy(rawText, current, options) {
     added,
     duplicates,
     globalChanged,
+    fromVersion: migrated.fromVersion,
+    toVersion: EXPORT_VERSION,
+    migrated: migrated.fromVersion !== EXPORT_VERSION,
+    steps: migrated.steps,
+    warnings: migrated.warnings,
     rejected: rejected.slice(0, 10),
     rejectedCount: rejected.length,
-    summary: `导入完成：新增 ${added} 条，已存在 ${duplicates} 条${rejected.length ? `，${rejected.length} 条格式不对被跳过` : ''}${globalText}。`,
+    summary: `导入完成：新增 ${added} 条，已存在 ${duplicates} 条${rejected.length ? `，${rejected.length} 条格式不对被跳过` : ''}${globalText}${versionText}。`,
   };
 }
 
@@ -487,6 +586,7 @@ function agentSitesPayload(input) {
 module.exports = {
   DECISIONS,
   DEFAULT_POLICY,
+  EXPORT_VERSION,
   LAYERS,
   MAX_RULES,
   RULE_MODES,
@@ -499,6 +599,7 @@ module.exports = {
   findMatch,
   importPolicy,
   listConflicts,
+  migrateParsedPolicy,
   normalizeHost,
   normalizePath,
   normalizeRule,

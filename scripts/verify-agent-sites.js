@@ -334,7 +334,7 @@ check('25. 导出是一份能自我说明的 JSON：带 kind/version/时间，�
   const out = sites.exportPolicy(policy, 1_700_000_000_000);
   assert.equal(out.app, 'nyx');
   assert.equal(out.kind, 'agent-sites');
-  assert.equal(out.version, 1);
+  assert.equal(out.version, sites.EXPORT_VERSION, '导出的版本号要与模块声明一致');
   assert.equal(out.exportedAt, '2023-11-14T22:13:20.000Z');
   assert.equal(out.globalEnabled, false);
   assert.deepEqual(out.allow.map((rule) => `${rule.mode}:${rule.target}`), ['host:example.com', 'prefix:example.com/admin']);
@@ -424,6 +424,60 @@ check('30. 导入导出的主进程接线：两个对话框 + 落盘 + 留痕', 
   const html = read('src/renderer/settings.html');
   assert.ok(html.includes('id="btn-agent-sites-export"'), '设置页要有导出按钮');
   assert.ok(html.includes('id="btn-agent-sites-import"'), '设置页要有导入按钮');
+});
+
+check('31. 导出文件带格式版本，规则带可解析的添加时间（候选③迁移的地基）', () => {
+  const policy = sites.sanitizePolicy({
+    globalEnabled: true,
+    allow: [{ target: 'example.com', mode: 'host', addedAt: 1_700_000_000_000 }],
+    block: [],
+  });
+  const out = sites.exportPolicy(policy, 1_700_000_100_000);
+  assert.equal(out.version, sites.EXPORT_VERSION, '导出要写自己的格式版本');
+  assert.equal(typeof out.exportedAt, 'string');
+  assert.ok(!Number.isNaN(Date.parse(out.exportedAt)), 'exportedAt 要能解析');
+  assert.equal(out.allow[0].addedAt, new Date(1_700_000_000_000).toISOString(), '逐条添加时间要保留');
+});
+
+check('32. v1 老文件（纯字符串规则、没有 addedAt）能导入，并如实说做了哪些迁移', () => {
+  const legacy = JSON.stringify({
+    app: 'nyx',
+    kind: 'agent-sites',
+    version: 1,
+    globalEnabled: true,
+    allow: ['a.example', { target: 'b.example/admin', mode: 'prefix' }],
+    block: [],
+  });
+  const result = sites.importPolicy(legacy, sites.sanitizePolicy(null), { mode: 'merge' });
+  assert.equal(result.ok, true);
+  assert.equal(result.fromVersion, 1);
+  assert.equal(result.toVersion, sites.EXPORT_VERSION);
+  assert.equal(result.migrated, true, '要标出这份文件被迁移过');
+  assert.equal(result.policy.allow.length, 2);
+  assert.equal(result.policy.allow[0].mode, 'host', '纯字符串按域名规则');
+  assert.equal(result.policy.allow[1].mode, 'prefix', '显式写了 prefix 的保留');
+  assert.ok(Array.isArray(result.steps) && result.steps.length >= 2, '迁移步骤要说得清');
+  assert.ok(result.summary.includes('升到'), '状态行要写明升级了格式');
+});
+
+check('33. 连 version 都没写的手写文件：按 v1 处理，但明确提示这是猜的', () => {
+  const handWritten = JSON.stringify({ globalEnabled: true, allow: ['hand.example'] });
+  const result = sites.importPolicy(handWritten, sites.sanitizePolicy(null), { mode: 'merge' });
+  assert.equal(result.ok, true);
+  assert.equal(result.fromVersion, 1);
+  assert.ok(
+    result.warnings.some((text) => text.includes('没写格式版本')),
+    '要说明它是按 v1 猜的，不许悄悄当最新格式',
+  );
+});
+
+check('34. 未来版本（v99）明确拒绝，不猜着导入', () => {
+  const future = JSON.stringify({ app: 'nyx', kind: 'agent-sites', version: 99, allow: [] });
+  const result = sites.importPolicy(future, sites.sanitizePolicy(null), { mode: 'merge' });
+  assert.equal(result.ok, false);
+  assert.ok(result.error.includes('v99'), '要说出对方是哪个版本');
+  assert.ok(result.error.includes(sites.EXPORT_VERSION + ''), '要说出自己只认到哪个版本');
+  assert.equal(result.policy.allow.length, 0, '拒绝时不许改动现有名单');
 });
 
 /* ------------------------------------------------------------------ */
