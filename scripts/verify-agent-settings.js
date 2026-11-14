@@ -447,16 +447,91 @@ check('聚合视图的接线：只读 IPC + preload 方法 + 设置页表格（�
   const js = read('src/renderer/settings.js');
   assert(/async function loadSettingAudit\(\)/.test(js), '缺渲染函数');
   assert(/await loadSettingAudit\(\)/.test(js), '读完之后要渲染聚合表');
-  assert(/agentSettingsAudit\(\{ limit: 20 \}\)/.test(js), '要按 limit 取');
+  assert(/agentSettingsAudit\(\{ limit: 20, days \}\)/.test(js), '要按 limit 与时间范围取');
   // 只读：这张表不许长出改设置的按钮
   const block = js.slice(js.indexOf('async function loadSettingAudit'), js.indexOf('function describeSettingValue'));
   assert(!/agentSettingsSet|applyAgentSetting|agentSettingsApply/.test(block), '聚合视图不许提供改设置的入口');
   return 'ok';
 });
 
+check('聚合视图能按时间看：窗口外的改动进 outOfRange，并在说明里如实交代（第八轮 ④）', () => {
+  const now = Date.UTC(2026, 10, 15, 0, 0, 0);
+  const day = 24 * 60 * 60 * 1000;
+  const records = [
+    { type: 'settings', decision: 'allow', ok: true, ts: now - 1000, agent: 'a', params: { key: 'theme', value: 'aurora' } },
+    { type: 'settings', decision: 'allow', ok: true, ts: now - 2 * day, agent: 'b', params: { key: 'theme', value: 'ink' } },
+    { type: 'settings', decision: 'allow', ok: true, ts: now - 9 * day, agent: 'c', params: { key: 'digestEnabled', value: true } },
+  ];
+  const all = settings.aggregateSettingChanges(records, {});
+  assert(all.total === 3, `不限时间时三条都算，实际 ${all.total}`);
+  assert(all.outOfRange === 0, '不限时间时不该有窗口外计数');
+  const oneDay = settings.aggregateSettingChanges(records, { since: now - day });
+  assert(oneDay.total === 1, `最近一天只该剩一条，实际 ${oneDay.total}`);
+  assert(oneDay.outOfRange === 2, `窗口外该是 2 条，实际 ${oneDay.outOfRange}`);
+  assert(/另有 2 次在所选时间之外/.test(oneDay.note), `说明要交代窗口外还有几条：${oneDay.note}`);
+  // 窗口内一条都没有，也不能说成「从来没有 agent 改过设置」
+  const empty = settings.aggregateSettingChanges(records, { since: now + day });
+  assert(empty.total === 0 && empty.empty === true, '窗口内应当为空');
+  assert(empty.outOfRange === 3, `全都该算窗口外，实际 ${empty.outOfRange}`);
+  assert(/时间之外/.test(empty.note) && !/还没有 agent 改过设置/.test(empty.note), `窗口空与从没改过要分开说：${empty.note}`);
+  // 没有时间的记录：有窗口时不算进窗口内，但也不能被静默吞掉
+  const noTs = settings.aggregateSettingChanges(
+    [{ type: 'settings', decision: 'allow', ok: true, params: { key: 'theme', value: 'ink' } }],
+    { since: now - day },
+  );
+  assert(noTs.total === 0 && noTs.outOfRange === 1, `没有时间戳的记录要计入窗口外，实际 ${JSON.stringify(noTs)}`);
+  return JSON.stringify({ all: all.total, day: oneDay.total, out: oneDay.outOfRange });
+});
+
+check('导出的 CSV 顶着聚合结果写：表头固定、CRLF、逗号引号按 RFC 4180 转义（第八轮 ④）', () => {
+  const now = Date.UTC(2026, 10, 15, 3, 4, 5);
+  const rows = [
+    { key: 'theme', label: '主题', count: 3, lastAt: now, lastValue: 'aurora', agents: ['a', 'b'] },
+    { key: 'showLinkBadge', label: '显示"链路"标记, 含逗号', count: 1, lastAt: now - 1000, lastValue: false, agents: ['c'] },
+  ];
+  const csv = settings.buildSettingAuditCsv(rows, { now });
+  const lines = csv.split('\r\n');
+  assert(lines[0] === '设置项,改过次数,最近一次,改成,谁改的', `表头不对：${lines[0]}`);
+  assert(csv.includes('\r\n'), '行尾必须是 CRLF（旧版 Excel 不认纯 LF）');
+  assert(!/[^\r]\n/.test(csv), '不许出现裸 LF');
+  assert(lines[1].startsWith('主题,3,'), `第一行不对：${lines[1]}`);
+  assert(lines[2].startsWith('"显示""链路""标记, 含逗号",1,'), `含逗号与引号的字段要整体加引号并双写内部引号：${lines[2]}`);
+  assert(lines[2].includes(',关,'), '布尔值要写成 开/关');
+  assert(lines[2].includes('c'), '谁改的要在里面');
+  assert(lines.filter((line) => line).length === 3, `两行数据加表头，实际 ${lines.filter((line) => line).length}`);
+  // 空名单也要给一行说明，别导出一个只有表头的空文件
+  const empty = settings.buildSettingAuditCsv([], { now });
+  assert(/^设置项/.test(empty) && empty.includes('说明,0,'), `空名单要给说明行：${empty}`);
+  assert(empty.includes('没有 agent 改过设置'), '说明行要讲清楚为什么是空的');
+  return JSON.stringify(lines[2].slice(0, 40));
+});
+
+check('导出的接线：同步对话框 + 默认文件名 + preload 与界面按钮（第八轮 ④）', () => {
+  const main = read('src/main.js');
+  assert(main.includes("ipcMain.handle('nyx:agent:settings-audit-export'"), '缺导出 IPC');
+  assert(/buildSettingAuditCsv: buildAgentSettingAuditCsv/.test(main), '主进程要引入 CSV 构造器');
+  assert(/buildAgentSettingAuditCsv\(aggregated\.keys/.test(main), '要拿聚合结果去拼 CSV');
+  assert(/dialog\.showSaveDialogSync\(/.test(main), '导出要用同步对话框（异步那条路踩过窗口先关的坑）');
+  assert(/agent设置改动-\$\{stamp\.getFullYear\(\)\}/.test(main), '默认文件名要带日期');
+  assert(/filters: \[\{ name: 'CSV', extensions: \['csv'\] \}\]/.test(main), '要限定 csv 扩展名');
+  assert(/AGENT_SETTINGS_AUDIT_EXPORTED/.test(main), '导出成功要留诊断');
+  assert(/NOTHING_TO_EXPORT/.test(main), '没有记录要明确拒绝导出');
+  const preload = read('src/preload.js');
+  assert(/agentSettingsAuditExport:/.test(preload), 'preload 缺导出方法');
+  const html = read('src/renderer/settings.html');
+  for (const id of ['agent-audit-range', 'btn-agent-audit-export']) {
+    assert(html.includes(`id="${id}"`), `设置页缺 ${id}`);
+  }
+  assert(/最近 24 小时/.test(html) && /最近 7 天/.test(html), '时间范围要有 24 小时与 7 天两档');
+  const js = read('src/renderer/settings.js');
+  assert(/function wireSettingAuditTools\(\)/.test(js), '缺界面接线函数');
+  assert(/agentSettingsAuditExport\(\{ days \}\)/.test(js), '导出要带上当前时间范围');
+  assert(/dataset\.wired !== 'true'/.test(js) && /dataset\.wired = 'true'/.test(js), '下拉与按钮只许绑一次');
+  return 'ok';
+});
+
 let passed = 0;
-let failed = 0;
-for (const item of checks) {
+let failed = 0;for (const item of checks) {
   if (item.pass) {
     passed += 1;
     console.log(`✔ ${item.name}`);

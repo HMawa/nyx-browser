@@ -4484,9 +4484,12 @@ async function loadFootprint() {
       note.className = 'hint is-warn';
       return;
     }
+    // 时间范围（第八轮 ④）：界面只传「最近几天」，换算成时间戳是主进程的事
+    const range = byId('agent-audit-range');
+    const days = range ? Number(range.value) || 0 : 0;
     let payload = null;
     try {
-      payload = await window.nyx.agentSettingsAudit({ limit: 20 });
+      payload = await window.nyx.agentSettingsAudit({ limit: 20, days });
     } catch (err) {
       table.hidden = true;
       note.textContent = `读不出改动记录：${err && err.message ? err.message : '未知原因'}`;
@@ -4535,6 +4538,62 @@ async function loadFootprint() {
     if (typeof value === 'object') return JSON.stringify(value);
     return String(value);
   }
+
+  /**
+   * 「谁改得多」的时间范围与导出（第八轮 ④）。
+   * 导出走同步保存框，导出的是聚合后的表格（每个设置项一行），不是原始流水账。
+   */
+  function wireSettingAuditTools() {
+    const range = byId('agent-audit-range');
+    if (range && range.dataset.wired !== 'true') {
+      range.dataset.wired = 'true';
+      range.addEventListener('change', () => {
+        loadSettingAudit();
+      });
+    }
+    const button = byId('btn-agent-audit-export');
+    if (!button || button.dataset.wired === 'true') return;
+    button.dataset.wired = 'true';
+    button.addEventListener('click', async () => {
+      const note = byId('agent-settings-audit-note');
+      if (!window.nyx || typeof window.nyx.agentSettingsAuditExport !== 'function') {
+        if (note) {
+          note.textContent = '当前内核不支持导出改动记录。';
+          note.className = 'hint is-warn';
+        }
+        return;
+      }
+      const rangeSelect = byId('agent-audit-range');
+      const days = rangeSelect ? Number(rangeSelect.value) || 0 : 0;
+      button.disabled = true;
+      if (note) {
+        note.textContent = '正在导出…';
+        note.className = 'hint';
+      }
+      let res = null;
+      try {
+        res = await window.nyx.agentSettingsAuditExport({ days });
+      } catch (err) {
+        res = { ok: false, error: err && err.message ? err.message : '未知原因' };
+      }
+      button.disabled = false;
+      if (!note) return;
+      if (res && res.ok) {
+        note.textContent = `已导出 ${res.rows} 行：${res.path}（${res.bytes} 字节）`;
+        note.className = 'hint is-ok';
+        return;
+      }
+      if (res && res.canceled) {
+        note.textContent = '已取消导出。';
+        note.className = 'hint';
+        return;
+      }
+      note.textContent = `没能导出：${(res && res.error) || '未知原因'}`;
+      note.className = 'hint is-warn';
+    });
+  }
+
+  wireSettingAuditTools();
 
   // 主界面加载失败页（A4）的「打开诊断」会要求设置窗口直接落到「诊断」分区
   if (window.nyx.onSettingsSection) {

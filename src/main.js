@@ -82,6 +82,7 @@ const {
   SETTING_LOCKED,
   SETTING_SCHEMA,
   aggregateSettingChanges: aggregateAgentSettingChanges,
+  buildSettingAuditCsv: buildAgentSettingAuditCsv,
   describeSettingsSchema,
   planPresetChange: planAgentPresetChange,
   planSettingChange: planAgentSettingChange,
@@ -9169,12 +9170,82 @@ function registerAgentSettingsIpc() {
     const aggregated = aggregateAgentSettingChanges(records, {
       limit: Number.isFinite(input.limit) ? input.limit : 20,
       includeUndo: input.includeUndo === true,
+      // 时间窗（第八轮 ④）：界面只传「最近几天」，换算成时间戳放在这里，
+      // 免得界面和主进程各算一套"一天是多久"。
+      since: readAuditSince(input.days),
     });
     return Object.assign({}, aggregated, {
       disclaimer: SETTING_DISCLAIMER,
       auditedAt: Date.now(),
+      days: readAuditDays(input.days),
     });
   });
+
+  // 导出聚合结果为 CSV：导的是"每个设置项一行"，不是原始流水账。
+  // 同步对话框：异步那条路在下载那边踩过「窗口先关、Promise 永挂」的坑。
+  ipcMain.handle('nyx:agent:settings-audit-export', (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    let records = [];
+    try {
+      records = runtime.agentAudit && typeof runtime.agentAudit.list === 'function' ? runtime.agentAudit.list() : [];
+    } catch (err) {
+      diagnostics.warn('AGENT_SETTINGS_AUDIT_READ_FAILED', '导出前读动作留痕失败', {
+        error: err && err.message ? err.message : String(err),
+      });
+    }
+    const aggregated = aggregateAgentSettingChanges(records, {
+      limit: Number.isFinite(input.limit) ? input.limit : 200,
+      includeUndo: input.includeUndo === true,
+      since: readAuditSince(input.days),
+    });
+    if (aggregated.empty) {
+      return { ok: false, code: 'NOTHING_TO_EXPORT', error: aggregated.note };
+    }
+    const body = buildAgentSettingAuditCsv(aggregated.keys, { now: Date.now() });
+    const stamp = new Date();
+    const pad = (v) => String(v).padStart(2, '0');
+    const defaultName = `agent设置改动-${stamp.getFullYear()}-${pad(stamp.getMonth() + 1)}-${pad(stamp.getDate())}.csv`;
+    let target = '';
+    try {
+      target = dialog.showSaveDialogSync(win, {
+        title: '导出 agent 改设置的记录（CSV）',
+        defaultPath: path.join(app.getPath('documents'), defaultName),
+        filters: [{ name: 'CSV', extensions: ['csv'] }],
+        buttonLabel: '导出',
+      });
+    } catch (err) {
+      diagnostics.error('AGENT_SETTINGS_AUDIT_EXPORT_FAILED', '导出对话框没能弹出来', {
+        error: err && err.message ? err.message : String(err),
+      });
+      return { ok: false, error: '导出对话框没能弹出来，稍后再试一次。' };
+    }
+    if (!target) return { ok: false, canceled: true, error: '已取消导出。' };
+    try {
+      fs.writeFileSync(target, body, 'utf8');
+    } catch (err) {
+      diagnostics.error('AGENT_SETTINGS_AUDIT_EXPORT_FAILED', 'CSV 没能写到磁盘上', {
+        error: err && err.message ? err.message : String(err),
+      });
+      return { ok: false, error: `没能写到磁盘上：${err && err.message ? err.message : String(err)}` };
+    }
+    diagnostics.info('AGENT_SETTINGS_AUDIT_EXPORTED', '导出了 agent 改设置的记录', {
+      rows: aggregated.keys.length,
+      bytes: Buffer.byteLength(body, 'utf8'),
+    });
+    return { ok: true, path: target, rows: aggregated.keys.length, bytes: Buffer.byteLength(body, 'utf8') };
+  });
+}
+
+/** 界面上能选的三个时间范围（天）；0 表示不限 */
+const AUDIT_RANGES = [0, 1, 7];
+function readAuditDays(raw) {
+  const value = Number(raw);
+  return AUDIT_RANGES.includes(value) ? value : 0;
+}
+/** 把"最近几天"换成时间戳下限；0/非法一律 0（不限时间） */
+function readAuditSince(raw) {
+  const days = readAuditDays(raw);
+  return days > 0 ? Date.now() - days * 24 * 60 * 60 * 1000 : 0;
 }
 
 /**

@@ -541,8 +541,13 @@ function aggregateSettingChanges(records, options) {
   const source = Array.isArray(records) ? records : [];
   const limit = Number.isFinite(options && options.limit) ? Math.max(1, Math.round(options.limit)) : 20;
   const flags = (options && options.includeUndo === true) ? true : false;
+  // 时间窗（第八轮 ④）：只统计 since 之后、until 之前的记录。
+  // 用「时间戳」而不是「天数」当下限，是为了让「最近 24 小时」这种说法只在界面层出现一次。
+  const since = Number.isFinite(options && options.since) && options.since > 0 ? Number(options.since) : 0;
+  const until = Number.isFinite(options && options.until) && options.until > 0 ? Number(options.until) : 0;
   const map = new Map();
   let considered = 0;
+  let outOfRange = 0;
   for (const raw of source) {
     const entry = raw && typeof raw === 'object' ? raw : null;
     if (!entry) continue;
@@ -559,8 +564,24 @@ function aggregateSettingChanges(records, options) {
     if (!key) continue;
     const known = SETTING_SCHEMA[key];
     if (!known) continue;
-    considered += 1;
     const ts = Number.isFinite(entry.ts) ? entry.ts : 0;
+    // 没有时间的记录：既算不进窗口内，也不能被静默丢掉——这里让它照样计入总数，
+    // 只是不算进 keys 的聚合里由 outOfRange 计数交代清楚。
+    if (since || until) {
+      if (!ts) {
+        outOfRange += 1;
+        continue;
+      }
+      if (since && ts < since) {
+        outOfRange += 1;
+        continue;
+      }
+      if (until && ts > until) {
+        outOfRange += 1;
+        continue;
+      }
+    }
+    considered += 1;
     const agent = typeof entry.agent === 'string' && entry.agent ? entry.agent : 'local';
     const current = map.get(key);
     const value = Object.prototype.hasOwnProperty.call(params, 'value') ? params.value : undefined;
@@ -592,12 +613,64 @@ function aggregateSettingChanges(records, options) {
   return {
     ok: true,
     total: considered,
+    outOfRange,
     keys,
     empty: considered === 0,
     note: considered === 0
-      ? '还没有 agent 改过设置。它们改的时候会先问你要确认，改完这里会按设置项记一次。'
-      : `最近 ${considered} 次改动，涉及 ${keys.length} 个设置项。`,
+      ? (outOfRange > 0
+        ? `所选的这段时间里没有 agent 改过设置，但另外还有 ${outOfRange} 次在时间之外——把范围放宽就能看到。`
+        : '还没有 agent 改过设置。它们改的时候会先问你要确认，改完这里会按设置项记一次。')
+      : `最近 ${considered} 次改动，涉及 ${keys.length} 个设置项${outOfRange > 0 ? `；另有 ${outOfRange} 次在所选时间之外` : ''}。`,
   };
+}
+
+/**
+ * 把聚合结果转成 CSV（第八轮 ④）。
+ *
+ * 只导聚合后的行（每个设置项一行），不导原始记录：原始记录里有 url、参数这类东西，
+ * 导出来是一条条流水账，看不出"谁改得多"这个问题的答案。
+ */
+function buildSettingAuditCsv(rows, options) {
+  const list = Array.isArray(rows) ? rows : [];
+  const now = options && Number.isFinite(options.now) ? new Date(options.now) : new Date();
+  const lines = [['设置项', '改过次数', '最近一次', '改成', '谁改的'].join(',')];
+  for (const row of list) {
+    const item = row && typeof row === 'object' ? row : {};
+    const at = Number.isFinite(item.lastAt) && item.lastAt > 0 ? new Date(item.lastAt) : null;
+    lines.push([
+      csvCell(item.label || item.key || ''),
+      csvCell(Number.isFinite(item.count) ? item.count : ''),
+      csvCell(at ? at.toISOString() : ''),
+      csvCell(describeSettingValue(item.lastValue)),
+      csvCell(Array.isArray(item.agents) ? item.agents.join(' / ') : (item.lastAgent || '')),
+    ].join(','));
+  }
+  if (list.length === 0) {
+    lines.push(['说明', '0', now.toISOString(), '这段时间里没有 agent 改过设置', ''].join(','));
+  }
+  // 行尾用 CRLF：旧版 Excel 不认只有 LF 的 CSV，会把整份内容塞进一个单元格
+  return `${lines.join('\r\n')}\r\n`;
+}
+
+/** 把设置值写成人能读的字（导出 CSV 与界面共用一套说法） */
+function describeSettingValue(value) {
+  if (value === true) return '开';
+  if (value === false) return '关';
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'string') return value;
+  if (value === undefined || value === null) return '';
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/** RFC 4180：含逗号、引号、换行的字段整体加双引号，内部引号双写 */
+function csvCell(value) {
+  const text = value === undefined || value === null ? '' : String(value);
+  if (/[",\r\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
 }
 
 module.exports = {
@@ -611,6 +684,8 @@ module.exports = {
   SETTING_RATE_WINDOW_MS,
   SETTING_SCHEMA,
   aggregateSettingChanges,
+  buildSettingAuditCsv,
+  describeSettingValue,
   describeSettingsSchema,
   planPresetChange,
   planSettingChange,

@@ -1132,6 +1132,17 @@
                     按设置项聚合动作留痕：改过几次、最近一次是谁改的、改成了什么值。
                     被拒绝的和执行失败的都不算，撤销默认单列不计入次数。
                   </p>
+                  <div class="agent-site-tools">
+                    <label class="agent-audit-range">
+                      时间范围
+                      <select id="agent-audit-range">
+                        <option value="0">全部</option>
+                        <option value="1">最近 24 小时</option>
+                        <option value="7">最近 7 天</option>
+                      </select>
+                    </label>
+                    <button class="btn btn-mini" id="btn-agent-audit-export" title="导出聚合后的表格（每个设置项一行，CSV）">导出 CSV</button>
+                  </div>
                   <table class="agent-audit-table" id="agent-settings-audit-table" hidden>
                     <thead>
                       <tr><th>设置项</th><th>改过</th><th>最近一次</th><th>改成</th><th>谁改的</th></tr>
