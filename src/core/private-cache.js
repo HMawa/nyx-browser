@@ -168,14 +168,95 @@ function privateCacheStatus(store, options) {
   };
 }
 
+/**
+ * 逐条试着解开，数出「解不开的」有几条。
+ *
+ * 为什么会解不开：换了系统账户、系统密钥被重置、或者文件被别的程序动过。
+ * 解不开的条目留在盘上没有任何用处——它既不能显示，也永远不会自己好起来，
+ * 所以必须能数出来、也必须能被清掉（否则用户只能删整个文件）。
+ *
+ * @param {object} store 磁盘上的原始结构
+ * @param {{now?: number, decrypt?: (entry: object) => {ok: boolean}}} [options]
+ *   decrypt 返回 {ok:true} 表示这条能解开；不传则视作全部可读（只数条数）。
+ */
+function inspectPrivateStore(store, options) {
+  const opts = options || {};
+  const now = Number.isFinite(opts.now) ? opts.now : Date.now();
+  const decrypt = typeof opts.decrypt === 'function' ? opts.decrypt : null;
+  const entries = normalizePrivateStore(store, { now }).entries;
+  let readable = 0;
+  let broken = 0;
+  const detail = [];
+  for (const entry of entries) {
+    let ok = true;
+    if (decrypt) {
+      try {
+        const result = decrypt(entry);
+        ok = Boolean(result && result.ok === true);
+      } catch {
+        ok = false;
+      }
+    }
+    if (ok) readable += 1;
+    else broken += 1;
+    detail.push({ hash: entry.hash, at: entry.at, ok });
+  }
+  return {
+    ok: true,
+    total: entries.length,
+    readable,
+    broken,
+    entries: detail,
+    note:
+      broken > 0
+        ? `有 ${broken} 条加密快照解不开（多半是换了系统账户或系统密钥变了）。它们既显示不出来，也不会自己恢复，可以一键清掉。`
+        : '存下来的加密快照都能在这台机器的这个账户下解开。',
+  };
+}
+
+/**
+ * 只清掉解不开的条目，能解的留着。
+ * 返回新的 store 与清掉的条数——界面要如实告诉用户"清了几条"。
+ */
+function dropBrokenEntries(store, options) {
+  const opts = options || {};
+  const now = Number.isFinite(opts.now) ? opts.now : Date.now();
+  const decrypt = typeof opts.decrypt === 'function' ? opts.decrypt : null;
+  const entries = normalizePrivateStore(store, { now }).entries;
+  const kept = [];
+  let dropped = 0;
+  for (const entry of entries) {
+    let ok = true;
+    if (decrypt) {
+      try {
+        const result = decrypt(entry);
+        ok = Boolean(result && result.ok === true);
+      } catch {
+        ok = false;
+      }
+    }
+    if (ok) kept.push(entry);
+    else dropped += 1;
+  }
+  return {
+    ok: true,
+    before: entries.length,
+    after: kept.length,
+    dropped,
+    store: { v: PRIVATE_CACHE_VERSION, entries: kept },
+  };
+}
+
 module.exports = {
   PRIVATE_CACHE_LIMIT,
   PRIVATE_CACHE_TEXT_MAX,
   PRIVATE_CACHE_TTL_MS,
   PRIVATE_CACHE_VERSION,
   describePrivateEntry,
+  dropBrokenEntries,
   findPrivateEntry,
   hashUrl,
+  inspectPrivateStore,
   normalizePrivateStore,
   pickPrivateStoreMode,
   preparePrivateRecord,

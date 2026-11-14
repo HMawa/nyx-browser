@@ -105,7 +105,9 @@ const {
 const {
   PRIVATE_CACHE_LIMIT,
   describePrivateEntry,
+  dropBrokenEntries,
   findPrivateEntry,
+  inspectPrivateStore,
   normalizePrivateStore,
   pickPrivateStoreMode,
   preparePrivateRecord,
@@ -1263,7 +1265,10 @@ function getPrivateCachedPage(url) {
     return {
       available: false,
       encrypted: true,
-      note: '这条加密快照解不开了（换了系统账户或密钥变了），可以直接重试页面。',
+      broken: true,
+      note:
+        '这条加密快照解不开了（换了系统账户或密钥变了）。它不会自己恢复，' +
+        '可以在 设置 → 隐私与安全 → 离线阅读缓存 里一键清掉。',
     };
   }
   const described = describePrivateEntry(entry, { now: Date.now() });
@@ -6728,6 +6733,7 @@ function offlineCachePayload() {
   const privateDecision = privateCacheDecision();
   const privateNotice = pendingPrivateCacheNotice;
   pendingPrivateCacheNotice = '';
+  const privateInspect = inspectPrivateCache();
   return {
     ok: true,
     // 注意：UiStore.get() 不接受参数，返回的是整份偏好对象 —— 不能写成 get('offlineCacheEnabled')
@@ -6745,7 +6751,29 @@ function offlineCachePayload() {
     private: privateCacheStatus(runtime.privateCache, { now: Date.now() }),
     privateFile: runtime.privateCacheFile || userDataFile('private-cache.json'),
     privateLimit: PRIVATE_CACHE_LIMIT,
+    // 解不开的条数（换系统账户 / 密钥变了）。>0 时界面上要给"一键清掉"的出口，
+    // 否则用户只能去删整个文件，连能解开的一起丢。
+    privateBroken: privateInspect.broken,
+    privateReadable: privateInspect.readable,
+    privateBrokenNote: privateInspect.note,
   };
+}
+
+/**
+ * 逐条试解密，数出解不开的条数。
+ * 只做一次判定，不把正文留在内存里——解出来的东西立刻丢掉。
+ */
+function privateDecryptProbe(entry) {
+  try {
+    safeStorage.decryptString(Buffer.from(entry.blob, 'base64'));
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function inspectPrivateCache() {
+  return inspectPrivateStore(runtime.privateCache, { now: Date.now(), decrypt: privateDecryptProbe });
 }
 
 function registerOfflineCacheIpc() {
@@ -6802,6 +6830,37 @@ function registerOfflineCacheIpc() {
     const result = clearPageCache('user-cleared');
     if (!result.ok) return { ...offlineCachePayload(), ok: false, error: result.error };
     return { ...offlineCachePayload(), cleared };
+  });
+
+  /**
+   * 只清掉解不开的加密快照（换系统账户 / 密钥变了之后）。
+   *
+   * 为什么不直接清整个文件：能解开的那些还有用，一刀切掉等于罚用户"换过账户"。
+   * 回给界面的 dropped 是真实清掉的条数，界面必须如实显示。
+   */
+  ipcMain.handle('nyx:offline:private-reset', () => {
+    const result = dropBrokenEntries(runtime.privateCache, { now: Date.now(), decrypt: privateDecryptProbe });
+    if (!result.ok) {
+      return { ...offlineCachePayload(), ok: false, error: result.error || '没能清掉解不开的快照。' };
+    }
+    runtime.privateCache = result.store;
+    const written = writePrivateCache(runtime.privateCache);
+    if (!written) {
+      if (runtime.diagnostics) {
+        runtime.diagnostics.error('PRIVATE_CACHE_CLEAR_FAILED', '解不开的快照没能在磁盘上清掉', {
+          dropped: result.dropped,
+        });
+      }
+      return { ...offlineCachePayload(), ok: false, error: '清掉了内存里的记录，但磁盘上的文件没能改写（可能被占用）。' };
+    }
+    if (runtime.diagnostics) {
+      runtime.diagnostics.info('PRIVATE_CACHE_BROKEN_DROPPED', '清掉了打不开的加密快照', {
+        before: result.before,
+        after: result.after,
+        dropped: result.dropped,
+      });
+    }
+    return { ...offlineCachePayload(), ok: true, dropped: result.dropped, privateLeft: result.after };
   });
 
   /**

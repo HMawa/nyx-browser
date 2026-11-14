@@ -303,6 +303,7 @@ contextBridge.exposeInMainWorld('nyx', {
   offlineCacheGet: () => ipcRenderer.invoke('nyx:offline:get'),
   offlineCacheSet: (payload) => ipcRenderer.invoke('nyx:offline:set', payload || {}),
   offlineCacheClear: () => ipcRenderer.invoke('nyx:offline:clear'),
+  offlineCachePrivateReset: () => ipcRenderer.invoke('nyx:offline:private-reset'),
   offlineCacheSites: () => ipcRenderer.invoke('nyx:offline:sites'),
   offlineCacheSitesSet: (payload) => ipcRenderer.invoke('nyx:offline:sites-set', payload || {}),
 

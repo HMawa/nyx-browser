@@ -1073,6 +1073,22 @@
   resize: vertical;
 }
 
+/* 解不开的加密快照（候选③）：只清坏的那几条，不连能解的一起丢 */
+.offline-broken {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+.offline-broken .warn-text {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--danger-soft);
+}
+
 #privacy-link-status.is-warn {
   color: var(--danger-soft);
 }

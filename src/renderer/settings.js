@@ -1294,6 +1294,19 @@
       if (data.privateNotice) parts.push(data.privateNotice);
       privateFacts.textContent = parts.join(' · ');
     }
+
+    // 解不开的加密快照：换系统账户 / 密钥变了就会出现。
+    // 必须给出口——只报错不给一键清理，用户最后只能删掉整个文件，连能解的也丢。
+    const broken = Number(data.privateBroken) || 0;
+    const brokenBox = byId('offline-private-broken');
+    const brokenText = byId('offline-private-broken-text');
+    if (brokenBox) brokenBox.hidden = broken <= 0;
+    if (brokenText) {
+      brokenText.textContent = broken
+        ? data.privateBrokenNote ||
+          `有 ${broken} 条加密快照解不开（多半是换了系统账户或系统密钥变了）。它们显示不出来，也不会自己恢复。`
+        : '';
+    }
   }
 
   /** 站点黑白名单（用户第 5 项）：三件小事——模式、只缓存、永不缓存 */
@@ -1474,6 +1487,38 @@
           setOfflineStatus(`没有清掉：${err && err.message ? err.message : '未知原因'}`, true);
         } finally {
           clearBtn.disabled = false;
+        }
+      });
+    }
+
+    // 只清「解不开的」那些（候选③）：能解开的留着，不给"换过账户"的人一刀切
+    const resetBtn = byId('btn-offline-private-reset');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', async () => {
+        if (!window.nyx || typeof window.nyx.offlineCachePrivateReset !== 'function') {
+          setOfflineStatus('当前内核不支持清理加密快照。', true);
+          return;
+        }
+        resetBtn.disabled = true;
+        try {
+          const res = await window.nyx.offlineCachePrivateReset();
+          if (!res || res.ok === false) {
+            setOfflineStatus(`没有清掉：${(res && res.error) || '未知原因'}`, true);
+            return;
+          }
+          renderOfflineCache(res);
+          const dropped = Number(res && res.dropped) || 0;
+          const left = Number(res && res.privateLeft) || 0;
+          setOfflineStatus(
+            dropped
+              ? `已清掉 ${dropped} 条解不开的快照${left ? `，还留着 ${left} 条能解开的` : '，现在没有加密快照了'}。`
+              : '没有解不开的快照，什么都没动。',
+            false,
+          );
+        } catch (err) {
+          setOfflineStatus(`没有清掉：${err && err.message ? err.message : '未知原因'}`, true);
+        } finally {
+          resetBtn.disabled = false;
         }
       });
     }

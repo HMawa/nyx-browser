@@ -411,6 +411,12 @@
                   <span>隐私模式也保存快照（整条加密后单独存放，只有这台机器的这个账户能解开）</span>
                 </label>
                 <p class="hint" id="offline-private-facts"></p>
+                <div class="offline-broken" id="offline-private-broken" role="alert" hidden>
+                  <p class="warn-text" id="offline-private-broken-text"></p>
+                  <button type="button" class="btn btn-mini btn-danger" id="btn-offline-private-reset">
+                    清掉解不开的快照
+                  </button>
+                </div>
                 <label class="ack-row" for="offline-site-mode">
                   <span>只缓存这些站点：</span>
                   <select id="offline-site-mode">

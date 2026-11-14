@@ -548,6 +548,87 @@ check('33. 接线：判定发生在抓取之前，名单能从设置页改、能
 
 /* ------------------------------------------------------------------ */
 
+check('35. 数得清「解不开的」有几条：能解、解不开、抛异常三种都要算对', () => {
+  const now = Date.parse('2026-11-14T12:00:00Z');
+  const store = {
+    v: 1,
+    entries: [
+      { hash: 'aaa', at: now - 1000, blob: 'good' },
+      { hash: 'bbb', at: now - 2000, blob: 'bad' },
+      { hash: 'ccc', at: now - 3000, blob: 'boom' },
+    ],
+  };
+  const result = privateCache.inspectPrivateStore(store, {
+    now,
+    decrypt: (entry) => {
+      if (entry.blob === 'good') return { ok: true };
+      if (entry.blob === 'bad') return { ok: false };
+      throw new Error('解不开');
+    },
+  });
+  assert.equal(result.total, 3, '三条都要数进来');
+  assert.equal(result.readable, 1, '能解开的 1 条');
+  assert.equal(result.broken, 2, '解不开 + 抛异常的 2 条');
+  assert.ok(/有 2 条加密快照解不开/.test(result.note), '说明里要如实报条数');
+  assert.ok(/不会自己恢复/.test(result.note), '要说清它不会自己好起来');
+
+  const allGood = privateCache.inspectPrivateStore(
+    { v: 1, entries: [{ hash: 'x', at: now - 1000, blob: 'g' }] },
+    { now, decrypt: () => ({ ok: true }) },
+  );
+  assert.equal(allGood.broken, 0, '都能解开时不许凭空报故障');
+  assert.ok(/都能在这台机器/.test(allGood.note), '正常时也要有一句明确结论');
+});
+
+check('36. 只清解不开的那些，能解的留着（不给「换过账户」的人一刀切）', () => {
+  const now = Date.parse('2026-11-14T12:00:00Z');
+  const store = {
+    v: 1,
+    entries: [
+      { hash: 'keep1', at: now - 1000, blob: 'good' },
+      { hash: 'drop1', at: now - 2000, blob: 'bad' },
+      { hash: 'keep2', at: now - 3000, blob: 'good2' },
+    ],
+  };
+  const result = privateCache.dropBrokenEntries(store, {
+    now,
+    decrypt: (entry) => ({ ok: entry.blob.startsWith('good') }),
+  });
+  assert.equal(result.before, 3, '清之前是 3 条');
+  assert.equal(result.dropped, 1, '只清掉 1 条解不开的');
+  assert.equal(result.after, 2, '剩 2 条');
+  assert.deepEqual(
+    result.store.entries.map((item) => item.hash).sort(),
+    ['keep1', 'keep2'],
+    '能解开的必须原样留着',
+  );
+  const nothing = privateCache.dropBrokenEntries(
+    { v: 1, entries: [{ hash: 'a', at: now - 1000, blob: 'good' }] },
+    { now, decrypt: () => ({ ok: true }) },
+  );
+  assert.equal(nothing.dropped, 0, '没有坏条目时不许动数据');
+});
+
+check('37. 解不开时既说清原因，也给出「一键清掉」的出口', () => {
+  const main = read('src/main.js');
+  assert.ok(/解不开了（换了系统账户或密钥变了）/.test(main), '要如实说是解不开，不是「没有缓存」');
+  assert.ok(/一键清掉/.test(main), '要告诉用户去哪儿处理');
+  assert.ok(main.includes('privateBroken'), '状态包里要带解不开的条数');
+  assert.ok(main.includes('inspectPrivateStore('), '条数必须真的逐条试解密算出来');
+  assert.ok(main.includes("ipcMain.handle('nyx:offline:private-reset'"), '要有一个只清坏条目的 IPC');
+  assert.ok(main.includes('PRIVATE_CACHE_BROKEN_DROPPED'), '清完要记诊断');
+  const preload = read('src/preload.js');
+  assert.ok(preload.includes('offlineCachePrivateReset'), 'preload 要暴露这个动作');
+  const html = read('src/renderer/settings.html');
+  assert.ok(html.includes('id="offline-private-broken"'), '设置页要有这个提示块');
+  assert.ok(html.includes('id="btn-offline-private-reset"'), '设置页要有清理按钮');
+  const js = read('src/renderer/settings.js');
+  assert.ok(js.includes('offlineCachePrivateReset'), '界面要真的调这个接口');
+  assert.ok(/brokenBox\.hidden = broken <= 0/.test(js), '没有坏条目时这个块必须是隐藏的');
+  assert.ok(/已清掉 \$\{dropped\} 条解不开的快照/.test(js), '清完要如实报清了几条');
+});
+
+/* ------------------------------------------------------------------ */
 const failed = checks.filter((item) => !item.ok);
 const total = checks.length;
 console.log('');
