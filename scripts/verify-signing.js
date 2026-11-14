@@ -20,6 +20,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { describeCertValidity } = require('./lib/cert-validity');
+const { pickNewestInstaller } = require('./lib/pick-artifact');
 
 const ROOT = path.join(__dirname, '..');
 const checks = [];
@@ -65,16 +66,25 @@ function findArtifact() {
   const dirs = dirArg
     ? [path.resolve(ROOT, dirArg)]
     : [path.join(ROOT, 'dist-sign'), path.join(ROOT, 'dist')];
+
+  // 版本号最大的那个才算「这次的包」：按目录顺序取第一个会验到旧的，
+  // 然后报一个漂亮的 Valid——看着过了，其实新包没验（真踩过）。
+  const candidates = [];
   for (const dir of dirs) {
     if (!fs.existsSync(dir)) continue;
-    const hit = fs
-      .readdirSync(dir)
-      .filter((name) => /^Nyx-Setup-.*\.exe$/i.test(name))
-      .sort()
-      .pop();
-    if (hit) return path.join(dir, hit);
+    for (const name of fs.readdirSync(dir)) {
+      if (!/^Nyx-Setup-.*\.exe$/i.test(name)) continue;
+      let mtimeMs = 0;
+      try {
+        mtimeMs = fs.statSync(path.join(dir, name)).mtimeMs;
+      } catch {
+        mtimeMs = 0;
+      }
+      candidates.push({ name, dir, mtimeMs });
+    }
   }
-  return '';
+  const picked = pickNewestInstaller(candidates);
+  return picked ? path.join(picked.dir, picked.name) : '';
 }
 
 const signatureParser = `

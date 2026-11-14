@@ -156,6 +156,43 @@ check(
   '跨两版要的就是最老那份；默认不删'
 );
 
+// 验签要验「这次的包」，不是「先找到的那个」
+const { pickNewestInstaller } = require('./lib/pick-artifact');
+check(
+  '验签挑包按版本号，不按目录顺序（否则会验到上次签的旧包）',
+  (() => {
+    const picked = pickNewestInstaller([
+      { name: 'Nyx-Setup-1.17.3.exe', dir: 'dist-sign', mtimeMs: 999 },
+      { name: 'Nyx-Setup-1.17.4.exe', dir: 'dist', mtimeMs: 1 },
+      { name: 'notes.txt', dir: 'dist', mtimeMs: 9999 },
+    ]);
+    return Boolean(picked) && picked.name === 'Nyx-Setup-1.17.4.exe' && picked.version === '1.17.4';
+  })(),
+  'dist-sign 里躺着上次签的旧包时，必须挑版本更大的那个'
+);
+check(
+  '同版本重打过的包按修改时间取最新的',
+  (() => {
+    const picked = pickNewestInstaller([
+      { name: 'Nyx-Setup-1.17.4.exe', dir: 'a', mtimeMs: 10 },
+      { name: 'Nyx-Setup-1.17.4.exe', dir: 'b', mtimeMs: 20 },
+    ]);
+    return Boolean(picked) && picked.dir === 'b';
+  })(),
+  '版本相同就看谁更新（重打包的场景）'
+);
+check(
+  '没有候选时返回空，而不是乱挑一个',
+  pickNewestInstaller([]) === null && pickNewestInstaller([{ name: 'readme.md' }]) === null,
+  '挑不出来就要说挑不出来'
+);
+check(
+  'verify-signing 真的用了这个挑包函数',
+  /require\('\.\/lib\/pick-artifact'\)/.test(read(path.join(ROOT, 'scripts', 'verify-signing.js'))) &&
+    /pickNewestInstaller\(/.test(read(path.join(ROOT, 'scripts', 'verify-signing.js'))),
+  '抽出去的函数没接上等于没修'
+);
+
 const failed = checks.filter((item) => !item.ok);
 console.log(`\n[Nyx] 发版门禁接线检查（${checks.length} 项）`);
 for (const item of checks) {
