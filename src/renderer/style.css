@@ -2315,6 +2315,46 @@ body.private-mode .shell {
   color: var(--danger-soft);
 }
 
+/* 被拦下的站点：每行一个按钮，点了直接去工具箱筛（候选④） */
+.digest-blocked-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.digest-blocked-btn {
+  width: 100%;
+  text-align: left;
+  padding: 5px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--bg-input) 82%, transparent);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.digest-blocked-btn:hover {
+  border-color: var(--accent-soft);
+  color: var(--text);
+}
+
+.digest-blocked-btn:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+  box-shadow: var(--ring);
+}
+
+.digest-blocked-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
 .digest-close:focus-visible,
 .digest-switch input:focus-visible,
 .digest-actions .tb-btn:focus-visible {

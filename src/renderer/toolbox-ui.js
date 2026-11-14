@@ -3429,6 +3429,24 @@
   // 窗口尺寸变化会改变页签栏可用宽度
   window.addEventListener('resize', () => updateNavFade());
 
+  /**
+   * 摘要面板里点「被拦下的站点」→ 在这里按域名筛抓包（候选④）。
+   *
+   * 为什么用事件：摘要面板由 renderer.js 画，工具箱由本文件画，两者同页但互不引用；
+   * 用事件解耦，谁先加载都无所谓，回归脚本也能直接 dispatchEvent 验。
+   */
+  window.addEventListener('nyx:toolbox-focus-net', async (event) => {
+    const query = String((event && event.detail && event.detail.query) || '').trim();
+    if (!tb.open) await openToolbox();
+    switchPane('net');
+    if (els.netSearch) els.netSearch.value = query;
+    tb.netQuery = query;
+    rebuildNet();
+    renderNetMeta();
+    if (els.netSearch) els.netSearch.focus();
+    toast(query ? `抓包已按「${query}」筛出` : '已切到抓包页');
+  });
+
   els.sniffSearch.addEventListener('input', () => {
     tb.sniffQuery = els.sniffSearch.value.trim();
     rebuildSniff();
@@ -3802,5 +3820,16 @@
     if (document.fonts && document.fonts.ready) {
       document.fonts.ready.then(() => updateNavFade()).catch(() => {});
     }
+
+    // 回归脚本用的调试面：只读状态 + 一个显式入口，不给业务绕路
+    window.__nyxToolboxDebug = {
+      focusNet: (query) => window.dispatchEvent(new CustomEvent('nyx:toolbox-focus-net', { detail: { query } })),
+      getNetQuery: () => tb.netQuery,
+      isOpen: () => Boolean(tb.open),
+      activePane: () => {
+        const btn = els.nav.querySelector('.tb-nav-btn.is-on');
+        return btn ? btn.dataset.pane : '';
+      },
+    };
   })();
 })();

@@ -289,6 +289,36 @@ async function main() {
     assert.ok(toolbox.includes('blockedReason'), '抓包 brief 必须带 blockedReason，否则摘要拿不到原因');
   });
 
+  await check('21. 「被拦下的站点」每行都能点，点了把域名交给工具箱（候选④）', () => {
+    const renderer = readFile('src/renderer/renderer.js');
+    assert.ok(renderer.includes('function buildBlockedBlock('), '缺少 buildBlockedBlock');
+    assert.ok(renderer.includes('digest-blocked-btn'), '每行必须是一个按钮，不是一行文字');
+    assert.ok(renderer.includes('digest-blocked-btn') && renderer.includes('aria-label'), '按钮要有可读的 aria-label');
+    assert.ok(
+      /dispatchEvent\(new CustomEvent\('nyx:toolbox-focus-net'/.test(renderer),
+      '点击必须通过事件把域名交出去（两个脚本互不引用）',
+    );
+    assert.ok(renderer.includes('function focusNetInToolbox('), '缺少 focusNetInToolbox');
+    // 没有拦截时不许画这个块（空块会让面板显得像出错了）
+    assert.ok(
+      /Array\.isArray\(network\.blockedHosts\) && network\.blockedHosts\.length/.test(renderer),
+      'blockedHosts 为空时不能渲染这一块',
+    );
+  });
+
+  await check('22. 工具箱收到事件后切到抓包页、填过滤条件并重画（候选④）', () => {
+    const toolbox = readFile('src/renderer/toolbox-ui.js');
+    const idx = toolbox.indexOf("window.addEventListener('nyx:toolbox-focus-net'");
+    assert.ok(idx > 0, '工具箱必须监听 nyx:toolbox-focus-net');
+    const body = toolbox.slice(idx, idx + 900);
+    assert.ok(/switchPane\('net'\)/.test(body), '要切到抓包页');
+    assert.ok(/els\.netSearch\.value = query/.test(body), '要把过滤条件填进搜索框（用户看得见）');
+    assert.ok(/tb\.netQuery = query/.test(body), '要真的参与过滤，只填框不生效等于骗人');
+    assert.ok(/rebuildNet\(\)/.test(body), '填完要重画列表');
+    assert.ok(/if \(!tb\.open\) await openToolbox\(\)/.test(body), '工具箱收起时要先打开，否则筛了也看不见');
+    assert.ok(toolbox.includes('__nyxToolboxDebug'), '要留调试面给回归脚本');
+  });
+
   const failed = checks.filter((item) => !item.ok);
   console.log(`\n页面摘要回归：${checks.length - failed.length} / ${checks.length} 通过`);
   if (failed.length) {

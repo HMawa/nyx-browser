@@ -1132,6 +1132,52 @@ function buildDigestBlock(title, lines, extraClass) {
   return block;
 }
 
+/**
+ * 「被拦下的请求」块（候选④）。
+ *
+ * 之前这里只有一行拼起来的文字，看到「被拦下 3 个」也只能干看着。
+ * 现在每个站点是一个按钮：点一下把域名交给工具箱的抓包页当过滤条件，
+ * 顺手把摘要面板收起来，让用户直接看到那些请求。
+ * 注意用自定义事件而不是直接调 toolbox-ui 的函数：两个脚本同页但互不依赖，
+ * 谁先加载都不会炸，测试也能直接 dispatchEvent 验。
+ */
+function buildBlockedBlock(hosts) {
+  const block = document.createElement('div');
+  block.className = 'digest-block digest-blocked';
+  const heading = document.createElement('h3');
+  heading.textContent = `被拦下的站点（${hosts.length} 个）`;
+  block.appendChild(heading);
+  const list = document.createElement('ul');
+  list.className = 'digest-blocked-list';
+  for (const item of hosts) {
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'digest-blocked-btn';
+    btn.dataset.host = item.host;
+    btn.textContent = `${item.host}（${item.count} 次，${item.reason}）`;
+    btn.title = '在工具箱的抓包页按这个域名筛出来';
+    btn.setAttribute('aria-label', `在工具箱里筛出 ${item.host} 的被拦下请求`);
+    btn.addEventListener('click', () => focusNetInToolbox(item.host));
+    li.appendChild(btn);
+    list.appendChild(li);
+  }
+  block.appendChild(list);
+  const hint = document.createElement('p');
+  hint.className = 'digest-blocked-hint';
+  hint.textContent = '被拦下不等于网站坏了：可能是广告、追踪器，也可能是你以为该在的东西——点一条自己看。';
+  block.appendChild(hint);
+  return block;
+}
+
+/** 把过滤条件交给工具箱（工具箱那边监听这个事件：切到抓包页 + 填搜索框） */
+function focusNetInToolbox(host) {
+  const query = String(host || '').trim();
+  if (!query) return;
+  window.dispatchEvent(new CustomEvent('nyx:toolbox-focus-net', { detail: { query } }));
+  if (els.digestPanel) els.digestPanel.hidden = true;
+}
+
 function buildDigestMeta(page) {
   const block = document.createElement('div');
   block.className = 'digest-block';
@@ -1199,9 +1245,7 @@ function renderDigest(payload) {
       lines.push(`主要接口：${network.apis.map((a) => `${a.key}（${a.count}）`).join('、')}`);
     }
     if (Array.isArray(network.blockedHosts) && network.blockedHosts.length) {
-      lines.push(
-        `被拦下：${network.blockedHosts.map((b) => `${b.host}（${b.count} 次，${b.reason}）`).join('、')}`,
-      );
+      lines.push('被拦下的站点见下方，点一条就能在工具箱里筛出来');
     }
     const block = buildDigestBlock(
       network.missing ? '网络（这次没取到抓包记录）' : '网络',
@@ -1215,6 +1259,10 @@ function renderDigest(payload) {
       block.appendChild(warn);
     }
     els.digestBody.appendChild(block);
+    // 候选④：「被拦下」单独一块，每行可点，点了直接去工具箱筛（否则只能看个数字）
+    if (Array.isArray(network.blockedHosts) && network.blockedHosts.length) {
+      els.digestBody.appendChild(buildBlockedBlock(network.blockedHosts));
+    }
   }
 }
 
