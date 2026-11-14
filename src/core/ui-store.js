@@ -66,6 +66,17 @@ const UI_PREF_DEFAULTS = {
    * 关掉之后隐私模式一条都不写；系统密钥不可用时也一条都不写（绝不退化成明文）。
    */
   privateSnapshotEnabled: true,
+
+  /**
+   * 离线缓存按站点收窄（用户第 5 项）。
+   *
+   * mode='all' 全存；mode='allowlist' 只存 cacheSiteAllow 里的站点。
+   * 无论哪种模式，cacheSiteBlock 里的站点永远不存（黑名单优先，白名单不能豁免）。
+   * 名单只做域名级：example.com 连子域一起算。
+   */
+  cacheSiteMode: 'all',
+  cacheSiteAllow: [],
+  cacheSiteBlock: [],
 };
 
 /** 枚举型偏好的合法取值（键 → 允许值）。
@@ -74,6 +85,7 @@ const UI_PREF_ENUMS = {
   theme: ['ink', 'aurora', 'paper', 'quiet'],
   privacyLink: ['proxy', 'direct'],
   gpuPolicy: ['low-power', 'high-performance', 'auto'],
+  cacheSiteMode: ['all', 'allowlist'],
 };
 
 class UiStore {

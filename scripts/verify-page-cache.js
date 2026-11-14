@@ -462,6 +462,90 @@ check('28. 接线：隐私模式走独立加密文件，明文快照那条路不
   assert.ok(js.includes("privateBox.disabled = !usable"), '密钥不可用时开关要禁掉，别让人以为开了就有');
 });
 
+/* ---------------- 按站点的黑白名单（用户第 5 项） ---------------- */
+
+check('29. 默认全存；黑名单命中就不存，而且黑名单压过白名单', () => {
+  const all = cache.decideCacheSite('https://news.test/a', { mode: 'all' });
+  assert.equal(all.cache, true, '默认应该缓存');
+  assert.equal(all.layer, 'all', '命中层要说清是「全存」');
+
+  const blocked = cache.decideCacheSite('https://bank.test/x', {
+    mode: 'allowlist',
+    allow: ['bank.test'],
+    block: ['bank.test'],
+  });
+  assert.equal(blocked.cache, false, '两张名单都在时，黑名单优先');
+  assert.equal(blocked.layer, 'block', '要报是黑名单挡的');
+  assert.ok(/不会存快照/.test(blocked.reason), '要用中文说清结果');
+
+  const sub = cache.decideCacheSite('https://ssl.bank.test/x', { block: ['bank.test'] });
+  assert.equal(sub.cache, false, '黑名单要连子域一起挡');
+});
+
+check('30. 白名单模式：名单内才存，名单外明确说不存并说明原因', () => {
+  const inside = cache.decideCacheSite('https://www.example.com/a', { mode: 'allowlist', allow: ['example.com'] });
+  assert.equal(inside.cache, true, '名单里（含子域）要缓存');
+  assert.equal(inside.layer, 'allow', '要报是白名单放行的');
+
+  const outside = cache.decideCacheSite('https://other.test/a', { mode: 'allowlist', allow: ['example.com'] });
+  assert.equal(outside.cache, false, '名单外的站点不缓存');
+  assert.equal(outside.layer, 'not-listed', '要报是「不在名单里」');
+  assert.ok(/不在名单里/.test(outside.reason), '原因要说清是名单的问题');
+
+  const noHost = cache.decideCacheSite('about:blank', { mode: 'all' });
+  assert.equal(noHost.cache, false, '没有站点的地址不缓存');
+  assert.equal(noHost.layer, 'no-host', '要报是地址的问题');
+});
+
+check('31. 名单条目归一：协议 / www / 大小写 / 尾点 / 空行都吃掉', () => {
+  const list = cache.normalizeSiteList([
+    ' HTTPS://WWW.Example.COM/Path ',
+    'example.com.',
+    '',
+    '   ',
+    'https://example.com',
+    123,
+    null,
+  ]);
+  assert.deepEqual(list, ['example.com'], '同一个站点只留一条，且归一成裸域名');
+  assert.equal(cache.normalizeSiteText('https://a.test/x'), 'a.test', '带协议的也要能归一');
+  assert.equal(cache.normalizeSiteText('not a host'), '', '不像域名的返回空串');
+  const many = cache.normalizeSiteList(Array.from({ length: 260 }, (_, i) => `s${i}.test`));
+  assert.equal(many.length, 200, '名单最多 200 条，不许无限长');
+});
+
+check('32. 策略归一：模式认白名单两个值，脏数据回落到「全存」', () => {
+  assert.equal(cache.normalizeSitePolicy({ mode: 'allowlist' }).mode, 'allowlist', '合法模式要保留');
+  assert.equal(cache.normalizeSitePolicy({ mode: 'weird' }).mode, 'all', '非法模式回落到全存（保守但可预期）');
+  const policy = cache.normalizeSitePolicy({ mode: 'all', allow: ['a.test', 'A.TEST'], block: ['https://b.test'] });
+  assert.deepEqual(policy.allow, ['a.test'], '归一后去重');
+  assert.deepEqual(policy.block, ['b.test'], '黑名单也归一');
+});
+
+check('33. 接线：判定发生在抓取之前，名单能从设置页改、能落到诊断里', () => {
+  const main = read('src/main.js');
+  const idx = main.indexOf('const siteDecision = decideCacheSite(');
+  assert.ok(idx > 0, '入口要先做一次站点判定');
+  const beforeCapture = main.indexOf('executeJavaScript(buildPageCaptureScript()', idx);
+  assert.ok(beforeCapture > idx, '判定必须发生在抓取之前（不缓存就别浪费一次网络与解析）');
+  assert.ok(main.includes('PAGE_CACHE_SITE_SKIPPED'), '被名单挡掉要留诊断，不许静默');
+  assert.ok(main.includes("ipcMain.handle('nyx:offline:sites'"), '要有读名单的 IPC');
+  assert.ok(main.includes("ipcMain.handle('nyx:offline:sites-set'"), '要有写名单的 IPC');
+  assert.ok(main.includes('PAGE_CACHE_SITES_UPDATED'), '改完要记一条诊断');
+  const preload = read('src/preload.js');
+  assert.ok(preload.includes('offlineCacheSites'), 'preload 要暴露读名单');
+  assert.ok(preload.includes('offlineCacheSitesSet'), 'preload 要暴露写名单');
+  const html = read('src/renderer/settings.html');
+  for (const id of ['offline-site-mode', 'offline-site-allow', 'offline-site-block', 'offline-site-facts']) {
+    assert.ok(html.includes(`id="${id}"`), `设置页缺少 ${id}`);
+  }
+  assert.ok(/黑名单优先/.test(html), '界面上要写明黑名单优先');
+  const js = read('src/renderer/settings.js');
+  assert.ok(js.includes('function renderCacheSites('), '要有渲染名单的函数');
+  assert.ok(js.includes('function wireCacheSites('), '要有绑定名单的函数');
+  assert.ok(/loadCacheSites\(\)/.test(js), '进分区要回读一次');
+});
+
 /* ------------------------------------------------------------------ */
 
 const failed = checks.filter((item) => !item.ok);

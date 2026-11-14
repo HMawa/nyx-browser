@@ -88,6 +88,13 @@ const {
   summarizeNetwork,
 } = require('./core/page-digest');
 const {
+  CACHE_SITE_MODES,
+  decideCacheSite,
+  normalizeSiteList,
+  normalizeSitePolicy,
+  normalizeSiteText,
+} = require('./core/page-cache');
+const {
   PRIVATE_CACHE_LIMIT,
   describePrivateEntry,
   findPrivateEntry,
@@ -1129,6 +1136,17 @@ function clearPrivateCache(reason) {
   }
   if (runtime.diagnostics) runtime.diagnostics.info('PRIVATE_CACHE_CLEARED', { reason, cleared });
   return { ok: true, cleared };
+}
+
+/** 站点黑白名单（用户第 5 项）：从偏好里取当前策略，界面改完立刻生效 */
+function cacheSitePolicy() {
+  if (!runtime.uiStore) return normalizeSitePolicy(null);
+  const prefs = runtime.uiStore.get();
+  return normalizeSitePolicy({
+    mode: prefs.cacheSiteMode,
+    allow: prefs.cacheSiteAllow,
+    block: prefs.cacheSiteBlock,
+  });
 }
 
 /** 隐私模式的加密快照：读 / 写 / 查，全部绕开明文文件 */
@@ -2769,10 +2787,22 @@ function hookHistoryRecording(tab) {
   // 只在普通模式、只在 http(s)、只在加载成功后抓；抓取失败只记日志（缓存是锦上添花，
   // 不能因为它报错打断正常浏览）。
   wc.on('did-finish-load', () => {
-    if (sessions.getMode() === 'private') return;
     const url = typeof wc.getURL === 'function' ? wc.getURL() : '';
     if (!isRecordableUrl(url)) return;
     if (wc.isDestroyed()) return;
+    // 站点黑白名单（用户第 5 项）：不管普通还是隐私模式，先在入口判一次。
+    // 判不缓存就直接不抓——不抓比"抓了再删"更干净，也不会白白花一次网络请求。
+    const siteDecision = decideCacheSite(url, cacheSitePolicy());
+    if (!siteDecision.cache) {
+      if (runtime.diagnostics) {
+        runtime.diagnostics.info('PAGE_CACHE_SITE_SKIPPED', {
+          url: redactUrlForLog(url),
+          layer: siteDecision.layer,
+          host: siteDecision.host,
+        });
+      }
+      return;
+    }
     wc.executeJavaScript(buildPageCaptureScript(), true)
       .then(async (raw) => {
         if (!raw || raw.ok !== true) return;
@@ -6763,6 +6793,54 @@ function registerOfflineCacheIpc() {
     const result = clearPageCache('user-cleared');
     if (!result.ok) return { ...offlineCachePayload(), ok: false, error: result.error };
     return { ...offlineCachePayload(), cleared };
+  });
+
+  /**
+   * 站点黑白名单（用户第 5 项）。
+   *
+   * set 的语义要克制：只改传进来的字段，没传的保持原样；
+   * 名单逐条规范化（去空白、去掉协议与 www、去重、上限 200），
+   * 规范化之后如果和用户写的不一样，把结果如实回给界面（别让界面以为存的是原样）。
+   */
+  ipcMain.handle('nyx:offline:sites', () => ({
+    ok: true,
+    ...cacheSitePolicy(),
+    modes: CACHE_SITE_MODES,
+  }));
+
+  ipcMain.handle('nyx:offline:sites-set', (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    const current = cacheSitePolicy();
+    const next = normalizeSitePolicy({
+      mode: input.mode === undefined ? current.mode : input.mode,
+      allow: input.allow === undefined ? current.allow : normalizeSiteList(input.allow),
+      block: input.block === undefined ? current.block : normalizeSiteList(input.block),
+    });
+    const writes = [
+      ['cacheSiteMode', next.mode],
+      ['cacheSiteAllow', next.allow],
+      ['cacheSiteBlock', next.block],
+    ];
+    for (const [key, value] of writes) {
+      try {
+        const saved = runtime.uiStore ? runtime.uiStore.set(key, value) : { ok: false, error: '偏好存储还没就绪' };
+        if (saved && saved.ok === false) {
+          if (runtime.diagnostics) runtime.diagnostics.error('PAGE_CACHE_SITE_SAVE_FAILED', '站点名单没能保存', { key, error: saved.error });
+          return { ok: false, error: `没能保存 ${key}：${saved.error}`, ...cacheSitePolicy() };
+        }
+      } catch (err) {
+        if (runtime.diagnostics) runtime.diagnostics.error('PAGE_CACHE_SITE_SAVE_FAILED', '站点名单没能保存', { key, error: String(err && err.message ? err.message : err) });
+        return { ok: false, error: `没能保存 ${key}：${err && err.message ? err.message : err}`, ...cacheSitePolicy() };
+      }
+    }
+    if (runtime.diagnostics) {
+      runtime.diagnostics.info('PAGE_CACHE_SITES_UPDATED', '离线缓存的站点名单已更新', {
+        mode: next.mode,
+        allow: next.allow.length,
+        block: next.block.length,
+      });
+    }
+    return { ok: true, ...next };
   });
 }
 

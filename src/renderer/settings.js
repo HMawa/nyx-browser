@@ -1296,6 +1296,78 @@
     }
   }
 
+  /** 站点黑白名单（用户第 5 项）：三件小事——模式、只缓存、永不缓存 */
+  function renderCacheSites(payload) {
+    const data = payload && payload.ok !== false ? payload : { mode: 'all', allow: [], block: [] };
+    const mode = byId('offline-site-mode');
+    if (mode) mode.value = data.mode === 'allowlist' ? 'allowlist' : 'all';
+    const allow = byId('offline-site-allow');
+    if (allow && document.activeElement !== allow) allow.value = (data.allow || []).join('\n');
+    const block = byId('offline-site-block');
+    if (block && document.activeElement !== block) block.value = (data.block || []).join('\n');
+    const facts = byId('offline-site-facts');
+    if (facts) {
+      const allowCount = (data.allow || []).length;
+      const blockCount = (data.block || []).length;
+      facts.textContent =
+        (data.mode === 'allowlist'
+          ? `只缓存名单里的 ${allowCount} 个站点`
+          : '所有站点都缓存（除非在黑名单里）') +
+        (blockCount ? ` · 永不缓存 ${blockCount} 个站点：${(data.block || []).join('、')}` : '');
+    }
+  }
+
+  async function saveCacheSites(patch, okText) {
+    if (!window.nyx || typeof window.nyx.offlineCacheSitesSet !== 'function') {
+      setOfflineStatus('当前内核不支持修改站点名单。', true);
+      return;
+    }
+    try {
+      const res = await window.nyx.offlineCacheSitesSet(patch);
+      if (!res || res.ok === false) {
+        setOfflineStatus(`没有改成：${(res && res.error) || '未知原因'}`, true);
+        renderCacheSites(res);
+        return;
+      }
+      renderCacheSites(res);
+      setOfflineStatus(okText || '已保存。', false);
+    } catch (err) {
+      setOfflineStatus(`没有改成：${err && err.message ? err.message : '未知原因'}`, true);
+    }
+  }
+
+  async function loadCacheSites() {
+    if (!window.nyx || typeof window.nyx.offlineCacheSites !== 'function') return;
+    try {
+      renderCacheSites(await window.nyx.offlineCacheSites());
+    } catch (err) {
+      setOfflineStatus(`读取站点名单失败：${err && err.message ? err.message : '未知原因'}`, true);
+    }
+  }
+
+  function wireCacheSites() {
+    const mode = byId('offline-site-mode');
+    if (mode) {
+      mode.addEventListener('change', () => {
+        saveCacheSites({ mode: mode.value }, mode.value === 'allowlist' ? '已切成「只缓存名单里的站点」。' : '已切成「所有站点都缓存」。');
+      });
+    }
+    const bindList = (id, key, label) => {
+      const box = byId(id);
+      if (!box) return;
+      // 用 change（失焦/回车触发），不用 input —— 每敲一个字就写盘会把磁盘打满
+      box.addEventListener('change', () => {
+        const list = box.value
+          .split(/\r?\n/)
+          .map((item) => item.trim())
+          .filter(Boolean);
+        saveCacheSites({ [key]: list }, `已保存${label}：${list.length} 个站点。`);
+      });
+    };
+    bindList('offline-site-allow', 'allow', '「只缓存」名单');
+    bindList('offline-site-block', 'block', '「永不缓存」名单');
+  }
+
   function setOfflineStatus(text, bad) {
     const status = byId('offline-status');
     if (!status) return;
@@ -1316,6 +1388,8 @@
       setOfflineStatus(`读取离线缓存状态失败：${err && err.message ? err.message : '未知原因'}`, true);
     }
     if (!offlineCacheWired) wireOfflineCache();
+    await loadCacheSites();
+    wireCacheSites();
   }
 
   function wireOfflineCache() {

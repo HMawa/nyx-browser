@@ -336,6 +336,101 @@ function describeCachedPage(snapshot, options) {
   };
 }
 
+/* ---------------- 按站点的黑白名单（用户第 5 项） ---------------- */
+
+/**
+ * 为什么要有这个：离线缓存默认"什么都存"，但用户可能只想留几个常用的站点，
+ * 或者干脆想让某几个站（银行、公司内网）一条都不在磁盘上留。
+ *
+ * 三层判定，顺序是刻意的：
+ *   1. 黑名单命中 → 不缓存（黑名单永远优先，白名单不能豁免它）；
+ *   2. 白名单模式（mode='allowlist'）→ 只有名单里的才缓存；
+ *   3. 其余统统按 mode 决定（'all' 全存 / 'allowlist' 不存）。
+ *
+ * 名单只做域名级：`example.com` 连子域一起算，这样用户写一条就够了，
+ * 不会出现"写了 example.com 但 www.example.com 漏了"这种事。
+ */
+const CACHE_SITE_MODES = ['all', 'allowlist'];
+
+function normalizeSiteText(raw) {
+  const text = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (!text) return '';
+  let host = text;
+  try {
+    host = new URL(/^[a-z][a-z0-9+.-]*:\/\//.test(text) ? text : `https://${text}`).hostname;
+  } catch {
+    return '';
+  }
+  return host.replace(/^www\./, '').replace(/\.$/, '');
+}
+
+function normalizeSiteList(rawList) {
+  const list = Array.isArray(rawList) ? rawList : [];
+  const out = [];
+  const seen = new Set();
+  for (const item of list) {
+    const host = normalizeSiteText(item);
+    if (!host || seen.has(host)) continue;
+    seen.add(host);
+    out.push(host);
+  }
+  return out.slice(0, 200);
+}
+
+function normalizeSitePolicy(raw) {
+  const input = raw && typeof raw === 'object' ? raw : {};
+  return {
+    mode: CACHE_SITE_MODES.includes(input.mode) ? input.mode : 'all',
+    allow: normalizeSiteList(input.allow),
+    block: normalizeSiteList(input.block),
+  };
+}
+
+function siteMatches(host, rule) {
+  if (!host || !rule) return false;
+  return host === rule || host.endsWith(`.${rule}`);
+}
+
+/**
+ * 这一页要不要存快照。
+ * 返回 { cache, layer, host, reason }：layer 是命中的那一层，reason 是中文说明，
+ * 界面与日志直接用，不许自己再编一套话。
+ */
+function decideCacheSite(rawUrl, rawPolicy) {
+  const policy = normalizeSitePolicy(rawPolicy);
+  let host = '';
+  try {
+    host = normalizeSiteText(String(rawUrl || ''));
+  } catch {
+    host = '';
+  }
+  if (!host) {
+    return { cache: false, layer: 'no-host', host: '', reason: '这个地址没有可识别的站点，不缓存。' };
+  }
+  const blocked = policy.block.find((rule) => siteMatches(host, rule));
+  if (blocked) {
+    return {
+      cache: false,
+      layer: 'block',
+      host,
+      reason: `${host} 在「不缓存的站点」里，这一页不会存快照。`,
+    };
+  }
+  if (policy.mode === 'allowlist') {
+    const allowed = policy.allow.find((rule) => siteMatches(host, rule));
+    if (!allowed) {
+      return {
+        cache: false,
+        layer: 'not-listed',
+        host,
+        reason: `当前是「只缓存名单里的站点」，${host} 不在名单里。`,
+      };
+    }
+    return { cache: true, layer: 'allow', host, reason: `${host} 在「只缓存的站点」名单里。` };
+  }
+  return { cache: true, layer: 'all', host, reason: '当前允许缓存所有站点。' };
+}
+
 module.exports = {
   BLOCK_TYPES,
   CACHE_BLOCK_MAX,
@@ -345,14 +440,19 @@ module.exports = {
   CACHE_IMAGE_MAX,
   CACHE_IMAGE_TOTAL_MAX,
   CACHE_LIMIT,
+  CACHE_SITE_MODES,
   CACHE_TEXT_MAX,
   CACHE_VERSION,
   attachImageData,
   buildCaptureScript,
   cacheKeyOf,
+  decideCacheSite,
   describeCachedPage,
   getSnapshot,
   imageTargets,
+  normalizeSiteList,
+  normalizeSitePolicy,
+  normalizeSiteText,
   normalizeSnapshot,
   putSnapshot,
   readCache,

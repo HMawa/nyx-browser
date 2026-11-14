@@ -301,6 +301,8 @@ contextBridge.exposeInMainWorld('nyx', {
   offlineCacheGet: () => ipcRenderer.invoke('nyx:offline:get'),
   offlineCacheSet: (payload) => ipcRenderer.invoke('nyx:offline:set', payload || {}),
   offlineCacheClear: () => ipcRenderer.invoke('nyx:offline:clear'),
+  offlineCacheSites: () => ipcRenderer.invoke('nyx:offline:sites'),
+  offlineCacheSitesSet: (payload) => ipcRenderer.invoke('nyx:offline:sites-set', payload || {}),
 
   /** 订阅「切到某个设置分区」指令（主界面错误页跳诊断用），返回取消订阅函数 */
   onSettingsSection: (handler) => {

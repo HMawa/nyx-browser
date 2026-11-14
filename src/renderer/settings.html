@@ -411,6 +411,22 @@
                   <span>隐私模式也保存快照（整条加密后单独存放，只有这台机器的这个账户能解开）</span>
                 </label>
                 <p class="hint" id="offline-private-facts"></p>
+                <label class="ack-row" for="offline-site-mode">
+                  <span>只缓存这些站点：</span>
+                  <select id="offline-site-mode">
+                    <option value="all">所有站点都缓存</option>
+                    <option value="allowlist">只缓存名单里的站点</option>
+                  </select>
+                </label>
+                <label class="ack-row" for="offline-site-allow">
+                  <span>只缓存的站点（每行一个域名，example.com 连子域一起算）</span>
+                </label>
+                <textarea id="offline-site-allow" rows="3" spellcheck="false" placeholder="example.com"></textarea>
+                <label class="ack-row" for="offline-site-block">
+                  <span>永不缓存的站点（黑名单优先，白名单也不能豁免）</span>
+                </label>
+                <textarea id="offline-site-block" rows="3" spellcheck="false" placeholder="bank.example.com"></textarea>
+                <p class="hint" id="offline-site-facts"></p>
                 <p class="hint" id="offline-status" role="status" aria-live="polite"></p>
               </div>
             </section>

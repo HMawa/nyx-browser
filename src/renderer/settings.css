@@ -988,6 +988,41 @@
   cursor: pointer;
 }
 
+/* 离线缓存的站点名单（用户第 5 项） */
+#offline-site-mode {
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-input);
+  color: var(--text-main);
+  font-size: 12px;
+}
+
+#offline-site-mode:focus-visible,
+#offline-site-allow:focus-visible,
+#offline-site-block:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+  box-shadow: var(--ring);
+}
+
+#offline-site-allow,
+#offline-site-block {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-input);
+  color: var(--text-main);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
 #privacy-link-status.is-warn {
   color: var(--danger-soft);
 }
