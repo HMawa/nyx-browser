@@ -813,6 +813,9 @@ if (process.argv.includes(VERIFY_INTEGRITY_FLAG)) {
 async function bootstrap() {
   registerIpc();
 
+  // 剪贴板 API 形状先探一次并记诊断：兼容层不能让"运行时退回了同步 API"这件事安静地发生
+  probeClipboardShape().catch(() => {});
+
   /**
    * 权限管理器必须在任何 session 建立之前注入。
    *
@@ -4006,10 +4009,80 @@ function hostOfUrl(url) {
  */
 const clipboardCache = { text: '', at: 0, reading: null };
 
+/**
+ * 剪贴板 API 形状探测（候选③ 收口）。
+ *
+ * 为什么不能只靠"两种形状都兼容"就算完：兼容层会让「运行时退回了旧 API」
+ * 这件事彻底安静——上游把异步改回去、或者有人把 electron 降回 43，
+ * 表现都只是"还能用"，没有任何人会发现。这里在启动时探测一次并记进诊断，
+ * 退化时用 warn 明确说，这样版本漂移是可见的。
+ */
+const clipboardShape = { async: null, probedAt: 0, syncFallbackSeen: false };
+
+/**
+ * 唯一的剪贴板读原语：返回"原样"的值（可能是字符串，也可能是 Promise）。
+ * 探测与正式读取都从这里走，这样整个主进程只有这一处直接碰 `clipboard.readText`，
+ * 版本差异只可能在兼容层里出现（回归脚本按这个不变量断言）。
+ */
+function rawClipboardRead() {
+  return clipboard.readText();
+}
+
+/** 唯一的剪贴板写原语：原样返回（可能是 undefined，也可能是 Promise）。 */
+function rawClipboardWrite(text) {
+  return clipboard.writeText(text);
+}
+
+async function probeClipboardShape() {
+  try {
+    const value = rawClipboardRead();
+    const isAsync = Boolean(value && typeof value.then === 'function');
+    clipboardShape.async = isAsync;
+    clipboardShape.probedAt = Date.now();
+    if (isAsync) {
+      diagnostics.info('CLIPBOARD_API_SHAPE', '剪贴板 API 是异步形状（Electron 45+）', {
+        electron: process.versions.electron,
+      });
+    } else {
+      diagnostics.warn('CLIPBOARD_API_SHAPE', '剪贴板 API 退回了同步形状（比 Electron 45 老）', {
+        electron: process.versions.electron,
+        hint: '兼容层仍能工作，但这说明运行时版本变了，去核对 package.json 与安全基线声明。',
+      });
+    }
+    // 探测本身就是一次读取，顺手把值放进缓存，省掉首屏那次空缓存
+    if (isAsync) await value.then((text) => {
+      if (typeof text === 'string') {
+        clipboardCache.text = text;
+        clipboardCache.at = Date.now();
+      }
+    }).catch(() => {});
+    else if (typeof value === 'string') {
+      clipboardCache.text = value;
+      clipboardCache.at = Date.now();
+    }
+    return isAsync;
+  } catch (err) {
+    clipboardShape.async = null;
+    diagnostics.warn('CLIPBOARD_API_PROBE_FAILED', '剪贴板形状探测失败（可能被其它程序占用）', {
+      error: err && err.message ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
 async function readClipboardText() {
   try {
-    const value = clipboard.readText();
-    const text = value && typeof value.then === 'function' ? await value : value;
+    const value = rawClipboardRead();
+    const isAsync = Boolean(value && typeof value.then === 'function');
+    if (!isAsync && !clipboardShape.syncFallbackSeen) {
+      // 只报一次：输入时每个字都会走到这里，重复刷日志没有意义
+      clipboardShape.syncFallbackSeen = true;
+      clipboardShape.async = false;
+      diagnostics.warn('CLIPBOARD_SYNC_FALLBACK', '剪贴板读取走回了同步分支', {
+        electron: process.versions.electron,
+      });
+    }
+    const text = isAsync ? await value : value;
     clipboardCache.text = typeof text === 'string' ? text : '';
     clipboardCache.at = Date.now();
     return clipboardCache.text;
@@ -4030,8 +4103,21 @@ async function refreshClipboardCache(minIntervalMs = 250) {
 }
 
 async function writeClipboardText(text) {
-  const value = clipboard.writeText(String(text == null ? '' : text));
-  if (value && typeof value.then === 'function') await value;
+  const payload = String(text == null ? '' : text);
+  try {
+    const value = rawClipboardWrite(payload);
+    if (value && typeof value.then === 'function') await value;
+    return true;
+  } catch (err) {
+    // 写失败必须让人看得见：调用方会据此给前台提示，不许静默当成功
+    diagnostics.error('CLIPBOARD_WRITE_FAILED', '写剪贴板失败（可能被其它程序占用）', {
+      error: err && err.message ? err.message : String(err),
+      chars: payload.length,
+    });
+    throw new Error(`写剪贴板失败：${err && err.message ? err.message : '系统剪贴板当前不可用'}`, {
+      cause: err,
+    });
+  }
 }
 
 /**

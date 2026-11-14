@@ -36,7 +36,7 @@ function functionBody(src, name) {
   return end < 0 ? src.slice(start) : src.slice(start, end + 2);
 }
 
-check('1. 剪贴板只在兼容层里碰：readText / writeText 的调用点不超过两处', () => {
+check('1. 剪贴板只在兼容层里碰：readText / writeText 各只有一处原语', () => {
   const main = read('src/main.js');
   // 注释里的调用示范不算调用点（这个坑踩过一次：注释里写了 `clipboard.readText()` 就数成 3 处）
   const code = main
@@ -46,11 +46,17 @@ check('1. 剪贴板只在兼容层里碰：readText / writeText 的调用点不�
       return !trimmed.startsWith('*') && !trimmed.startsWith('//') && !trimmed.startsWith('/*');
     })
     .join('\n');
-  const calls = code.match(/clipboard\.(?:readText|writeText)\s*\(/g) || [];
-  // readClipboardText + writeClipboardText 各一处，多出来就是有人绕过兼容层了
-  assert.equal(calls.length, 2, `clipboard 直接调用应只有兼容层里的两处，实际 ${calls.length} 处`);
-  assert.ok(main.includes('async function readClipboardText('), '缺少异步读取封装');
-  assert.ok(main.includes('async function writeClipboardText('), '缺少异步写入封装');
+  const reads = code.match(/clipboard\.readText\s*\(/g) || [];
+  const writes = code.match(/clipboard\.writeText\s*\(/g) || [];
+  // 读、写各留一个原语：探测 / 读取 / 写入三个入口都从原语走，
+  // 这样"运行时形状变了"只可能发生在兼容层里，别处不可能绕过。
+  assert.equal(reads.length, 1, `clipboard.readText() 只应有一个原语调用点，实际 ${reads.length} 处`);
+  assert.equal(writes.length, 1, `clipboard.writeText() 只应有一个原语调用点，实际 ${writes.length} 处`);
+  for (const name of ['rawClipboardRead', 'rawClipboardWrite', 'readClipboardText', 'writeClipboardText']) {
+    assert.ok(main.includes(`function ${name}(`), `缺少兼容层函数 ${name}`);
+  }
+  const probe = functionBody(main, 'probeClipboardShape');
+  assert.ok(/rawClipboardRead\(\)/.test(probe), '探测必须走原语，不许再直接碰 clipboard');
 });
 
 check('2. 兼容层真的处理了两种形状（字符串 / Promise）', () => {
@@ -111,6 +117,52 @@ check('6. 版本相关的事实与运行时一致（升级必须同时改三处�
   const doc = read('docs/Nyx-安全基线-C2-CVE对照.md');
   assert.ok(doc.includes(`\`${baseline.RUNTIME_BASELINE.chromium}\``), '文档里的 Chromium 版本要与基线一致');
   assert.ok(doc.includes(`\`${baseline.RUNTIME_BASELINE.node}\``), '文档里的 Node 版本要与基线一致');
+});
+
+check('7. 启动时探测剪贴板 API 形状，退化会如实记诊断（不许安静地兼容过去）', () => {
+  const main = read('src/main.js');
+  assert.ok(main.includes('async function probeClipboardShape('), '缺少 probeClipboardShape');
+  const body = functionBody(main, 'probeClipboardShape');
+  assert.ok(/typeof value\.then === 'function'/.test(body), '探测要判断返回值是不是 Promise');
+  assert.ok(/CLIPBOARD_API_SHAPE/.test(body), '探测结果要记诊断（CLIPBOARD_API_SHAPE）');
+  assert.ok(/diagnostics\.warn\(\s*'CLIPBOARD_API_SHAPE'/.test(body), '退回同步形状时必须 warn，不能只 info');
+  assert.ok(/diagnostics\.info\(\s*'CLIPBOARD_API_SHAPE'/.test(body), '异步形状（正常）也要留一条 info 作基线');
+  // 必须在启动流程里真的被调用，否则探测函数写得再好也不会执行
+  const bootAt = main.indexOf('async function bootstrap()');
+  assert.ok(bootAt > 0, '找不到 bootstrap');
+  const boot = main.slice(bootAt, bootAt + 600);
+  assert.ok(/probeClipboardShape\(\)/.test(boot), 'bootstrap 里必须真的调用探测');
+});
+
+check('8. 运行时退回同步剪贴板时，读路径会（且只会）警告一次', () => {
+  const main = read('src/main.js');
+  const body = functionBody(main, 'readClipboardText');
+  assert.ok(/CLIPBOARD_SYNC_FALLBACK/.test(body), '同步分支必须记 CLIPBOARD_SYNC_FALLBACK');
+  assert.ok(/syncFallbackSeen/.test(body), '同一个会话只报一次，避免每次输入都刷日志');
+  const occurrences = (main.match(/CLIPBOARD_SYNC_FALLBACK/g) || []).length;
+  assert.equal(occurrences, 1, `CLIPBOARD_SYNC_FALLBACK 只应出现在一处，实际 ${occurrences} 处`);
+});
+
+check('9. 写剪贴板失败要报出来，并且不许把失败当成功', () => {
+  const main = read('src/main.js');
+  const body = functionBody(main, 'writeClipboardText');
+  assert.ok(/try\s*\{/.test(body) && /catch/.test(body), '写失败要被接住才能记诊断');
+  assert.ok(/CLIPBOARD_WRITE_FAILED/.test(body), '写失败必须记 CLIPBOARD_WRITE_FAILED');
+  assert.ok(/throw new Error\(/.test(body), '写完失败必须抛错，让调用方给前台提示');
+  // 兼容层之外不许再出现 availableFormats（Electron 45 已经没有这个 API）；
+  // 注释里提到"它没了"是允许的，所以要先把注释行剔掉。
+  const stripped = ['src/main.js', 'src/preload.js', 'src/renderer/renderer.js']
+    .map((rel) =>
+      read(rel)
+        .split('\n')
+        .filter((line) => {
+          const trimmed = line.trim();
+          return !trimmed.startsWith('*') && !trimmed.startsWith('//') && !trimmed.startsWith('/*');
+        })
+        .join('\n'),
+    )
+    .join('\n');
+  assert.ok(!/availableFormats/.test(stripped), 'availableFormats() 在 Electron 45 已不存在，不许再调用');
 });
 
 const failed = checks.filter((item) => !item.ok);
