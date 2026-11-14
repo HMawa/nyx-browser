@@ -99,6 +99,8 @@ const { createModeEventLog } = require('./core/mode-events');
 const { ACTIONS: LINK_GUARD_ACTIONS, isProxyFailureCode, decideProxyFailureAction } = require('./core/link-guard');
 const { networkStatePayload } = require('./core/network-state');
 const {
+  CACHE_LIMIT,
+  CACHE_VERSION,
   buildCaptureScript: buildPageCaptureScript,
   describeCachedPage,
   getSnapshot,
@@ -1059,9 +1061,10 @@ function initPageCache() {
   return runtime.pageCache;
 }
 
-/** 写一条离线快照（隐私模式直接返回，不落盘）。 */
+/** 写一条离线快照（隐私模式、或用户关掉离线缓存时直接返回，不落盘）。 */
 function savePageCache(snapshot) {
   if (sessions.getMode() === 'private') return false;
+  if (runtime.uiStore && runtime.uiStore.get().offlineCacheEnabled === false) return false;
   const result = putSnapshot(runtime.pageCache, snapshot);
   if (!result.stored) return false;
   runtime.pageCache = result.store;
@@ -3595,6 +3598,8 @@ function registerIpc() {
 
   // 主界面加载失败页（A4）：重试 / 跳诊断 / 复制详情
   registerErrorPageIpc();
+  // 离线阅读缓存的开关与清理（候选③）
+  registerOfflineCacheIpc();
   registerDownloadsIpc();
   // agent 审计面与急停（D）
   registerAgentAuditIpc();
@@ -6274,6 +6279,71 @@ function registerErrorPageIpc() {
       runtime.diagnostics.info('OFFLINE_CACHE_SHOWN', { url: redactUrlForLog(url), chars: described.chars, at: described.at });
     }
     return { ok: true, url, ...described };
+  });
+}
+
+/**
+ * 离线阅读缓存的开关与清理（候选③：把"要不要把正文写到磁盘"交给用户决定）。
+ * 关掉时不只是"以后不写"，而是把已经写到磁盘的快照一起清掉——
+ * 留着一份用户以为已经关掉的历史，比功能本身更糟。
+ */
+function clearPageCache(reason) {
+  runtime.pageCache = { version: CACHE_VERSION, items: [] };
+  try {
+    fs.writeFileSync(runtime.pageCacheFile, JSON.stringify(runtime.pageCache), 'utf8');
+  } catch (err) {
+    console.warn('[Nyx] 清空离线缓存时写盘失败：', err && err.message ? err.message : err);
+    if (runtime.diagnostics) runtime.diagnostics.error('PAGE_CACHE_CLEAR_FAILED', '清空离线缓存时没能写入磁盘', { error: String(err && err.message ? err.message : err) });
+    return { ok: false, error: `没能写入 ${runtime.pageCacheFile}：${err && err.message ? err.message : err}` };
+  }
+  if (runtime.diagnostics) runtime.diagnostics.info('PAGE_CACHE_CLEARED', { reason, file: runtime.pageCacheFile });
+  return { ok: true };
+}
+
+function offlineCachePayload() {
+  const items = runtime.pageCache && Array.isArray(runtime.pageCache.items) ? runtime.pageCache.items : [];
+  return {
+    ok: true,
+    // 注意：UiStore.get() 不接受参数，返回的是整份偏好对象 —— 不能写成 get('offlineCacheEnabled')
+    enabled: runtime.uiStore ? runtime.uiStore.get().offlineCacheEnabled !== false : true,
+    count: items.length,
+    limit: CACHE_LIMIT,
+    file: runtime.pageCacheFile || userDataFile('page-cache.json'),
+    note: '只存 http(s) 页面的正文纯文字快照，用来断网时看"上次读到什么"；隐私模式从不写入。',
+  };
+}
+
+function registerOfflineCacheIpc() {
+  ipcMain.handle('nyx:offline:get', () => offlineCachePayload());
+
+  ipcMain.handle('nyx:offline:set', (_event, payload) => {
+    const enabled = !(payload && payload.enabled === false);
+    try {
+      const saved = runtime.uiStore.set('offlineCacheEnabled', enabled);
+      // set() 遇到非法值时返回 { ok:false } 而不抛异常，这里必须看返回值，
+      // 否则界面会显示"已关闭"而内核其实没改。
+      if (saved && saved.ok === false) {
+        if (runtime.diagnostics) runtime.diagnostics.error('PAGE_CACHE_TOGGLE_FAILED', '离线缓存开关没能保存', { error: saved.error });
+        return { ...offlineCachePayload(), ok: false, error: `没能保存这个开关：${saved.error}` };
+      }
+    } catch (err) {
+      if (runtime.diagnostics) runtime.diagnostics.error('PAGE_CACHE_TOGGLE_FAILED', '离线缓存开关没能保存', { error: String(err && err.message ? err.message : err) });
+      return { ...offlineCachePayload(), ok: false, error: `没能保存这个开关：${err && err.message ? err.message : err}` };
+    }
+    let cleared = 0;
+    if (!enabled) {
+      cleared = (runtime.pageCache && runtime.pageCache.items.length) || 0;
+      const result = clearPageCache('user-disabled');
+      if (!result.ok) return { ...offlineCachePayload(), ok: false, error: result.error };
+    }
+    return { ...offlineCachePayload(), enabled, cleared };
+  });
+
+  ipcMain.handle('nyx:offline:clear', () => {
+    const cleared = (runtime.pageCache && runtime.pageCache.items.length) || 0;
+    const result = clearPageCache('user-cleared');
+    if (!result.ok) return { ...offlineCachePayload(), ok: false, error: result.error };
+    return { ...offlineCachePayload(), cleared };
   });
 }
 

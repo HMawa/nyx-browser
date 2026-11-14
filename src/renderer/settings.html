@@ -389,6 +389,28 @@
 
             <section class="info-card">
               <div class="info-head">
+                <h3>离线阅读缓存</h3>
+                <span class="badge" id="offline-badge">—</span>
+                <div class="info-head-actions">
+                  <button type="button" class="btn btn-mini btn-danger" id="btn-offline-clear">清空已保存的正文</button>
+                </div>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  断网时失败页会显示「上次读到的内容」，靠的就是这里的正文快照：只存 http(s) 页面的纯文字，
+                  不存图片、Cookie 或表单内容。隐私模式从不写入；关掉这个开关会停止写入，并把已经保存的快照一起清掉。
+                </p>
+                <label class="ack-row">
+                  <input type="checkbox" id="offline-cache-enabled" />
+                  <span>允许保存页面正文快照（用于断网时查看，可随时清空）</span>
+                </label>
+                <p class="hint" id="offline-facts"></p>
+                <p class="hint" id="offline-status" role="status" aria-live="polite"></p>
+              </div>
+            </section>
+
+            <section class="info-card">
+              <div class="info-head">
                 <h3>加固状态</h3>
                 <span class="badge" id="privacy-badge">—</span>
                 <div class="info-head-actions">

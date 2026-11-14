@@ -3231,6 +3231,76 @@ async function main() {
       }
     }
 
+    // 离线阅读缓存开关（候选③）：设置页真的能关、关了真的清空、再打开真的恢复
+    if (settings) {
+      try {
+        const card = await settings.eval(`(async () => {
+          const payload = await window.nyx.offlineCacheGet();
+          const box = document.getElementById('offline-cache-enabled');
+          const badge = document.getElementById('offline-badge');
+          const facts = document.getElementById('offline-facts');
+          const clearBtn = document.getElementById('btn-offline-clear');
+          return {
+            payload,
+            hasBox: !!box,
+            checked: box ? box.checked : null,
+            badgeText: badge ? badge.textContent.trim() : '',
+            factsText: facts ? facts.textContent.trim() : '',
+            hasClear: !!clearBtn,
+          };
+        })()`);
+        check(
+          '设置页有「离线阅读缓存」卡片：开关状态与内核一致，且给出条目数与落点（候选③）',
+          card
+            && card.hasBox === true
+            && card.checked === card.payload.enabled
+            && card.hasClear === true
+            && card.badgeText.length > 0
+            && /条|页/.test(card.factsText),
+          JSON.stringify(card),
+        );
+
+        const toggled = await (async () => {
+          await settings.eval(`(() => {
+            const box = document.getElementById('offline-cache-enabled');
+            box.checked = false;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+          })()`);
+          const off = await pollUntil(async () => {
+            const payload = await settings.eval('window.nyx.offlineCacheGet()');
+            return payload && payload.enabled === false ? payload : false;
+          }, 30, 250);
+          const statusText = await settings.eval(`(() => {
+            const el = document.getElementById('offline-status');
+            return el ? el.textContent.trim() : '';
+          })()`);
+          // 恢复开启，避免影响后续断言（这一步本身也要能成功）
+          await settings.eval(`(() => {
+            const box = document.getElementById('offline-cache-enabled');
+            box.checked = true;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+          })()`);
+          const on = await pollUntil(async () => {
+            const payload = await settings.eval('window.nyx.offlineCacheGet()');
+            return payload && payload.enabled === true ? payload : false;
+          }, 30, 250);
+          return { off, on, statusText };
+        })();
+        check(
+          '关掉离线缓存开关后内核真的停止缓存并清空已存正文，再打开能恢复（候选③）',
+          toggled
+            && toggled.off
+            && toggled.off.enabled === false
+            && toggled.off.count === 0
+            && toggled.on
+            && toggled.on.enabled === true,
+          JSON.stringify({ off: toggled && toggled.off, on: toggled && toggled.on, status: toggled && toggled.statusText }),
+        );
+      } catch (err) {
+        check('离线缓存开关端到端检查未中断', false, err && err.message);
+      }
+    }
+
     check('主窗口无未捕获脚本异常', shellErrors.length === 0, shellErrors.slice(0, 3).join(' | '));
     if (settings) {
       const settingsErrors = settings.exceptions();

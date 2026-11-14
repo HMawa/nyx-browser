@@ -183,6 +183,73 @@ check('14. 接线：主进程写/读/取三处都在，且隐私模式不写', (
   assert.ok(js.includes('peCachedText'), 'renderer 要写缓存正文');
 });
 
+check('15. 离线缓存是可选开关：默认开，关掉后不再写（候选③）', () => {
+  const store = require('../src/core/ui-store');
+  assert.equal(store.UI_PREF_DEFAULTS.offlineCacheEnabled, true, '默认应为开启');
+  const main = read('src/main.js');
+  assert.ok(
+    main.includes('uiStore.get().offlineCacheEnabled === false'),
+    '写快照前必须问用户的开关（关掉就不能继续写）',
+  );
+});
+
+check('16. 关掉开关会把已经落盘的正文明文一起清掉，并把条数回给界面', () => {
+  const main = read('src/main.js');
+  assert.ok(main.includes('function clearPageCache('), '要有集中清理函数');
+  assert.ok(/runtime\.pageCache = \{ version: CACHE_VERSION, items: \[\] \}/.test(main), '清理要真的把内存清空');
+  assert.ok(main.includes('PAGE_CACHE_CLEARED'), '清理要落日志');
+  assert.ok(main.includes("ipcMain.handle('nyx:offline:set'"), '要有开关 IPC');
+  assert.ok(main.includes("ipcMain.handle('nyx:offline:clear'"), '要有手动清空 IPC');
+  assert.ok(/cleared = \(runtime\.pageCache && runtime\.pageCache\.items\.length\) \|\| 0/.test(main), '要如实回传清掉多少条');
+  assert.ok(/if \(!enabled\) \{/.test(main), '关掉时必须走清理分支');
+});
+
+check('17. 开关的状态包如实带条目数、上限与文件落点', () => {
+  const main = read('src/main.js');
+  assert.ok(main.includes('function offlineCachePayload()'), '要有统一状态包');
+  for (const key of ['enabled', 'count', 'limit', 'file', 'note']) {
+    assert.ok(new RegExp(`\\b${key}:`).test(main), `状态包里缺少 ${key}`);
+  }
+  assert.ok(main.includes('隐私模式从不写入'), '状态包要写明隐私模式的边界');
+});
+
+check('18. 接线：preload 三个方法 + 设置页卡片 + 进分区回读', () => {
+  const preload = read('src/preload.js');
+  for (const name of ['offlineCacheGet', 'offlineCacheSet', 'offlineCacheClear']) {
+    assert.ok(preload.includes(name), `preload 缺少 ${name}`);
+  }
+  const html = read('src/renderer/settings.html');
+  for (const id of ['offline-badge', 'offline-cache-enabled', 'btn-offline-clear', 'offline-facts', 'offline-status']) {
+    assert.ok(html.includes(`id="${id}"`), `settings.html 缺少 #${id}`);
+  }
+  assert.ok(/关掉这个开关会停止写入，并把已经保存的快照一起清掉/.test(html), '卡片要直说关掉会清空');
+  const js = read('src/renderer/settings.js');
+  assert.ok(js.includes('loadOfflineCache();'), '进隐私分区要回读');
+  assert.ok(js.includes('renderOfflineCache'), '要有渲染函数');
+  assert.ok(js.includes('没有改成：'), '失败要如实说"没有改成"');
+});
+
+check('19. 开关必须真被读到：UiStore.get() 不接受参数，调用时不得传键名', () => {
+  const store = require('../src/core/ui-store');
+  const storeSrc = read('src/core/ui-store.js');
+  assert.ok(/  get\(\) \{/.test(storeSrc), 'UiStore.get() 的签名必须是无参的');
+  const instance = new store.UiStore({ stateDir: path.join(require('node:os').tmpdir(), `nyx-ui-store-probe-${process.pid}`) });
+  const all = instance.get();
+  assert.equal(typeof all, 'object', 'get() 返回整份偏好对象');
+  assert.equal(all.offlineCacheEnabled, true, '默认应带 offlineCacheEnabled=true');
+
+  // 关键回归：曾经写成 get('offlineCacheEnabled')，拿到的是整个对象，
+  // 于是 !== false 永远成立 —— 开关关掉了其实还在缓存。
+  const main = read('src/main.js');
+  assert.ok(
+    !/uiStore\.get\(\s*'/.test(main) && !/uiStore\.get\(\s*"/.test(main),
+    'main.js 里不得出现 uiStore.get(键名)：get() 不接受参数，要写成 get().键名',
+  );
+  assert.ok(main.includes("uiStore.get().offlineCacheEnabled === false"), '写缓存前必须真的问到开关值');
+  assert.ok(main.includes('uiStore.get().offlineCacheEnabled !== false'), '状态包必须真的报到开关值');
+  assert.ok(/saved\.ok === false/.test(main), 'set() 返回 ok:false 时必须如实失败，不能假装保存成功');
+});
+
 /* ------------------------------------------------------------------ */
 
 const failed = checks.filter((item) => !item.ok);

@@ -287,6 +287,8 @@
       loadPrivacyLink();
       // 录屏/被远控状态也可能随时变（用户刚开了个会议），每次进分区都重查一次
       loadScreenWatch();
+      // 离线阅读缓存（候选③）：条目数会随浏览变化，进分区就回读
+      loadOfflineCache();
     }
 
     // 扩展清单按需拉取：装载状态与文件系统耦合，进分区时读一次最新值
@@ -1229,6 +1231,107 @@
           }
         } catch (err) {
           setStatus(`没能记录确认：${err && err.message ? err.message : '未知原因'}`, true);
+        }
+      });
+    }
+  }
+
+  /* ---------------- 离线阅读缓存（候选③） ---------------- */
+
+  let offlineCacheWired = false;
+
+  /** 渲染开关、条目数、文件落点；说明里不藏"关掉会清空"这件事 */
+  function renderOfflineCache(payload) {
+    const data = payload && payload.ok !== false ? payload : { enabled: false, count: 0, limit: 0, file: '' };
+    const enabled = data.enabled !== false;
+    const count = Number(data.count) || 0;
+
+    const badge = byId('offline-badge');
+    if (badge) {
+      badge.textContent = enabled ? (count ? `已保存 ${count} 页` : '已开启') : '已关闭';
+      badge.className = `badge ${enabled ? 'ok' : 'warn'}`;
+    }
+
+    const box = byId('offline-cache-enabled');
+    if (box) box.checked = enabled;
+
+    const facts = byId('offline-facts');
+    if (facts) {
+      const limit = Number(data.limit) || 0;
+      facts.textContent = count
+        ? `当前保存了 ${count} 页正文快照${limit ? `（最多 ${limit} 页，最旧的会被顶掉）` : ''} · 文件：${data.file || '未知'}`
+        : `还没有保存任何正文快照${limit ? `（最多保存 ${limit} 页）` : ''} · 文件：${data.file || '未知'}`;
+    }
+  }
+
+  function setOfflineStatus(text, bad) {
+    const status = byId('offline-status');
+    if (!status) return;
+    status.textContent = text || '';
+    status.className = bad ? 'hint is-warn' : 'hint';
+  }
+
+  async function loadOfflineCache() {
+    if (!window.nyx || typeof window.nyx.offlineCacheGet !== 'function') {
+      setOfflineStatus('当前内核不支持离线缓存设置。', true);
+      return;
+    }
+    try {
+      const res = await window.nyx.offlineCacheGet();
+      renderOfflineCache(res);
+      if (res && res.ok === false) setOfflineStatus(res.error || '读取离线缓存状态失败', true);
+    } catch (err) {
+      setOfflineStatus(`读取离线缓存状态失败：${err && err.message ? err.message : '未知原因'}`, true);
+    }
+    if (!offlineCacheWired) wireOfflineCache();
+  }
+
+  function wireOfflineCache() {
+    offlineCacheWired = true;
+
+    const box = byId('offline-cache-enabled');
+    if (box) {
+      box.addEventListener('change', async () => {
+        const enabled = box.checked;
+        box.disabled = true;
+        try {
+          const res = await window.nyx.offlineCacheSet({ enabled });
+          if (!res || res.ok === false) {
+            box.checked = !enabled;
+            setOfflineStatus(`没有改成：${(res && res.error) || '未知原因'}`, true);
+            return;
+          }
+          renderOfflineCache(res);
+          if (!enabled) {
+            setOfflineStatus(`已关闭：不再保存正文快照${res.cleared ? `，并清掉了原有的 ${res.cleared} 页` : ''}。`, false);
+          } else {
+            setOfflineStatus('已开启：此后打开的 http(s) 页面会保存一份纯文字快照。', false);
+          }
+        } catch (err) {
+          box.checked = !enabled;
+          setOfflineStatus(`没有改成：${err && err.message ? err.message : '未知原因'}`, true);
+        } finally {
+          box.disabled = false;
+        }
+      });
+    }
+
+    const clearBtn = byId('btn-offline-clear');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', async () => {
+        clearBtn.disabled = true;
+        try {
+          const res = await window.nyx.offlineCacheClear();
+          if (!res || res.ok === false) {
+            setOfflineStatus(`没有清掉：${(res && res.error) || '未知原因'}`, true);
+            return;
+          }
+          renderOfflineCache(res);
+          setOfflineStatus(res.cleared ? `已清空 ${res.cleared} 页正文快照。` : '本来就是空的，没有可清的。', false);
+        } catch (err) {
+          setOfflineStatus(`没有清掉：${err && err.message ? err.message : '未知原因'}`, true);
+        } finally {
+          clearBtn.disabled = false;
         }
       });
     }

@@ -50,6 +50,13 @@ const UI_PREF_DEFAULTS = {
    * 改完立刻生效（TabManager.setSleepAfterMs），不需要重启。
    */
   tabSleepMinutes: 30,
+
+  /**
+   * 离线阅读缓存（候选③）：默认开启，但用户可以在「隐私与安全」里一键关掉。
+   * 关掉时不只是以后不写，还会把已经落盘的正文快照一起清掉——
+   * 隐私模式从来不写（那是硬约束），普通模式则由这个开关说了算。
+   */
+  offlineCacheEnabled: true,
 };
 
 /** 枚举型偏好的合法取值（键 → 允许值）。

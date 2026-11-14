@@ -293,6 +293,11 @@ contextBridge.exposeInMainWorld('nyx', {
   /** 断网时取这一页的离线快照（只有真的缓存过才 available:true） */
   errorCachedPage: (payload) => ipcRenderer.invoke('nyx:error:cached', payload || {}),
 
+  /** 离线阅读缓存：读开关与条目数 / 开关（关掉会清空）/ 清空 */
+  offlineCacheGet: () => ipcRenderer.invoke('nyx:offline:get'),
+  offlineCacheSet: (payload) => ipcRenderer.invoke('nyx:offline:set', payload || {}),
+  offlineCacheClear: () => ipcRenderer.invoke('nyx:offline:clear'),
+
   /** 订阅「切到某个设置分区」指令（主界面错误页跳诊断用），返回取消订阅函数 */
   onSettingsSection: (handler) => {
     const listener = (_event, section) => handler(section);
