@@ -530,6 +530,74 @@ check('导出的接线：同步对话框 + 默认文件名 + preload 与界面�
   return 'ok';
 });
 
+check('28. 动作聚合按类型与站点各数一遍，设置改动不重复进动作表', () => {
+  const now = Date.UTC(2026, 10, 15);
+  const records = [
+    { type: 'click', site: 'a.test', ts: now - 1000, decision: 'allow', ok: true },
+    { type: 'click', site: 'a.test', ts: now - 2000, decision: 'allow', ok: true },
+    { type: 'readPage', site: 'b.test', ts: now - 3000, decision: 'allow', ok: true },
+    { type: 'settings', site: 'b.test', ts: now - 3500, decision: 'allow', ok: true, params: { key: 'gpuPolicy' } },
+  ];
+  const result = settings.aggregateAgentActions(records);
+  assert(result.ok === true, '要返回 ok');
+  assert(result.total === 3, `设置改动不该算进动作次数（实际 ${result.total}）`);
+  assert(result.types.length === 2, '两类动作');
+  assert(result.types[0].type === 'click' && result.types[0].count === 2, '按次数从多到少排');
+  assert(result.types[0].label === '点击', '要有中文名');
+  assert(result.sites[0].site === 'a.test' && result.sites[0].count === 2, '站点要单独数');
+  assert(/最近 3 次动作/.test(result.note), 'note 要说清次数');
+  return 'ok';
+});
+
+check('29. 被拦下和被拒的动作单独报数，不混进执行次数', () => {
+  const now = Date.UTC(2026, 10, 15);
+  const records = [
+    { type: 'type', site: 'a.test', ts: now - 1000, decision: 'allow', ok: true },
+    { type: 'type', site: 'a.test', ts: now - 2000, decision: 'deny', ok: false },
+    { type: 'click', site: 'a.test', ts: now - 3000, decision: 'allow', ok: false },
+  ];
+  const result = settings.aggregateAgentActions(records);
+  assert(result.total === 1, '只有成功那一次算动作');
+  assert(result.denied === 2, '被拦下与被拒各算一次，单独计数');
+  assert(/另有 2 次被拦下或被拒/.test(result.note), 'note 要如实报被拦下的次数');
+  // 全被拦下时不能说"没干过什么"，要说清楚是被拦了
+  const blocked = settings.aggregateAgentActions([{ type: 'click', ts: now, decision: 'deny', ok: false }]);
+  assert(blocked.empty === true && /被拦下或被拒/.test(blocked.note), '全被拦下要说清是被拦了，不能说"没有动作"');
+  return 'ok';
+});
+
+check('30. 动作聚合与设置聚合共用同一条时间窗，窗口外的照样计入 outOfRange', () => {
+  const now = Date.UTC(2026, 10, 15);
+  const records = [
+    { type: 'click', site: 'a.test', ts: now - 1000, decision: 'allow', ok: true },
+    { type: 'click', site: 'a.test', ts: now - 8 * 86400000, decision: 'allow', ok: true },
+    { type: 'readPage', site: 'b.test', decision: 'allow', ok: true },
+  ];
+  const windowed = settings.aggregateAgentActions(records, { since: now - 86400000 });
+  assert(windowed.total === 1, '窗口内只有一条');
+  assert(windowed.outOfRange === 2, '窗口外 + 没有时间戳的两条都要进 outOfRange');
+  assert(/2 条/.test(windowed.note), 'note 要说清有多少条在窗口外');
+  assert(settings.labelOfAction('我们不认识的动作') === '其它动作', '不认识的类型要有兜底中文名');
+  return 'ok';
+});
+
+check('31. 接线：「它都干过什么」两块表在界面里，IPC 同时返回 settings 与 actions', () => {
+  const main = read('src/main.js');
+  const html = read('src/renderer/settings.html');
+  const js = read('src/renderer/settings.js');
+  assert(/aggregateAgentActions,/.test(main), 'main 要引入动作聚合');
+  assert(/const actions = aggregateAgentActions\(records, \{/.test(main), 'IPC 里要真的调它');
+  assert(/actions,/.test(main), '返回体要带 actions');
+  for (const id of ['agent-actions-audit-table', 'agent-actions-audit-rows', 'agent-actions-audit-note', 'agent-actions-sites']) {
+    assert(html.includes(`id="${id}"`), `设置页缺 ${id}`);
+  }
+  assert(/它都干过什么/.test(html), '标题要说人话');
+  assert(/function renderActionAudit\(actions\)/.test(js), '缺渲染动作表的函数');
+  assert(/renderActionAudit\(payload\.actions\)/.test(js), '读到记录后要渲染动作表');
+  assert(/主要在哪些站点/.test(js), '要给出站点分布');
+  return 'ok';
+});
+
 let passed = 0;
 let failed = 0;for (const item of checks) {
   if (item.pass) {

@@ -83,6 +83,7 @@ const {
   SETTING_KEYS,
   SETTING_LOCKED,
   SETTING_SCHEMA,
+  aggregateAgentActions,
   aggregateSettingChanges: aggregateAgentSettingChanges,
   buildSettingAuditCsv: buildAgentSettingAuditCsv,
   describeSettingsSchema,
@@ -9396,7 +9397,14 @@ function registerAgentSettingsIpc() {
       // 免得界面和主进程各算一套"一天是多久"。
       since: readAuditSince(input.days),
     });
+    // 动作聚合（第九轮 ④）：同一批记录再按动作类型/站点各数一遍，
+    // 与设置聚合共用同一时间窗，两边的口径不许不一样。
+    const actions = aggregateAgentActions(records, {
+      limit: Number.isFinite(input.limit) ? input.limit : 20,
+      since: readAuditSince(input.days),
+    });
     return Object.assign({}, aggregated, {
+      actions,
       disclaimer: SETTING_DISCLAIMER,
       auditedAt: Date.now(),
       days: readAuditDays(input.days),

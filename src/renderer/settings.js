@@ -4668,6 +4668,57 @@ async function loadFootprint() {
     table.hidden = false;
     note.textContent = payload.note || '';
     note.className = 'hint';
+    // 动作聚合（第九轮 ④）：和设置改动同一批记录、同一个时间窗，分开两块显示
+    renderActionAudit(payload.actions);
+  }
+
+  /**
+   * 「它都干过什么」：按动作类型与站点各数一遍。
+   * 被拦下/被拒的只报数不进表格——它们不是"做过的事"，混进执行次数里会把风险说小。
+   */
+  function renderActionAudit(actions) {
+    const table = byId('agent-actions-audit-table');
+    const rows = byId('agent-actions-audit-rows');
+    const note = byId('agent-actions-audit-note');
+    const sitesLine = byId('agent-actions-sites');
+    if (!table || !rows || !note) return;
+    if (!actions || actions.ok === false) {
+      table.hidden = true;
+      note.textContent = '读不出动作记录。';
+      note.className = 'hint is-warn';
+      if (sitesLine) sitesLine.textContent = '';
+      return;
+    }
+    const types = Array.isArray(actions.types) ? actions.types : [];
+    rows.textContent = '';
+    note.textContent = actions.note || '';
+    note.className = actions.empty ? 'hint' : 'hint';
+    if (!types.length) {
+      table.hidden = true;
+    } else {
+      for (const item of types) {
+        const tr = document.createElement('tr');
+        const cells = [
+          item.label || item.type,
+          `${item.count} 次`,
+          Number.isFinite(item.lastAt) && item.lastAt > 0 ? new Date(item.lastAt).toLocaleString() : '—',
+          (item.sites || []).slice(0, 3).join('、') || '—',
+        ];
+        for (const text of cells) {
+          const td = document.createElement('td');
+          td.textContent = text;
+          tr.append(td);
+        }
+        rows.append(tr);
+      }
+      table.hidden = false;
+    }
+    if (sitesLine) {
+      const sites = Array.isArray(actions.sites) ? actions.sites : [];
+      sitesLine.textContent = sites.length
+        ? `主要在哪些站点：${sites.slice(0, 6).map((item) => `${item.site}（${item.count} 次）`).join('、')}。`
+        : '';
+    }
   }
 
   function describeSettingValue(value) {

@@ -1165,6 +1165,21 @@
                   </table>
                   <p class="hint" id="agent-settings-audit-note"></p>
                 </div>
+                <div class="info-sub" id="agent-actions-audit-block">
+                  <h4>它都干过什么</h4>
+                  <p class="hint">
+                    同一批留痕按「动作类型」和「站点」各数一遍。被拦下和被拒的不算进执行次数，单独报数——
+                    把它们混进去会把风险说小。
+                  </p>
+                  <p class="hint" id="agent-actions-audit-note" role="status" aria-live="polite"></p>
+                  <table class="agent-audit-table" id="agent-actions-audit-table" hidden>
+                    <thead>
+                      <tr><th>动作</th><th>次数</th><th>最近一次</th><th>站点</th></tr>
+                    </thead>
+                    <tbody id="agent-actions-audit-rows"></tbody>
+                  </table>
+                  <p class="hint" id="agent-actions-sites"></p>
+                </div>
                 <p class="hint" id="agent-settings-status" role="status" aria-live="polite"></p>
               </div>
             </section>

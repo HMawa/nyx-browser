@@ -630,6 +630,120 @@ function aggregateSettingChanges(records, options) {
  * 只导聚合后的行（每个设置项一行），不导原始记录：原始记录里有 url、参数这类东西，
  * 导出来是一条条流水账，看不出"谁改得多"这个问题的答案。
  */
+/**
+ * 聚合 agent 的**动作**（第九轮 ④）。
+ *
+ * 原来这张视图只看「改设置」，可绝大多数时候 agent 干的是点击、读页面、截图这些；
+ * 只看设置改动会让人以为 agent 没干过什么。这里按动作类型与站点各数一遍，
+ * 与设置聚合共用同一条时间窗口径（since/until + outOfRange），不做两套说法。
+ */
+const ACTION_LABELS = {
+  navigate: '打开网页',
+  readPage: '读页面',
+  screenshot: '截图',
+  click: '点击',
+  type: '输入文字',
+  executeJS: '执行脚本',
+  extractText: '取正文',
+  state: '看标签状态',
+  riskLog: '读风险记录',
+  settings: '改设置',
+  download: '下载',
+};
+
+function labelOfAction(type) {
+  return ACTION_LABELS[type] || '其它动作';
+}
+
+function aggregateAgentActions(records, options) {
+  const source = Array.isArray(records) ? records : [];
+  const limit = Number.isFinite(options && options.limit) ? Math.max(1, Math.round(options.limit)) : 20;
+  const since = Number.isFinite(options && options.since) && options.since > 0 ? Number(options.since) : 0;
+  const until = Number.isFinite(options && options.until) && options.until > 0 ? Number(options.until) : 0;
+  const types = new Map();
+  const sites = new Map();
+  let considered = 0;
+  let outOfRange = 0;
+  let denied = 0;
+
+  for (const raw of source) {
+    const entry = raw && typeof raw === 'object' ? raw : null;
+    if (!entry) continue;
+    // 设置改动不算"动作"：它在上面的设置视图里已经有各自的一行，两边重复数会让人以为点了两次
+    if (entry.type === 'settings') continue;
+    if (!entry.type) continue;
+    const ts = Number.isFinite(entry.ts) ? entry.ts : 0;
+    if (since || until) {
+      if (!ts) {
+        outOfRange += 1;
+        continue;
+      }
+      if (since && ts < since) {
+        outOfRange += 1;
+        continue;
+      }
+      if (until && ts > until) {
+        outOfRange += 1;
+        continue;
+      }
+    }
+    // 被拒绝的动作照样要记——但它不是"做过的事"，所以单独数，混进执行次数里会把风险说小
+    if (entry.decision === 'deny' || entry.ok === false) {
+      denied += 1;
+      continue;
+    }
+    considered += 1;
+    const type = String(entry.type);
+    const site = typeof entry.site === 'string' ? entry.site : '';
+    const currentType = types.get(type);
+    if (!currentType) {
+      types.set(type, { type, label: labelOfAction(type), count: 1, lastAt: ts, sites: site ? [site] : [] });
+    } else {
+      currentType.count += 1;
+      if (ts >= currentType.lastAt) currentType.lastAt = ts;
+      if (site && !currentType.sites.includes(site)) currentType.sites.push(site);
+    }
+    if (site) {
+      const currentSite = sites.get(site);
+      if (!currentSite) sites.set(site, { site, count: 1, lastAt: ts });
+      else {
+        currentSite.count += 1;
+        if (ts >= currentSite.lastAt) currentSite.lastAt = ts;
+      }
+    }
+  }
+
+  const typeRows = Array.from(types.values())
+    .sort((a, b) => (b.count - a.count) || (b.lastAt - a.lastAt))
+    .slice(0, limit);
+  const siteRows = Array.from(sites.values())
+    .sort((a, b) => (b.count - a.count) || (b.lastAt - a.lastAt))
+    .slice(0, 10);
+
+  const parts = [];
+  if (considered === 0) {
+    parts.push(denied > 0
+      ? `没有执行成功的动作；另外有 ${denied} 次被拦下或被拒（被拦下的不算"做过的事"）。`
+      : '这段时间里 agent 没有执行过动作。');
+    if (outOfRange > 0) parts.push(`另有 ${outOfRange} 条记录在所选时间之外。`);
+  } else {
+    parts.push(`最近 ${considered} 次动作，涉及 ${typeRows.length} 类`);
+    if (denied > 0) parts.push(`另有 ${denied} 次被拦下或被拒`);
+    if (outOfRange > 0) parts.push(`另有 ${outOfRange} 条在所选时间之外`);
+  }
+
+  return {
+    ok: true,
+    total: considered,
+    denied,
+    outOfRange,
+    types: typeRows,
+    sites: siteRows,
+    empty: considered === 0,
+    note: `${parts.join('；')}。`,
+  };
+}
+
 function buildSettingAuditCsv(rows, options) {
   const list = Array.isArray(rows) ? rows : [];
   const now = options && Number.isFinite(options.now) ? new Date(options.now) : new Date();
@@ -683,10 +797,13 @@ module.exports = {
   SETTING_RATE_LIMIT,
   SETTING_RATE_WINDOW_MS,
   SETTING_SCHEMA,
+  ACTION_LABELS,
+  aggregateAgentActions,
   aggregateSettingChanges,
   buildSettingAuditCsv,
   describeSettingValue,
   describeSettingsSchema,
+  labelOfAction,
   planPresetChange,
   planSettingChange,
   planSettingUndo,
