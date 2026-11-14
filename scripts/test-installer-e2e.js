@@ -7,7 +7,9 @@
  *   1) 静默全新安装：/S /D=<临时目录>，断言程序文件、vendor 内核、完整性清单与安装报告（模式=全新安装）；
  *   2) 覆盖安装（修复）：写用户数据标记后同包再装，断言报告模式=修复安装、数据保留、--verify-integrity 通过；
  *   3) 静默卸载保留数据："Uninstall Nyx.exe" /S，断言安装目录消失、用户数据仍在；
- *   4) 重装后完全卸载：/S /DELETEAPPDATA，断言安装目录与 %APPDATA%\Nyx 都被删除。
+ *   4) 重装后完全卸载：/S /DELETEAPPDATA，断言安装目录与 %APPDATA%\Nyx 都被删除；
+ *   5) 给了旧安装包（--from，或 --cross 时从 dist\legacy 自动发现）再加：
+ *      降级安装 / 升级安装 / 跨两版升级（含旧格式用户数据与两次真实启动）。
  *
  * 安全前提（本机是开发者机器，测试绝不能动真实用户数据）：
  *   - 测试前把 %APPDATA%\Nyx、%LOCALAPPDATA%\Nyx 整体改名迁移到 %TEMP%\e2e-archive-<pid> 下，
@@ -18,6 +20,7 @@
  * 用法：
  *   node scripts/test-installer-e2e.js --installer=<安装包绝对路径>
  *   node scripts/test-installer-e2e.js                 # 自动取 dist 下最新的 Nyx-Setup-*.exe
+ *   node scripts/test-installer-e2e.js --cross         # 跨版本：dist\legacy 里最老的包 → 最新包
  *
  * 退出码：0 = 全部断言通过；1 = 有失败项（失败后不再执行后续步骤）。
  */
@@ -311,6 +314,33 @@ function findLatestInstaller() {
   return candidates[0] || null;
 }
 
+/**
+ * 归档的旧安装包目录（dist\legacy）。放进这里的包是"跨版本升级的基线"，
+ * 不参与 npm run dist，也不会被 findLatestInstaller 选中当被测包。
+ */
+const LEGACY_DIR = path.join(ROOT, 'dist', 'legacy');
+
+/** 列出 dist\legacy 里的安装包，按版本号从老到新 */
+function listLegacyInstallers() {
+  let names = [];
+  try {
+    names = fs.readdirSync(LEGACY_DIR);
+  } catch {
+    return [];
+  }
+  return names
+    .filter((name) => /^Nyx-Setup-.*\.exe$/i.test(name))
+    .map((name) => path.join(LEGACY_DIR, name))
+    .filter((file) => {
+      try {
+        return fs.statSync(file).isFile() && Boolean(versionFromName(file));
+      } catch {
+        return false;
+      }
+    })
+    .sort((a, b) => compareVersion(versionFromName(a), versionFromName(b)));
+}
+
 function parseArgs() {
   const args = process.argv.slice(2);
   let value = null;
@@ -340,6 +370,18 @@ function parseArgs() {
     }
   }
   if (from) olderInstallerPath = path.resolve(from.replace(/^"|"$/g, ''));
+  // 跨版本模式没给 --from 时，自动从 dist\legacy 里挑最老的归档包当基线：
+  // 让「1.16.0 → 当前版本」这条最远的升级路径随时可复跑，而不是每次都要人肉找包。
+  if (crossMode && !olderInstallerPath) {
+    const legacy = listLegacyInstallers();
+    if (legacy.length) {
+      olderInstallerPath = legacy[0];
+      console.log(`[信息] 未指定 --from，自动选用 dist\\legacy 里最老的归档包：${path.basename(olderInstallerPath)}（共 ${legacy.length} 个归档：${legacy.map((file) => versionFromName(file)).join(' / ')}）`);
+    } else {
+      console.log('[信息] 没给 --from，dist\\legacy 里也没有归档安装包——本次只测全新安装 / 修复安装 / 两种卸载。');
+      console.log('       要把跨版本升级也测掉：把旧安装包放进 dist\\legacy\\ 再重跑，或显式给 --from=<旧版安装包>。');
+    }
+  }
   if (value) {
     installerPath = path.resolve(value.replace(/^"|"$/g, ''));
     return;
@@ -420,6 +462,17 @@ function stageOlderInstaller(round) {
 function versionFromName(file) {
   const match = /Nyx-Setup-(\d+\.\d+\.\d+)\.exe$/i.exec(path.basename(file || ''));
   return match ? match[1] : '';
+}
+
+/** 比较两个 x.y.z 版本号：返回负数表示 a 更老（只在这里用，所以不引 make-release 的实现）。 */
+function compareVersion(a, b) {
+  const left = String(a || '0').split('.').map((part) => Number(part) || 0);
+  const right = String(b || '0').split('.').map((part) => Number(part) || 0);
+  for (let i = 0; i < 3; i += 1) {
+    const diff = (left[i] || 0) - (right[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
 }
 
 /** 读 exe 的 FileVersion（产品版本号写在这里，升级/降级后必须对得上）。 */
@@ -1147,6 +1200,8 @@ function printUsage() {
   console.log('  node scripts/test-installer-e2e.js --installer=dist\\Nyx-Setup-1.17.2.exe --from=<1.16.0 安装包> --cross');
   console.log('       --cross：先全新装旧版、写入旧格式用户数据、起一次程序，再直接升到新版（跳过中间版本），');
   console.log('       验证「跨两版升级」既不丢数据、新版也能带着旧数据正常启动。');
+  console.log('       --cross 不给 --from 时，自动选用 dist\\legacy 里最老的归档安装包当基线（找不到会明说）；');
+  console.log('       归档目录只放"升级基线"，不会被当成被测的最新包。');
   console.log('  node scripts/test-installer-e2e.js --preflight-only   # 只跑环境检查，不做任何改动');
   console.log('');
   console.log('说明：会静默安装到 %TEMP%\\nyx-e2e-<pid>\\install，测试前自动备份并迁移 %APPDATA%\\Nyx、');

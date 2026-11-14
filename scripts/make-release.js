@@ -596,14 +596,17 @@ function listArchivedReleases(archiveRoot) {
 function findOlderInstaller(setupPath, version) {
   const candidates = [];
   const distDir = path.dirname(setupPath);
-  try {
-    for (const name of fs.readdirSync(distDir)) {
-      const match = /^Nyx-Setup-(\d+\.\d+\.\d+)\.exe$/i.exec(name);
-      if (!match || match[1] === version) continue;
-      candidates.push({ version: match[1], file: path.join(distDir, name) });
+  const scanDirs = [distDir, path.join(distDir, 'legacy')];
+  for (const dir of scanDirs) {
+    try {
+      for (const name of fs.readdirSync(dir)) {
+        const match = /^Nyx-Setup-(\d+\.\d+\.\d+)\.exe$/i.exec(name);
+        if (!match || match[1] === version) continue;
+        candidates.push({ version: match[1], file: path.join(dir, name) });
+      }
+    } catch {
+      /* dist 或 dist\legacy 读不到就跳过（归档目录可能还没建） */
     }
-  } catch {
-    /* dist 读不到就只看留档 */
   }
   const archiveRoot = path.resolve(readArg('archive', DEFAULT_ARCHIVE_ROOT));
   try {
