@@ -17,7 +17,7 @@ const RUNTIME_BASELINE = {
   electron: '43.7.4',
   chromium: '150.0.7871.250',
   node: '24.21.0',
-  reviewedAt: '2026-11-12',
+  reviewedAt: '2026-11-14',
 };
 
 /**
