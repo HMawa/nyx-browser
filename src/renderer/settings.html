@@ -897,6 +897,58 @@
 
             <section class="info-card">
               <div class="info-head">
+                <h3>接入模式</h3>
+                <span class="badge" id="agent-mode-badge">—</span>
+              </div>
+              <div class="info-body">
+                <p class="hint" id="agent-mode-hint">
+                  内置模式里 agent 只能走 Nyx 自己的接口，每个动作都过统一通道；外部接入会让别的程序直接驱动浏览器，
+                  那边做什么 Nyx 看不见，审计只剩「经过浏览器的部分」。
+                </p>
+                <div class="radio-row" id="agent-mode-row" role="radiogroup" aria-label="agent 接入模式">
+                  <label class="radio-item">
+                    <input type="radio" name="agent-mode" id="agent-mode-builtin" value="builtin" />
+                    <span>
+                      <strong>内置（推荐）</strong>
+                      <em>进程内 MCP 接口，权限判定、人工确认、留痕、急停全都生效。</em>
+                    </span>
+                  </label>
+                  <label class="radio-item">
+                    <input type="radio" name="agent-mode" id="agent-mode-external" value="external" />
+                    <span>
+                      <strong>外部接入（CDP）</strong>
+                      <em>外部程序直接连浏览器调试端口，审计不完整，切换后需要重启。</em>
+                    </span>
+                  </label>
+                </div>
+                <div class="gpu-facts">
+                  <p class="hint" id="agent-mode-facts"></p>
+                  <p class="hint" id="agent-mode-banner" hidden></p>
+                </div>
+                <div id="agent-mode-step2" hidden>
+                  <p class="hint" id="agent-mode-step2-title">
+                    再确认一次：外部接入会让审计变得不完整
+                  </p>
+                  <ul class="link-lost" id="agent-mode-risks"></ul>
+                  <div class="ack-row">
+                    <label>
+                      <input type="checkbox" id="agent-mode-ack" />
+                      我已了解外部接入会让审计不完整，后果由我自己承担
+                    </label>
+                  </div>
+                  <p class="hint">这不是可以关掉的提示：把审计变薄这件事，不允许一键完成。</p>
+                </div>
+                <div class="sec-actions">
+                  <button type="button" class="btn btn-primary" id="btn-agent-mode-apply">切换接入模式</button>
+                  <button type="button" class="btn" id="btn-agent-mode-cancel" hidden>取消</button>
+                  <button type="button" class="btn" id="btn-agent-mode-restart" hidden>立即重启</button>
+                </div>
+                <p class="hint" id="agent-mode-status" role="status" aria-live="polite"></p>
+              </div>
+            </section>
+
+            <section class="info-card">
+              <div class="info-head">
                 <h3>紧急停止</h3>
                 <span class="badge" id="agent-badge">—</span>
               </div>

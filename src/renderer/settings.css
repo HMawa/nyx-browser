@@ -626,6 +626,28 @@
   word-break: break-all;
 }
 
+/* 接入模式（清单 A）：两步确认 + 常驻横幅 */
+#agent-mode-step2 {
+  margin: 12px 0 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+#agent-mode-step2-title {
+  color: var(--danger-soft);
+  font-weight: 600;
+}
+
+#agent-mode-banner:not([hidden]) {
+  color: var(--danger-soft);
+}
+
+#agent-mode-badge.badge.bad {
+  color: var(--danger-soft);
+}
+
 /* 站点三层授权（清单 E） */
 .agent-site-block {
   margin: 10px 0 14px;

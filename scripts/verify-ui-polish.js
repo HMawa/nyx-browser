@@ -2720,6 +2720,53 @@ async function main() {
       JSON.stringify(sitesFlow.bad),
     );
 
+    /* ---------- agent 接入模式（清单 A） ---------- */
+    // 两步确认不能靠"点一下按钮"验证，得看第二道门是不是真的拦得住：
+    // 只走第一步必须被拒（NEED_CONFIRM）、第二步没勾风险必须被拒（NEED_ACK）。
+    const modeFlow = await shell.eval(`(async () => {
+      const read = () => window.nyx.agentMode();
+      const before = await read();
+      const step1 = await window.nyx.agentModeSet({ target: 'external', stage: 1 });
+      const afterStep1 = await read();
+      const noAck = await window.nyx.agentModeSet({ target: 'external', stage: 2 });
+      const afterNoAck = await read();
+      const done = await window.nyx.agentModeSet({ target: 'external', stage: 2, ackRisk: true });
+      const afterDone = await read();
+      const back = await window.nyx.agentModeSet({ target: 'builtin', stage: 2, ackRisk: true });
+      const afterBack = await read();
+      return {
+        before: { mode: before.mode, auditComplete: before.auditComplete, restartRequired: before.restartRequired },
+        step1: { ok: step1.ok, code: step1.code, mode: afterStep1.mode },
+        noAck: { ok: noAck.ok, code: noAck.code, mode: afterNoAck.mode },
+        done: { ok: done.ok, mode: afterDone.mode, bootMode: afterDone.bootMode, restartRequired: afterDone.restartRequired, banner: afterDone.banner, risks: (afterDone.risks || []).length },
+        back: { ok: back.ok, mode: afterBack.mode, bootMode: afterBack.bootMode },
+      };
+    })()`);
+    check(
+      '接入模式默认是内置，只走一步确认切不过去，第二步没勾风险也切不过去（A）',
+      modeFlow.before.mode === 'builtin'
+        && modeFlow.before.auditComplete === true
+        && modeFlow.step1.ok === false
+        && modeFlow.step1.code === 'NEED_CONFIRM'
+        && modeFlow.step1.mode === 'builtin'
+        && modeFlow.noAck.ok === false
+        && modeFlow.noAck.code === 'NEED_ACK'
+        && modeFlow.noAck.mode === 'builtin',
+      JSON.stringify(modeFlow.step1) + JSON.stringify(modeFlow.noAck),
+    );
+    check(
+      '两步都确认后才记下外部模式，并如实说"要重启才生效"且常驻审计不完整横幅（A）',
+      modeFlow.done.ok === true
+        && modeFlow.done.mode === 'external'
+        && modeFlow.done.bootMode === 'builtin'
+        && modeFlow.done.restartRequired === true
+        && /审计不完整/.test(modeFlow.done.banner)
+        && modeFlow.done.risks >= 4
+        && modeFlow.back.ok === true
+        && modeFlow.back.mode === 'builtin',
+      JSON.stringify(modeFlow.done) + JSON.stringify(modeFlow.back),
+    );
+
     /* ---------- 运行时无脚本异常 ---------- */
     const shellErrors = shell.exceptions();
     /* ---------- B3（设置页侧）：卡片 / 未勾确认被拦 / 勾选后可改可回 ---------- */

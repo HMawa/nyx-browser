@@ -3277,12 +3277,160 @@ async function loadFootprint() {
     }
   }
 
+  // ── 接入模式（清单 A）─────────────────────────────────────────────
+  // 两步确认：第一步只把"要切到哪个模式"记在内存里，第二步给风险清单 + 必须勾确认，
+  // 而且第二次的提示不允许出现"不再提示"（清单 §3 的不可回退约束）。
+  let agentModeWired = false;
+  let agentModeState = null;
+  let agentModePending = '';
+
+  function renderAgentMode(payload) {
+    agentModeState = payload || null;
+    const info = payload || {};
+    const badge = byId('agent-mode-badge');
+    const facts = byId('agent-mode-facts');
+    const banner = byId('agent-mode-banner');
+    const step2 = byId('agent-mode-step2');
+    const risks = byId('agent-mode-risks');
+    const ack = byId('agent-mode-ack');
+    const cancel = byId('btn-agent-mode-cancel');
+    const restart = byId('btn-agent-mode-restart');
+    const applyBtn = byId('btn-agent-mode-apply');
+    const builtin = byId('agent-mode-builtin');
+    const external = byId('agent-mode-external');
+
+    if (badge) {
+      const externalOn = info.mode === 'external';
+      badge.textContent = info.label || (externalOn ? '外部接入（CDP）' : '内置（推荐）');
+      badge.className = externalOn ? 'badge bad' : 'badge ok';
+    }
+    if (builtin) builtin.checked = info.mode !== 'external';
+    if (external) external.checked = info.mode === 'external';
+
+    if (facts) {
+      const lines = [info.summary || ''];
+      lines.push(
+        info.auditComplete === false
+          ? '审计完整度：不完整（只看得到经过浏览器的部分）'
+          : '审计完整度：完整（每个动作都经过统一通道）',
+      );
+      if (info.mode === 'external') {
+        lines.push(`外部端点：${info.externalEndpoint || '（端口未知）'}`);
+      }
+      if (info.restartRequired) {
+        lines.push(`已记下「${info.label || info.mode}」，但本次启动仍按「${info.bootLabel || info.bootMode}」运行——重启后才生效。`);
+      } else {
+        lines.push('当前启动就是这个模式，不需要重启。');
+      }
+      facts.textContent = lines.filter(Boolean).join('　');
+    }
+
+    if (banner) {
+      const show = info.auditComplete === false;
+      banner.hidden = !show;
+      banner.textContent = show ? info.banner || '' : '';
+    }
+
+    if (step2) step2.hidden = !agentModePending;
+    if (agentModePending && risks) {
+      risks.textContent = '';
+      (info.risks || []).forEach((text) => {
+        const li = document.createElement('li');
+        li.textContent = text;
+        risks.appendChild(li);
+      });
+    }
+    if (ack) ack.checked = false;
+    if (cancel) cancel.hidden = !agentModePending;
+    if (restart) restart.hidden = info.restartRequired !== true;
+    if (applyBtn) applyBtn.textContent = agentModePending ? '确认切换（第二步）' : '切换接入模式';
+  }
+
+  async function loadAgentMode() {
+    const status = byId('agent-mode-status');
+    if (!window.nyx || typeof window.nyx.agentMode !== 'function') {
+      if (status) status.textContent = '当前内核不支持读取接入模式。';
+      return null;
+    }
+    try {
+      const res = await window.nyx.agentMode();
+      renderAgentMode(res);
+      if (status) status.textContent = '';
+      return res;
+    } catch (err) {
+      if (status) status.textContent = `读取接入模式失败：${err && err.message ? err.message : err}`;
+      return null;
+    }
+  }
+
+  async function applyAgentMode() {
+    const status = byId('agent-mode-status');
+    const ack = byId('agent-mode-ack');
+    const pending = agentModePending || (agentModeState && agentModeState.mode === 'external' ? 'builtin' : 'external');
+    if (!agentModePending) {
+      // 第一步：只问一次，把目标模式记下来，等第二步确认
+      agentModePending = pending;
+      renderAgentMode(agentModeState || {});
+      if (status) status.textContent = '再点一次「确认切换」才会真正改，中间必须勾选上面的风险确认。';
+      return;
+    }
+    if (!ack || ack.checked !== true) {
+      if (status) status.textContent = '请先勾选「我已了解外部接入会让审计不完整」。';
+      return;
+    }
+    if (!window.nyx || typeof window.nyx.agentModeSet !== 'function') {
+      if (status) status.textContent = '当前内核不支持切换接入模式。';
+      return;
+    }
+    const btn = byId('btn-agent-mode-apply');
+    if (btn) btn.disabled = true;
+    try {
+      const res = await window.nyx.agentModeSet({ target: agentModePending, stage: 2, ackRisk: true });
+      agentModePending = '';
+      renderAgentMode(res);
+      if (status) {
+        status.textContent = res && res.ok === false
+          ? `没有改成：${(res && res.error) || '未知原因'}`
+          : `已记下「${(res && res.label) || ''}」，重启 Nyx 之后生效。`;
+        status.className = res && res.ok === false ? 'hint is-warn' : 'hint is-ok';
+      }
+    } catch (err) {
+      if (status) status.textContent = `切换失败：${err && err.message ? err.message : err}`;
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function wireAgentMode() {
+    if (agentModeWired) return;
+    agentModeWired = true;
+    const applyBtn = byId('btn-agent-mode-apply');
+    if (applyBtn) applyBtn.addEventListener('click', () => applyAgentMode());
+    const cancel = byId('btn-agent-mode-cancel');
+    if (cancel) {
+      cancel.addEventListener('click', () => {
+        agentModePending = '';
+        renderAgentMode(agentModeState || {});
+        const status = byId('agent-mode-status');
+        if (status) status.textContent = '已取消，没有改任何设置。';
+      });
+    }
+    const restart = byId('btn-agent-mode-restart');
+    if (restart) {
+      restart.addEventListener('click', () => {
+        if (window.nyx && typeof window.nyx.restartApp === 'function') window.nyx.restartApp();
+      });
+    }
+  }
+
   function loadAgentSection() {
     wireAgentSection();
     wireAgentSites();
+    wireAgentMode();
     loadAgentStatus();
     loadAgentAudit();
     loadAgentSites();
+    loadAgentMode();
   }
 
   // 主界面加载失败页（A4）的「打开诊断」会要求设置窗口直接落到「诊断」分区

@@ -67,6 +67,15 @@ const {
   removeRule: removeSiteRule,
   sanitizePolicy: sanitizeSitePolicy,
 } = require('./core/agent-sites');
+const {
+  AGENT_DEBUG_PORT_FILE,
+  DEFAULT_AGENT_MODE,
+  agentModePayload,
+  describeAgentMode,
+  normalizeAgentMode,
+  planAgentModeSwitch,
+  readAgentModeFromPrefs,
+} = require('./core/agent-mode');
 const { getRiskLog } = require('./core/risk-guard');
 const { startHttpApi } = require('./api/http-api');
 const { createModeEventLog } = require('./core/mode-events');
@@ -268,6 +277,46 @@ for (const name of gpuSwitches(BOOT_GPU_POLICY)) {
 }
 console.log(`[Nyx] 显卡策略：${describeGpuPolicy(BOOT_GPU_POLICY).label}（开关 ${gpuSwitches(BOOT_GPU_POLICY).join(',') || '无'}）`);
 
+/**
+ * agent 接入模式（清单 A）。
+ *
+ * 为什么要在 ready 之前读：CDP 端口（外部接入）只能在启动时打开，Chromium 没有运行时开关，
+ * 所以模式和端口都必须在注册 command line switch 之前确定。UiStore 要等 ready，用不了，
+ * 这里直接同步读 <userData>/agent-mode.json；读失败/损坏一律按内置模式启动（更安全的那一侧）。
+ */
+const AGENT_MODE_FILE = 'agent-mode.json';
+const DEFAULT_AGENT_DEBUG_PORT = 9333;
+
+function readBootAgentMode() {
+  const fallback = { mode: DEFAULT_AGENT_MODE, debugPort: DEFAULT_AGENT_DEBUG_PORT };
+  try {
+    const file = path.join(app.getPath('userData'), AGENT_MODE_FILE);
+    if (!fs.existsSync(file)) return fallback;
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const mode = readAgentModeFromPrefs(raw);
+    const port = Number(raw && raw.debugPort);
+    return {
+      mode,
+      debugPort: Number.isInteger(port) && port > 1024 && port < 65536 ? port : DEFAULT_AGENT_DEBUG_PORT,
+    };
+  } catch (err) {
+    console.warn('[Nyx] agent 接入模式读取失败，按内置模式启动：', err && err.message ? err.message : err);
+    return fallback;
+  }
+}
+
+const BOOT_AGENT_MODE_CONFIG = readBootAgentMode();
+const BOOT_AGENT_MODE = BOOT_AGENT_MODE_CONFIG.mode;
+if (BOOT_AGENT_MODE === 'external') {
+  // 只有用户显式选择外部接入时才打开 CDP；内置模式下这个端口根本不存在。
+  app.commandLine.appendSwitch('remote-debugging-port', String(BOOT_AGENT_MODE_CONFIG.debugPort));
+  console.warn(
+    `[Nyx] agent 接入模式：外部接入（CDP 端口 ${BOOT_AGENT_MODE_CONFIG.debugPort}）——审计不完整，界面会常驻提示`,
+  );
+} else {
+  console.log('[Nyx] agent 接入模式：内置（动作统一走 agent-dispatch，审计完整）');
+}
+
 // 启用 WebNN（Chromium 131+ 可用，需 secure context；file:// 由 unsafely 开关补齐）
 app.commandLine.appendSwitch('enable-features', 'WebMachineLearningNeuralNetwork');
 app.commandLine.appendSwitch('unsafely-treat-insecure-origin-as-secure', 'file://');
@@ -314,8 +363,12 @@ const runtime = {
   /** 停止原因与时间，给界面与诊断用 */
   agentStopReason: '',
   agentStopAt: 0,
-  /** agent 接入模式（清单 A）：builtin 进程内 / external 外部 CDP；默认内置 */
-  agentMode: 'builtin',
+  /** agent 接入模式（清单 A）：builtin 进程内 / external 外部 CDP；启动时读落盘值 */
+  agentMode: BOOT_AGENT_MODE,
+  /** 启动时实际生效的模式（改完没重启时与 agentMode 不一致，界面要如实说） */
+  bootAgentMode: BOOT_AGENT_MODE,
+  /** 外部接入的 CDP 端口（内置模式下仅作展示，不监听） */
+  agentDebugPort: BOOT_AGENT_MODE_CONFIG.debugPort,
   /** 下载中心窗口（独立 BrowserWindow） */
   downloadsWindow: null,
   /**
@@ -3379,6 +3432,7 @@ function registerIpc() {
   // agent 审计面与急停（D）
   registerAgentAuditIpc();
   registerAgentSitesIpc();
+  registerAgentModeIpc();
 
   registerUpdateIpc();
 
@@ -7341,6 +7395,8 @@ function agentStatusPayload() {
     stopAt: runtime.agentStopAt || 0,
     stopShortcut: AGENT_STOP_SHORTCUT,
     mode: runtime.agentMode || 'builtin',
+    // 内部接入模式的完整状态（清单 A）：审计是否完整、要不要重启、外部模式的端点
+    modeInfo: agentModeStatus(),
     channel: inner || null,
     audit: runtime.agentAudit ? runtime.agentAudit.stats() : null,
   };
@@ -7554,9 +7610,90 @@ function registerAgentSitesIpc() {
   });
 }
 
+/**
+ * agent 接入模式的落盘与状态（清单 A）。
+ *
+ * 模式只在启动时决定（CDP 端口没有运行时开关），所以这里写盘只是"下次启动用哪个"，
+ * 当前进程的 runtime.agentMode 不变——界面必须如实显示"已记下，重启后生效"。
+ */
+function writeAgentMode(mode) {
+  const next = normalizeAgentMode(mode);
+  const body = { mode: next, debugPort: runtime.agentDebugPort, updatedAt: new Date().toISOString() };
+  try {
+    fs.writeFileSync(userDataFile(AGENT_MODE_FILE), JSON.stringify(body, null, 2), 'utf8');
+    runtime.agentMode = next;
+    return { ok: true, mode: next };
+  } catch (err) {
+    diagnostics.error('AGENT_MODE_SAVE_FAILED', 'agent 接入模式没能保存到磁盘', {
+      mode: next,
+      error: err && err.message,
+    });
+    return {
+      ok: false,
+      mode: runtime.agentMode,
+      error: `没能写入 ${AGENT_MODE_FILE}：${err && err.message ? err.message : err}`,
+    };
+  }
+}
+
+function agentModeStatus() {
+  return agentModePayload({
+    mode: runtime.agentMode,
+    bootMode: runtime.bootAgentMode,
+    debugPort: runtime.agentDebugPort,
+  });
+}
+
+/**
+ * 接入模式的 IPC（清单 A）：切换要两次确认，第二次还要显式勾风险。
+ * 这里不接受"跳过确认"的捷径——清单 §3 把"不可关闭的强提醒"列为不可回退约束。
+ */
+function registerAgentModeIpc() {
+  ipcMain.handle('nyx:agent:mode', () => agentModeStatus());
+
+  ipcMain.handle('nyx:agent:mode-set', (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    const plan = planAgentModeSwitch({
+      current: runtime.agentMode,
+      target: input.target,
+      stage: input.stage,
+      ackRisk: input.ackRisk === true,
+    });
+    if (!plan.ok) {
+      // 需要确认不是错误状态，但对界面来说"没改成"，要说清还差哪一步
+      return { ...agentModeStatus(), ...plan, ok: false };
+    }
+    const saved = writeAgentMode(plan.target);
+    const status = agentModeStatus();
+    if (!saved.ok) return { ...status, ok: false, error: saved.error };
+    diagnostics.warn('AGENT_MODE_CHANGED', `agent 接入模式改为「${describeAgentMode(plan.target).label}」`, {
+      from: plan.current,
+      to: plan.target,
+      needsRestart: plan.needsRestart === true,
+      debugPort: runtime.agentDebugPort,
+    });
+    if (plan.target === 'external') {
+      notifyNotice({
+        level: 'warn',
+        code: 'AGENT_MODE_EXTERNAL',
+        title: '已改为外部接入模式（需要重启）',
+        message:
+          '重启后 Nyx 会打开 CDP 端口，外部程序可以直接驱动浏览器；审计只能覆盖经过浏览器的部分，界面上会常驻「审计不完整」标识。',
+      });
+    } else {
+      notifyNotice({
+        level: 'info',
+        code: 'AGENT_MODE_BUILTIN',
+        title: '已改回内置模式（需要重启）',
+        message: '重启后 agent 的每个动作都会重新经过统一通道，审计恢复完整。',
+      });
+    }
+    return { ...status, ok: true, ...plan, applied: false, message: plan.message };
+  });
+}
+
 async function startLocalApi() {
   runtime.apiToken = ensureApiToken();
-
   // 站点授权（清单 E）：名单读盘失败时按空名单启动（即"每个站点都要问一次"），
   // 绝不因为文件坏了就变成"全部放行"。
   runtime.agentSites = readAgentSites();

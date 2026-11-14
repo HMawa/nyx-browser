@@ -294,6 +294,35 @@ body {
   background: var(--danger);
 }
 
+/* agent 接入模式（A）：外部接入时这条标识常驻，红底红字，不能用灰色小字糊过去 */
+.agent-mode-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: var(--r-sm);
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger-soft);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.agent-mode-flag .agent-mode-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--danger);
+  flex: none;
+}
+
+.agent-mode-flag:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+  box-shadow: var(--ring);
+}
+
 .icon-btn.agent-stop:focus-visible {
   outline: 2px solid var(--accent-soft);
   outline-offset: 2px;

@@ -24,6 +24,9 @@ const els = {
   agentStop: document.getElementById('btn-agent-stop'),
   agentStopDot: document.getElementById('agent-stop-dot'),
   agentStopText: document.getElementById('agent-stop-text'),
+  // agent 接入模式（A）：外部接入时这条标识常驻
+  agentModeFlag: document.getElementById('agent-mode-flag'),
+  agentModeText: document.getElementById('agent-mode-text'),
   linkBadge: document.getElementById('link-badge'),
   modeGroup: document.getElementById('mode-group'),
   // 加载失败页（A4）
@@ -875,6 +878,29 @@ function applyAgentStatus(payload) {
   if (audit && typeof audit.kept === 'number' && els.agentStop.dataset) {
     els.agentStop.dataset.auditKept = String(audit.kept);
   }
+  applyAgentModeFlag(payload && payload.modeInfo);
+}
+
+/**
+ * 接入模式的常驻标识（清单 A）。
+ *
+ * 外部接入（CDP）时审计只看得到"经过浏览器"的部分，这件事必须一直摆在窗口上，
+ * 而不是切换时弹一次提示就完了——用户随时能看见"现在是哪种模式、审计缺了多少"。
+ */
+function applyAgentModeFlag(modeInfo) {
+  if (!els.agentModeFlag) return;
+  const info = modeInfo || null;
+  const incomplete = Boolean(info) && info.auditComplete === false;
+  els.agentModeFlag.hidden = !incomplete;
+  if (!incomplete) {
+    els.agentModeFlag.removeAttribute('title');
+    return;
+  }
+  if (els.agentModeText) els.agentModeText.textContent = info.banner || '审计不完整';
+  const pending = info.restartRequired === true;
+  els.agentModeFlag.title = pending
+    ? '当前是外部接入模式（重启后才完全生效）：审计只覆盖经过浏览器的部分，站点授权与动作级确认管不到 CDP 的内部调用。'
+    : '当前是外部接入模式：审计只覆盖经过浏览器的部分，站点授权与动作级确认管不到 CDP 的内部调用。';
 }
 
 async function toggleAgentStop() {

@@ -152,6 +152,9 @@ contextBridge.exposeInMainWorld('nyx', {
 
   /** 站点三层授权（E）：改全局开关、加/删白名单与屏蔽名单、信任/清空会话 */
   agentSitesSet: (payload) => ipcRenderer.invoke('nyx:agent:sites-set', payload || {}),
+  // agent 接入模式（清单 A）：切换要两次确认，第二次还得勾风险；改完要重启才生效。
+  agentMode: () => ipcRenderer.invoke('nyx:agent:mode'),
+  agentModeSet: (payload) => ipcRenderer.invoke('nyx:agent:mode-set', payload || {}),
 
 
   /** 权限决策轨迹（默认最近 50 条） */

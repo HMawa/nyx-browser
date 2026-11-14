@@ -57,6 +57,12 @@
           <span class="sr-only" id="dl-badge-label"></span>
         </button>
 
+        <!-- agent 接入模式（A）：外部接入时这条标识必须常驻，不能只在切换时提示一次 -->
+        <div class="agent-mode-flag" id="agent-mode-flag" role="status" aria-live="polite" hidden>
+          <span class="agent-mode-dot" aria-hidden="true"></span>
+          <span class="agent-mode-text" id="agent-mode-text">审计不完整</span>
+        </div>
+
         <!-- agent 急停（D）：常驻按钮，agent 运行时也必须一眼能找到，不藏在菜单里 -->
         <button class="icon-btn agent-stop" id="btn-agent-stop" title="停止 agent 操作">
           <span class="agent-stop-dot" id="agent-stop-dot" aria-hidden="true"></span>
