@@ -6,9 +6,10 @@
  * 本地 HTTP API 与 MCP 服务都复用这里的 run()，保证两套入口能力完全一致。
  * 支持的能力：
  *   navigate      导航到指定 URL
- *   screenshot    截取当前标签可视区域（返回 PNG base64）
- *   click         按 CSS 选择器点击元素
- *   type          向输入框/可编辑区域输入文字（可回车提交）
+ *   readPage      结构化读取页面（url/title/正文摘要/可交互元素清单 + 稳定 id）
+ *   screenshot    截取当前标签可视区域（返回 PNG base64；只做人工辅助，不是主通道）
+ *   click         点击元素（按稳定 elementId，或退回 CSS 选择器）
+ *   type          向输入框/可编辑区域输入文字（按稳定 elementId，或退回 CSS 选择器）
  *   executeJS     在页面上下文执行 JavaScript
  *   extractText   提取页面正文纯文本
  *   state         读取浏览器当前状态（模式 / 标签列表 / 上限）
@@ -21,8 +22,17 @@
  * 本地接口或 MCP，否则通道就被绕过了。
  */
 
+const {
+  buildElementActionScript,
+  buildReadPageScript,
+  buildTypeByIdScript,
+  elementNotFound,
+  summarizeReadPage,
+} = require('./page-reader');
+
 const ACTION_TYPES = [
   'navigate',
+  'readPage',
   'screenshot',
   'click',
   'type',
@@ -138,6 +148,9 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog }) 
       action: type,
       data: payload.ok === false ? undefined : payload,
       error: payload.ok === false ? payload.error : undefined,
+      // 执行失败时把业务错误码透出去（如 ELEMENT_NOT_FOUND / ELEMENT_DISABLED），
+      // 否则通道只能一律记 ACTION_FAILED，agent 分不清"元素没了"和"执行炸了"。
+      code: payload.ok === false ? payload.code || '' : '',
       elapsedMs: Date.now() - started,
     });
 
@@ -174,6 +187,16 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog }) 
           return wrap(result.ok ? { ok: true, url: result.url } : { ok: false, error: result.error });
         }
 
+        case 'readPage': {
+          if (aborted()) return interrupted();
+          const raw = await wc.executeJavaScript(
+            buildReadPageScript({ maxText: params.maxText, maxElements: params.maxElements }),
+            true,
+          );
+          if (aborted()) return interrupted();
+          return wrap(summarizeReadPage(raw));
+        }
+
         case 'screenshot': {
           const image = await wc.capturePage();
           const size = image.getSize();
@@ -187,15 +210,36 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog }) 
         }
 
         case 'click': {
-          if (!params.selector) return { ok: false, action: type, error: '缺少参数 selector', elapsedMs: Date.now() - started };
+          // 优先按稳定 id 点（清单 B：不许靠坐标猜）；没有 id 才退回 CSS 选择器
+          if (params.elementId) {
+            if (aborted()) return interrupted();
+            const byId = await wc.executeJavaScript(buildElementActionScript(params.elementId, 'click'), true);
+            if (aborted()) return interrupted();
+            if (byId && byId.ok === false) return wrap(elementNotFound(params.elementId));
+            return wrap(byId);
+          }
+          if (!params.selector) return { ok: false, action: type, error: '缺少参数 selector 或 elementId', elapsedMs: Date.now() - started };
           if (aborted()) return interrupted();
           const result = await wc.executeJavaScript(buildClickScript(params.selector, params.index || 0), true);
           return wrap(result);
         }
 
         case 'type': {
-          if (!params.selector) return { ok: false, action: type, error: '缺少参数 selector', elapsedMs: Date.now() - started };
           if (typeof params.text !== 'string') return { ok: false, action: type, error: '缺少参数 text', elapsedMs: Date.now() - started };
+          if (params.elementId) {
+            if (aborted()) return interrupted();
+            const byId = await wc.executeJavaScript(
+              buildTypeByIdScript(params.elementId, params.text, params.clear !== false, !!params.submit),
+              true,
+            );
+            if (aborted()) return interrupted();
+            if (byId && byId.ok === false) {
+              if (byId.code === 'ELEMENT_DISABLED') return wrap(byId);
+              return wrap(elementNotFound(params.elementId));
+            }
+            return wrap(byId);
+          }
+          if (!params.selector) return { ok: false, action: type, error: '缺少参数 selector 或 elementId', elapsedMs: Date.now() - started };
           if (aborted()) return interrupted();
           const script = buildTypeScript(params.selector, params.text, params.clear !== false, !!params.submit);
           const result = await wc.executeJavaScript(script, true);

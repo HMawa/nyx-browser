@@ -20,6 +20,7 @@
 
 const DISPATCH_TYPES = [
   'navigate',
+  'readPage',
   'screenshot',
   'click',
   'type',
@@ -133,15 +134,22 @@ function redactParams(type, params) {
       return { url: redactUrl(source.url) };
     case 'click':
       return {
+        elementId: typeof source.elementId === 'string' ? source.elementId.slice(0, 40) : undefined,
         selector: typeof source.selector === 'string' ? source.selector.slice(0, 200) : undefined,
         index: Number.isFinite(source.index) ? source.index : 0,
       };
     case 'type':
       return {
+        elementId: typeof source.elementId === 'string' ? source.elementId.slice(0, 40) : undefined,
         selector: typeof source.selector === 'string' ? source.selector.slice(0, 200) : undefined,
         text: redactText(source.text),
         clear: source.clear !== false,
         submit: source.submit === true,
+      };
+    case 'readPage':
+      return {
+        maxText: Number.isFinite(source.maxText) ? source.maxText : 0,
+        maxElements: Number.isFinite(source.maxElements) ? source.maxElements : 0,
       };
     case 'executeJS':
       return {
@@ -170,9 +178,10 @@ function redactParams(type, params) {
   }
 }
 
-/** 留痕里“目标”一栏：元素用选择器，其它用网址 */
+/** 留痕里“目标”一栏：稳定元素 id 优先，其次选择器，最后网址 */
 function describeTarget(type, params) {
   const source = params && typeof params === 'object' ? params : {};
+  if (typeof source.elementId === 'string' && source.elementId) return source.elementId.slice(0, 40);
   if (typeof source.selector === 'string' && source.selector) return source.selector.slice(0, 200);
   if (typeof source.url === 'string' && source.url) return redactUrl(source.url);
   return type === 'state' || type === 'screenshot' || type === 'riskLog' ? '（当前标签）' : '';

@@ -134,10 +134,30 @@ async function main() {
 
   defineTool(
     server,
+    'nyx_read_page',
+    {
+      title: '读取页面结构（首选）',
+      description:
+        '把当前页面读成结构化数据，而不是截图：网址、标题、是否加载完成、视口尺寸、正文摘要，'
+        + '以及可交互元素清单（每个元素带稳定 id / 角色 / 名字 / 当前值 / 是否禁用 / 是否在视口内）。'
+        + '要点击或输入时用这些 id（nyx_click / nyx_type 的 elementId 参数）；id 在页面没变化时两次读一致，'
+        + '元素不存在会明确报 ELEMENT_NOT_FOUND，不要靠坐标猜。',
+      inputSchema: {
+        maxText: z.number().optional().describe('正文摘要最大字符数，默认 6000'),
+        maxElements: z.number().optional().describe('可交互元素最多返回多少个，默认 300'),
+      },
+    },
+    async ({ maxText, maxElements }) => (await invoke({ type: 'readPage', params: { maxText, maxElements } })()),
+  );
+
+  defineTool(
+    server,
     'nyx_screenshot',
     {
-      title: '截图',
-      description: '截取 Nyx 当前标签的可视区域，返回 PNG 图片',
+      title: '截图（仅人工辅助）',
+      description:
+        '截取 Nyx 当前标签的可视区域，返回 PNG 图片。只用于给人看或排错；'
+        + '要理解页面请用 nyx_read_page，不要靠看图猜元素位置。',
       inputSchema: {},
     },
     async () => (await invoke({ type: 'screenshot', params: {} })()),
@@ -148,13 +168,16 @@ async function main() {
     'nyx_click',
     {
       title: '点击元素',
-      description: '按 CSS 选择器点击页面元素',
+      description:
+        '优先按 nyx_read_page 返回的稳定 elementId 点击；没有 id 时才回退 CSS 选择器。'
+        + '按 id 找不到会返回 ELEMENT_NOT_FOUND，此时应重新读取页面，而不是换坐标重试。',
       inputSchema: {
-        selector: z.string().describe('CSS 选择器'),
+        elementId: z.string().optional().describe('nyx_read_page 返回的元素 id，如 e3f2a1b'),
+        selector: z.string().optional().describe('CSS 选择器（没有 elementId 时使用）'),
         index: z.number().optional().describe('多个匹配时取第几个，默认 0'),
       },
     },
-    async ({ selector, index }) => (await invoke({ type: 'click', params: { selector, index } })()),
+    async ({ elementId, selector, index }) => (await invoke({ type: 'click', params: { elementId, selector, index } })()),
   );
 
   defineTool(
@@ -163,16 +186,18 @@ async function main() {
     {
       title: '输入文字',
       description:
-        '向输入框或可编辑区域写入文字，可选回车提交。注意：每次输入都会在 Nyx 桌面端弹出人工确认，用户拒绝时文字不会写进页面。',
+        '向输入框或可编辑区域写入文字，可选回车提交。优先用 nyx_read_page 的稳定 elementId。'
+        + '注意：每次输入都会在 Nyx 桌面端弹出人工确认，用户拒绝时文字不会写进页面。',
       inputSchema: {
-        selector: z.string().describe('CSS 选择器'),
+        elementId: z.string().optional().describe('nyx_read_page 返回的输入元素 id'),
+        selector: z.string().optional().describe('CSS 选择器（没有 elementId 时使用）'),
         text: z.string().describe('要输入的文字'),
         clear: z.boolean().optional().describe('是否先清空原内容，默认 true'),
         submit: z.boolean().optional().describe('是否回车提交，默认 false'),
       },
     },
-    async ({ selector, text, clear, submit }) =>
-      (await invoke({ type: 'type', params: { selector, text, clear, submit } })()),
+    async ({ elementId, selector, text, clear, submit }) =>
+      (await invoke({ type: 'type', params: { elementId, selector, text, clear, submit } })()),
   );
 
   defineTool(

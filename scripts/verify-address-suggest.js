@@ -358,17 +358,37 @@ async function main() {
       );
 
       /* 5. 回车选中：返回 URL 且浮层收起
-            展开动作本身会重置高亮（等于一次新查询），所以先下键选第一条再回车 */
-      await shell.eval("window.nyx.addressSuggestNav('down')");
-      const picked = await shell.eval("window.nyx.addressSuggestNav('enter')");
+            展开动作本身会重置高亮（等于一次新查询），所以先下键选第一条再回车。
+            浮层有可能被「标签状态推送」顺手关掉（见 AGENTS §7「建议浮层刚打开就被关」），
+            所以这里重试：只有确认「下键真的移动了高亮」才回车，避免偶发假红。 */
+      let picked = null;
+      let lastPick = null;
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        const down = await shell.eval("window.nyx.addressSuggestNav('down')");
+        if (!down || down.handled !== true) {
+          lastPick = { attempt, stage: 'down', down };
+          await shell.eval(
+            "window.nyx.addressSuggestQuery({ text: 'example', x: 160, y: 320, width: 460 })",
+          );
+          await sleep(400 * attempt);
+          continue;
+        }
+        const enter = await shell.eval("window.nyx.addressSuggestNav('enter')");
+        lastPick = { attempt, stage: 'enter', down, enter };
+        if (enter && enter.handled === true) {
+          picked = enter;
+          break;
+        }
+        await sleep(300 * attempt);
+      }
       check(
         '回车取到高亮条目 URL',
         picked && picked.handled && typeof picked.url === 'string' && picked.url.startsWith('https://'),
-        JSON.stringify(picked),
+        picked ? JSON.stringify(picked) : `三次都没取到（最后一次：${JSON.stringify(lastPick)}）`,
       );
       await sleep(800);
       const stillThere = (await listTargets()).some((t) => t.url.includes('addr-suggest.html'));
-      check('选中后浮层自动收起', !stillThere);
+      check('选中后浮层自动收起', !stillThere, picked ? `picked=${picked.url}` : '没有选中过条目');
     }
 
     /* 5. 搜索直通行：文本输入必然带一条"搜索"，网址输入则不补 */

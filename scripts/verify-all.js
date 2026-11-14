@@ -1,11 +1,11 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把十个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把十一个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
- *  2. scripts/verify-ui-polish.js（界面体验，95 项）
+ *  2. scripts/verify-ui-polish.js（界面体验，98 项）
  *  3. scripts/verify-link-guard.js（出站链路守卫，12 项；纯 Node，不启动 Electron）
  *  4. scripts/verify-downloads.js（下载链路，16 项；纯 Node，不启动 Electron）
  *  5. scripts/verify-gpu-policy.js（图形性能策略，14 项；纯 Node，不启动 Electron）
@@ -13,7 +13,8 @@
  *  7. scripts/verify-security-switches.js（外壳防护基线，19 项；纯 Node，不启动 Electron）
  *  8. scripts/verify-screen-watch.js（录屏 / 被远控检测，14 项；纯 Node，不启动 Electron）
  *  9. scripts/verify-agent-dispatch.js（agent 统一动作通道，20 项；纯 Node，不启动 Electron）
- * 10. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
+ * 10. scripts/verify-page-reader.js（页面读取与稳定元素 id，19 项；纯 Node，不启动 Electron）
+ * 11. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -54,7 +55,7 @@ const STEPS = [
   {
     label: '界面体验回归',
     script: 'verify-ui-polish.js',
-    items: '95 项',
+    items: '98 项',
     timeoutMs: 300000,
   },
   {
@@ -97,6 +98,12 @@ const STEPS = [
     label: '动作通道回归',
     script: 'verify-agent-dispatch.js',
     items: '20 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '页面读取回归',
+    script: 'verify-page-reader.js',
+    items: '19 项',
     timeoutMs: 60000,
   },
   {

@@ -98,11 +98,11 @@ async function main() {
   await check('1. 通道名单与执行器支持的动作一一对应', () => {
     const missing = ACTION_TYPES.filter((type) => !DISPATCH_TYPES.includes(type));
     const extra = DISPATCH_TYPES.filter((type) => !ACTION_TYPES.includes(type));
-    const ok = missing.length === 0 && extra.length === 0 && DISPATCH_TYPES.length === 8;
+    const ok = missing.length === 0 && extra.length === 0 && DISPATCH_TYPES.length >= 8;
     return { ok, detail: { 通道动作: DISPATCH_TYPES.length, 执行器动作: ACTION_TYPES.length, missing, extra } };
   });
 
-  await check('2. 八类动作全部经通道执行，且每一类都留下 execute + result 两条记录', async () => {
+  await check('2. 通道里的每个动作都经通道执行，且各自留下 execute + result 两条记录', async () => {
     const { audit, runner, dispatcher } = createHarness({ confirm: async () => ({ approved: true }) });
     const executed = [];
     for (const type of DISPATCH_TYPES) {
@@ -124,10 +124,13 @@ async function main() {
       if (result.ok) executed.push(type);
     }
     const resultStages = audit.filter((entry) => entry.stage === 'result' && entry.ok === true);
+    // 不再写死动作个数：每加一类动作（例如 B 的 readPage）不该让这条断言变红，
+    // 它要守的是「通道里每一个都真的走过流程、都留下两条记录」。
+    const expected = DISPATCH_TYPES.length;
     const ok =
-      executed.length === 8 &&
-      runner.calls.length === 8 &&
-      resultStages.length === 8 &&
+      executed.length === expected &&
+      runner.calls.length === expected &&
+      resultStages.length === expected &&
       audit.every((entry) => typeof entry.id === 'string' && typeof entry.ts === 'number');
     return {
       ok,

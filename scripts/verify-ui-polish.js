@@ -1904,6 +1904,23 @@ async function main() {
         res.end(body);
         return;
       }
+      // B 用例专用：一个结构稳定的小页面，带 4 个按钮，第 3 个按钮被点后把结果写进 #b-out。
+      // 读两次的 id 必须一致、按 id 点第 3 个必须命中——这就是"不靠截图、不靠坐标"的验收。
+      if (String(req.url || '').startsWith('/b-page')) {
+        const html = '<!doctype html><meta charset="utf-8"><title>B 用例页</title>'
+          + '<main><h1>选择操作</h1><p>这段正文用来验证可读正文摘要。</p>'
+          + '<button id="b1" type="button">第一个</button>'
+          + '<button id="b2" type="button">第二个</button>'
+          + '<button id="b3" type="button">第三个</button>'
+          + '<input id="b-name" type="text" placeholder="姓名" value="张三">'
+          + '<a id="b-link" href="/b-page?next=1">下一步</a>'
+          + '<div id="b-out">未点击</div></main>'
+          + '<script>document.getElementById("b3").addEventListener("click", function () {'
+          + 'document.getElementById("b-out").textContent = "第三个被点了"; });</script>';
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(html);
+        return;
+      }
       res.writeHead(httpMode, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(
         httpMode === 200
@@ -2386,13 +2403,74 @@ async function main() {
     })();
     check(
       '本地接口的能力清单标出「哪些动作必须人工确认」（C）',
-      agentApi.actionCount === 8 && agentApi.typeNeedsConfirm === true && agentApi.downloadRule === true && agentApi.channel === 'agent-dispatch',
+      agentApi.actionCount === 9 && agentApi.typeNeedsConfirm === true && agentApi.downloadRule === true && agentApi.channel === 'agent-dispatch',
       JSON.stringify(agentApi),
     );
     check(
       '接口里的动作真走统一通道：未知动作带错误码被拒，正常动作照常成功（C）',
       agentApi.badStatus >= 400 && agentApi.badCode === 'UNKNOWN_ACTION' && agentApi.stateOk === true,
       JSON.stringify(agentApi),
+    );
+
+    /* ---------- B（眼睛）：不截图也能找准元素，两次读 id 一致，点不存在的元素会明确报错 ---------- */
+    const agentPage = await (async () => {
+      try {
+        const token = fs.readFileSync(path.join(userData, 'api-token.txt'), 'utf8').trim();
+        const port = fs.readFileSync(path.join(userData, 'api-port.txt'), 'utf8').trim();
+        const call = async (body) => {
+          const res = await fetch(`http://127.0.0.1:${port}/action`, {
+            method: 'POST',
+            headers: { 'X-Nyx-Token': token, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          return { status: res.status, body: await res.json() };
+        };
+        await call({ type: 'navigate', params: { url: `http://127.0.0.1:${httpPort}/b-page` } });
+        await sleep(1500);
+        const first = await call({ type: 'readPage', params: {} });
+        const second = await call({ type: 'readPage', params: {} });
+        const elsA = (first.body.data && first.body.data.elements) || [];
+        const elsB = (second.body.data && second.body.data.elements) || [];
+        const third = elsA.find((el) => el.name === '第三个');
+        const clicked = third ? await call({ type: 'click', params: { elementId: third.id } }) : null;
+        const after = await call({ type: 'readPage', params: {} });
+        const bogus = await call({ type: 'click', params: { elementId: 'e000000' } });
+        return {
+          idsA: elsA.map((el) => el.id).join(','),
+          idsB: elsB.map((el) => el.id).join(','),
+          count: elsA.length,
+          names: elsA.map((el) => el.name).slice(0, 6).join('|'),
+          hasDisabled: elsA.some((el) => el.name === '姓名' && el.value === '张三'),
+          text: ((first.body.data && first.body.data.text) || '').slice(0, 120),
+          hint: (first.body.data && first.body.data.hint) || '',
+          thirdClicked: Boolean(clicked && clicked.body.ok === true),
+          out: /第三个被点了/.test((after.body.data && after.body.data.text) || ''),
+          bogusCode: bogus.body.code || '',
+          bogusStatus: bogus.status,
+          bogusError: bogus.body.error || '',
+        };
+      } catch (err) {
+        return { error: err.message };
+      }
+    })();
+    check(
+      '页面读成结构化数据：元素清单 + 正文摘要 + 稳定 id，两次读完全一致（B）',
+      agentPage.count >= 5
+        && agentPage.idsA === agentPage.idsB
+        && agentPage.idsA.length > 0
+        && /这段正文用来验证可读正文摘要/.test(agentPage.text)
+        && agentPage.hasDisabled === true,
+      JSON.stringify({ count: agentPage.count, ids: agentPage.idsA, names: agentPage.names, hint: agentPage.hint }),
+    );
+    check(
+      '不截图、不靠坐标：按稳定 id 点中「第三个」按钮，页面状态真的变了（B）',
+      agentPage.thirdClicked === true && agentPage.out === true,
+      JSON.stringify({ thirdClicked: agentPage.thirdClicked, out: agentPage.out }),
+    );
+    check(
+      '点一个不存在的 id 会明确报 ELEMENT_NOT_FOUND 并要求重新读页面（不误点、不静默）（B）',
+      agentPage.bogusCode === 'ELEMENT_NOT_FOUND' && /重新读取页面/.test(agentPage.bogusError),
+      JSON.stringify({ code: agentPage.bogusCode, status: agentPage.bogusStatus, error: agentPage.bogusError.slice(0, 80) }),
     );
 
     /* ---------- 运行时无脚本异常 ---------- */

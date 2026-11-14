@@ -147,9 +147,10 @@ function startHttpApi({
     if (url.pathname === '/capabilities' && req.method === 'GET') {
       const schemas = {
         navigate: { url: 'string' },
+        readPage: { maxText: 'number?', maxElements: 'number?' },
         screenshot: {},
-        click: { selector: 'string', index: 'number?' },
-        type: { selector: 'string', text: 'string', clear: 'boolean?', submit: 'boolean?' },
+        click: { elementId: 'string?', selector: 'string?', index: 'number?' },
+        type: { elementId: 'string?', selector: 'string?', text: 'string', clear: 'boolean?', submit: 'boolean?' },
         executeJS: { code: 'string' },
         extractText: { selector: 'string?', maxLength: 'number?' },
         state: {},
