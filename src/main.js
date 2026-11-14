@@ -64,6 +64,8 @@ const {
   addSessionTrust,
   agentSitesPayload,
   evaluateSite,
+  exportPolicy: exportSitePolicy,
+  importPolicy: importSitePolicy,
   removeRule: removeSiteRule,
   sanitizePolicy: sanitizeSitePolicy,
 } = require('./core/agent-sites');
@@ -7888,6 +7890,81 @@ function registerAgentSitesIpc() {
     });
     pushAgentStatus();
     return payloadOf(input);
+  });
+
+  // 名单导入导出（候选④）：导出给人备份，导入默认并入、不删用户已有的条目。
+  ipcMain.handle('nyx:agent:sites-export', () => {
+    const policy = sanitizeSitePolicy(runtime.agentSites || null);
+    const body = exportSitePolicy(policy);
+    const stamp = new Date().toISOString().slice(0, 10);
+    const target = dialog.showSaveDialogSync(win, {
+      title: '导出 agent 站点名单',
+      defaultPath: path.join(app.getPath('documents'), `nyx-agent-sites-${stamp}.json`),
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      buttonLabel: '导出',
+    });
+    if (!target) {
+      return { ...payloadOf({}), ok: false, canceled: true, error: '已取消导出。' };
+    }
+    try {
+      fs.writeFileSync(target, `${JSON.stringify(body, null, 2)}\n`, 'utf8');
+    } catch (err) {
+      diagnostics.error('AGENT_SITES_EXPORT_FAILED', '站点名单没能导出', { error: String(err && err.message ? err.message : err) });
+      return { ...payloadOf({}), ok: false, error: `没能写入 ${target}：${err && err.message ? err.message : err}` };
+    }
+    diagnostics.info('AGENT_SITES_EXPORTED', '站点名单已导出', {
+      file: target,
+      allow: body.allow.length,
+      block: body.block.length,
+    });
+    return {
+      ...payloadOf({}),
+      exported: { path: target, allow: body.allow.length, block: body.block.length },
+    };
+  });
+
+  ipcMain.handle('nyx:agent:sites-import', (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    const picked = dialog.showOpenDialogSync(win, {
+      title: '导入 agent 站点名单',
+      properties: ['openFile'],
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      buttonLabel: '导入',
+    });
+    if (!picked || !picked.length) {
+      return { ...payloadOf(input), ok: false, canceled: true, error: '已取消导入。' };
+    }
+    const file = picked[0];
+    let raw = '';
+    try {
+      raw = fs.readFileSync(file, 'utf8');
+    } catch (err) {
+      return { ...payloadOf(input), ok: false, error: `这个文件读不出来：${err && err.message ? err.message : err}` };
+    }
+    const result = importSitePolicy(raw, runtime.agentSites || sanitizeSitePolicy(null), { mode: 'merge' });
+    if (!result.ok) {
+      diagnostics.warn('AGENT_SITES_IMPORT_REJECTED', '站点名单导入被拒', { file, error: result.error });
+      return { ...payloadOf(input), ok: false, error: result.error };
+    }
+    writeAgentSites(result.policy);
+    diagnostics.info('AGENT_SITES_IMPORTED', '站点名单已导入', {
+      file,
+      added: result.added,
+      duplicates: result.duplicates,
+      rejected: result.rejectedCount,
+    });
+    pushAgentStatus();
+    return {
+      ...payloadOf(input),
+      imported: {
+        path: file,
+        added: result.added,
+        duplicates: result.duplicates,
+        rejected: result.rejected,
+        rejectedCount: result.rejectedCount,
+        summary: result.summary,
+      },
+    };
   });
 }
 

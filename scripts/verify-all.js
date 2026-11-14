@@ -15,13 +15,13 @@
  *  9. scripts/verify-agent-dispatch.js（agent 统一动作通道，20 项；纯 Node，不启动 Electron）
  * 10. scripts/verify-page-reader.js（页面读取与稳定元素 id，19 项；纯 Node，不启动 Electron）
  * 11. scripts/verify-agent-audit.js（agent 审计面与急停，17 项；纯 Node，不启动 Electron）
- * 12. scripts/verify-agent-sites.js（站点三层授权，24 项；纯 Node，不启动 Electron）
+ * 12. scripts/verify-agent-sites.js（站点三层授权，30 项；纯 Node，不启动 Electron）
  * 13. scripts/verify-agent-mode.js（agent 接入模式与两步确认，16 项；纯 Node，不启动 Electron）
  * 14. scripts/verify-page-digest.js（页面摘要，17 项；纯 Node，不启动 Electron）
  * 15. scripts/verify-tab-lifecycle.js（标签生命周期判定，18 项；纯 Node，不启动 Electron）
  * 16. scripts/verify-tab-sleep.js（标签休眠与唤醒端到端，10 项）
  * 17. scripts/verify-network-state.js（断网判定与断网横幅，10 项；纯 Node，不启动 Electron）
- * 18. scripts/verify-page-cache.js（离线页面缓存，14 项；纯 Node，不启动 Electron）
+ * 18. scripts/verify-page-cache.js（离线页面缓存，19 项；纯 Node，不启动 Electron）
  * 19. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
  *
  * 行为约定：
@@ -123,7 +123,7 @@ const STEPS = [
   {
     label: 'agent 站点授权回归',
     script: 'verify-agent-sites.js',
-    items: '24 项',
+    items: '30 项',
     timeoutMs: 60000,
   },
   {

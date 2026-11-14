@@ -325,6 +325,107 @@ check('19. 界面接线：设置页有名单卡与开关，preload 暴露两个�
   assert.ok(preload.includes("invoke('nyx:agent:sites-set'"), 'preload 应暴露 agentSitesSet');
 });
 
+check('25. 导出是一份能自我说明的 JSON：带 kind/version/时间，规则保留模式（候选④）', () => {
+  const policy = sites.sanitizePolicy({
+    globalEnabled: false,
+    allow: [{ target: 'example.com', mode: 'host' }, { target: 'example.com/admin', mode: 'prefix' }],
+    block: [{ target: 'evil.test', mode: 'host' }],
+  });
+  const out = sites.exportPolicy(policy, 1_700_000_000_000);
+  assert.equal(out.app, 'nyx');
+  assert.equal(out.kind, 'agent-sites');
+  assert.equal(out.version, 1);
+  assert.equal(out.exportedAt, '2023-11-14T22:13:20.000Z');
+  assert.equal(out.globalEnabled, false);
+  assert.deepEqual(out.allow.map((rule) => `${rule.mode}:${rule.target}`), ['host:example.com', 'prefix:example.com/admin']);
+  assert.deepEqual(out.block.map((rule) => `${rule.mode}:${rule.target}`), ['host:evil.test']);
+});
+
+check('26. 导入默认合并：新条目加进去，已存在的算重复而不是报错', () => {
+  const current = sites.sanitizePolicy({ allow: [{ target: 'example.com', mode: 'host' }], block: [] });
+  const file = JSON.stringify({
+    kind: 'agent-sites',
+    allow: [{ target: 'example.com', mode: 'host' }, { target: 'news.test', mode: 'prefix' }],
+    block: [{ target: 'evil.test', mode: 'host' }],
+  });
+  const result = sites.importPolicy(file, current, { mode: 'merge' });
+  assert.equal(result.ok, true);
+  assert.equal(result.added, 2, '新增的应该是一条白名单 + 一条屏蔽');
+  assert.equal(result.duplicates, 1, 'example.com 已存在，应计为重复');
+  assert.equal(result.rejectedCount, 0);
+  assert.ok(result.policy.allow.some((rule) => rule.target === 'news.test' && rule.mode === 'prefix'));
+  assert.ok(result.policy.block.some((rule) => rule.target === 'evil.test'));
+  assert.ok(/条/.test(result.summary), 'summary 要用人话报数');
+});
+
+check('27. 导入坏文件给中文原因，不当成「导入成功但啥都没变」', () => {
+  const current = sites.sanitizePolicy(null);
+  const badJson = sites.importPolicy('{ not json', current);
+  assert.equal(badJson.ok, false);
+  assert.ok(/不是 JSON/.test(badJson.error), badJson.error);
+
+  const notObject = sites.importPolicy('[1,2,3]', current);
+  assert.equal(notObject.ok, false);
+  assert.ok(/不是一份名单/.test(notObject.error), notObject.error);
+
+  const wrongKind = sites.importPolicy(JSON.stringify({ kind: 'bookmarks', allow: [] }), current);
+  assert.equal(wrongKind.ok, false);
+  assert.ok(/不是 agent 站点名单/.test(wrongKind.error), wrongKind.error);
+
+  const empty = sites.importPolicy(JSON.stringify({ kind: 'agent-sites' }), current);
+  assert.equal(empty.ok, false);
+  assert.ok(/既没有 allow 也没有 block/.test(empty.error), empty.error);
+});
+
+check('28. 导入里的脏条目被列出来，不会被静默忽略', () => {
+  const current = sites.sanitizePolicy(null);
+  const file = JSON.stringify({
+    kind: 'agent-sites',
+    allow: [{ target: 'ok.test', mode: 'host' }, { target: 'not a host', mode: 'host' }, { target: 'ok2.test', mode: 'host' }],
+  });
+  const result = sites.importPolicy(file, current, { mode: 'merge' });
+  assert.equal(result.ok, true);
+  assert.equal(result.added, 2);
+  assert.equal(result.rejectedCount, 1);
+  assert.equal(result.rejected.length, 1);
+  assert.ok(/not a host/.test(result.rejected[0]), '被拒绝的条目要原样列出来');
+  assert.ok(/1/.test(result.summary), result.summary);
+});
+
+check('29. 导出再导入是等价的：规则与全局开关都能往返（候选④）', () => {
+  const source = sites.sanitizePolicy({
+    globalEnabled: false,
+    allow: [{ target: 'example.com', mode: 'host' }, { target: 'shop.test', mode: 'prefix' }],
+    block: [{ target: 'evil.test', mode: 'host' }],
+  });
+  const exported = JSON.stringify(sites.exportPolicy(source, 1_700_000_000_000));
+  const result = sites.importPolicy(exported, sites.sanitizePolicy(null), { mode: 'merge' });
+  assert.equal(result.ok, true);
+  assert.equal(result.policy.globalEnabled, false, '全局开关要跟着走');
+  const key = (list) => list.map((rule) => `${rule.mode}:${rule.target}`).sort();
+  assert.deepEqual(key(result.policy.allow), key(source.allow));
+  assert.deepEqual(key(result.policy.block), key(source.block));
+  assert.equal(result.duplicates, 0);
+  assert.equal(result.rejectedCount, 0);
+});
+
+check('30. 导入导出的主进程接线：两个对话框 + 落盘 + 留痕', () => {
+  const main = read('src/main.js');
+  assert.ok(main.includes("ipcMain.handle('nyx:agent:sites-export'"), '要有导出 IPC');
+  assert.ok(main.includes("ipcMain.handle('nyx:agent:sites-import'"), '要有导入 IPC');
+  assert.ok(main.includes('showSaveDialogSync'), '导出要用同步保存框（异步会让用户看到一个空对话框）');
+  assert.ok(main.includes('showOpenDialogSync'), '导入要用同步打开框');
+  assert.ok(main.includes('AGENT_SITES_EXPORTED'), '导出要落日志');
+  assert.ok(main.includes('AGENT_SITES_IMPORTED'), '导入要落日志');
+  assert.ok(main.includes('AGENT_SITES_IMPORT_REJECTED'), '导入被拒要落日志');
+  const preload = read('src/preload.js');
+  assert.ok(preload.includes('agentSitesExport'), 'preload 应暴露 agentSitesExport');
+  assert.ok(preload.includes('agentSitesImport'), 'preload 应暴露 agentSitesImport');
+  const html = read('src/renderer/settings.html');
+  assert.ok(html.includes('id="btn-agent-sites-export"'), '设置页要有导出按钮');
+  assert.ok(html.includes('id="btn-agent-sites-import"'), '设置页要有导入按钮');
+});
+
 /* ------------------------------------------------------------------ */
 
 const failed = checks.filter((item) => !item.ok);

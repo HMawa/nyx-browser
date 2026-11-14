@@ -3454,6 +3454,64 @@ async function loadFootprint() {
     const addAllow = byId('btn-agent-allow-add');
     const allowInput = byId('agent-allow-input');
     const allowMode = byId('agent-allow-mode');
+    // 名单导入导出（候选④）：导出给人备份，导入默认并入、不删已有条目
+    const exportBtn = byId('btn-agent-sites-export');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', async () => {
+        const status = byId('agent-sites-status');
+        exportBtn.disabled = true;
+        try {
+          const res = await window.nyx.agentSitesExport();
+          if (res && res.ok !== false && res.exported) {
+            if (status) {
+              status.textContent = `已导出到 ${res.exported.path}（白名单 ${res.exported.allow} 条 / 屏蔽 ${res.exported.block} 条）`;
+              status.className = 'hint is-ok';
+            }
+          } else if (status) {
+            status.textContent = (res && res.error) || '没能导出名单';
+            status.className = res && res.canceled ? 'hint' : 'hint is-warn';
+          }
+        } catch (err) {
+          if (status) {
+            status.textContent = `没能导出名单：${err && err.message ? err.message : '未知原因'}`;
+            status.className = 'hint is-warn';
+          }
+        } finally {
+          exportBtn.disabled = false;
+        }
+      });
+    }
+
+    const importBtn = byId('btn-agent-sites-import');
+    if (importBtn) {
+      importBtn.addEventListener('click', async () => {
+        const status = byId('agent-sites-status');
+        importBtn.disabled = true;
+        try {
+          const res = await window.nyx.agentSitesImport({});
+          if (res && res.ok !== false && res.imported) {
+            renderAgentSites(res);
+            if (status) {
+              status.textContent = res.imported.rejectedCount
+                ? `${res.imported.summary} 跳过的条目：${res.imported.rejected.join('；')}`
+                : res.imported.summary;
+              status.className = res.imported.rejectedCount ? 'hint is-warn' : 'hint is-ok';
+            }
+          } else if (status) {
+            status.textContent = (res && res.error) || '没能导入名单';
+            status.className = res && res.canceled ? 'hint' : 'hint is-warn';
+          }
+        } catch (err) {
+          if (status) {
+            status.textContent = `没能导入名单：${err && err.message ? err.message : '未知原因'}`;
+            status.className = 'hint is-warn';
+          }
+        } finally {
+          importBtn.disabled = false;
+        }
+      });
+    }
+
     if (addAllow && allowInput) {
       addAllow.addEventListener('click', () => {
         const value = allowInput.value.trim();

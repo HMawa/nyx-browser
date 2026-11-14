@@ -356,6 +356,99 @@ function describePolicy(policy) {
   return `agent 访问已开启；白名单 ${safe.allow.length} 条，屏蔽名单 ${safe.block.length} 条`;
 }
 
+/** 导出成可读的 JSON（给用户自己备份 / 换机器用，不是内部落盘格式） */
+function exportPolicy(policy, now) {
+  const safe = sanitizePolicy(policy);
+  return {
+    app: 'nyx',
+    kind: 'agent-sites',
+    version: 1,
+    exportedAt: new Date(Number(now) || Date.now()).toISOString(),
+    globalEnabled: safe.globalEnabled,
+    allow: safe.allow.map((rule) => ({ target: rule.target, mode: rule.mode, note: rule.note })),
+    block: safe.block.map((rule) => ({ target: rule.target, mode: rule.mode, note: rule.note })),
+  };
+}
+
+/**
+ * 导入一份导出的名单。默认 merge（并进现有名单，不删用户已有的），
+ * replace 才整份替换。校验不过就说清哪一条不行——静默丢弃条目等于骗人。
+ */
+function importPolicy(rawText, current, options) {
+  const opts = options && typeof options === 'object' ? options : {};
+  const mode = opts.mode === 'replace' ? 'replace' : 'merge';
+  const now = Number(opts.now) || Date.now();
+  let parsed = null;
+  try {
+    parsed = JSON.parse(String(rawText || ''));
+  } catch {
+    return { ok: false, error: '这个文件不是 JSON，可能不是 Nyx 导出的名单。', policy: sanitizePolicy(current) };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, error: '文件内容不是一份名单（应该是一个对象）。', policy: sanitizePolicy(current) };
+  }
+  if (parsed.kind && parsed.kind !== 'agent-sites') {
+    return { ok: false, error: `这份文件的类型是「${parsed.kind}」，不是 agent 站点名单。`, policy: sanitizePolicy(current) };
+  }
+  const hasAllow = Array.isArray(parsed.allow);
+  const hasBlock = Array.isArray(parsed.block);
+  if (!hasAllow && !hasBlock) {
+    return { ok: false, error: '文件里既没有 allow 也没有 block 名单。', policy: sanitizePolicy(current) };
+  }
+
+  const base = mode === 'replace' ? sanitizePolicy({ globalEnabled: parsed.globalEnabled, allow: [], block: [] }) : sanitizePolicy(current);
+  const nextAllow = mode === 'replace' ? [] : base.allow.slice();
+  const nextBlock = mode === 'replace' ? [] : base.block.slice();
+  // 全局开关跟着文件走：备份里记着"agent 访问已关闭"，导入后就必须是关闭。
+  // 反过来（保留当前的开）等于把安全设置悄悄放宽，是最不该静默发生的事。
+  const adoptGlobal = typeof parsed.globalEnabled === 'boolean' ? parsed.globalEnabled : base.globalEnabled;
+  const globalChanged = adoptGlobal !== base.globalEnabled;
+  let added = 0;
+  let duplicates = 0;
+  const rejected = [];
+
+  const absorb = (list, target, label) => {
+    const items = Array.isArray(list) ? list : [];
+    for (const raw of items) {
+      const result = addRule(target, raw, now);
+      if (!result.ok) {
+        rejected.push(`${label}：${(raw && (raw.target || raw)) || '（空）'}`);
+        continue;
+      }
+      if (result.already) {
+        duplicates += 1;
+        continue;
+      }
+      target.length = 0;
+      target.push(...result.list);
+      added += 1;
+    }
+  };
+
+  absorb(parsed.allow, nextAllow, '白名单');
+  absorb(parsed.block, nextBlock, '屏蔽名单');
+
+  const policy = sanitizePolicy({
+    globalEnabled: adoptGlobal,
+    allow: nextAllow,
+    block: nextBlock,
+  });
+
+  const globalText = globalChanged ? `；全局开关已按文件改成「${adoptGlobal ? '开启' : '关闭'}」` : '';
+
+  return {
+    ok: true,
+    policy,
+    mode,
+    added,
+    duplicates,
+    globalChanged,
+    rejected: rejected.slice(0, 10),
+    rejectedCount: rejected.length,
+    summary: `导入完成：新增 ${added} 条，已存在 ${duplicates} 条${rejected.length ? `，${rejected.length} 条格式不对被跳过` : ''}${globalText}。`,
+  };
+}
+
 /** 给界面用的状态包（设置页与「为什么被挡住」都用同一份） */
 function agentSitesPayload(input) {
   const source = input && typeof input === 'object' ? input : {};
@@ -402,7 +495,9 @@ module.exports = {
   agentSitesPayload,
   describePolicy,
   evaluateSite,
+  exportPolicy,
   findMatch,
+  importPolicy,
   listConflicts,
   normalizeHost,
   normalizePath,
