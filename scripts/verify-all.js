@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把二十一个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把二十二个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
@@ -177,6 +177,14 @@ const STEPS = [
     timeoutMs: 60000,
   },
   {
+    label: '代码签名',
+    script: 'verify-signing.js',
+    items: '12 项',
+    timeoutMs: 60000,
+    /** 没打签名包时只跑静态守卫（脚本自己会打印「跳过真实签名检查」） */
+    args: ['--no-artifact'],
+  },
+  {
     label: '打包产物冒烟',
     script: 'verify-packaged-smoke.js',
     items: '11 项',
@@ -277,7 +285,7 @@ function runStep(step, index, total) {
 
   const started = nowMs();
   // stdio 直通：子脚本的输出原样打到当前控制台，方便定位失败项
-  const result = spawnSync(process.execPath, [scriptPath], {
+  const result = spawnSync(process.execPath, [scriptPath].concat(Array.isArray(step.args) ? step.args : []), {
     cwd: ROOT,
     stdio: 'inherit',
     timeout: step.timeoutMs,

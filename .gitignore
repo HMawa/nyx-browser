@@ -44,6 +44,12 @@ docs/Nyx-1.0.9-源码差异（vs 修复前）.txt
 /main.js
 /make-test-png.js
 
+# ---- 自签名代码签名证书：只在本机生成与使用，绝不入库 ----
+# 由 `node scripts/make-signing-cert.js` 生成；私钥与密码一旦泄漏等于任何人可冒充本机的发布者
+build/signing/
+*.pfx
+*.cer
+
 # ---- 早期探针脚本与运行日志（历史遗留，不入库）----
 ai-*-probe.js
 hf-*.js
