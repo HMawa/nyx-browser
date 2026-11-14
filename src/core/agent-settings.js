@@ -766,6 +766,38 @@ function buildSettingAuditCsv(rows, options) {
   return `${lines.join('\r\n')}\r\n`;
 }
 
+/**
+ * 「它都干过什么」也能导出成 CSV（第九轮 ④）。
+ *
+ * 与设置改动那张表刻意分开：一个数"改了哪些设置项"，一个数"做了哪些动作"，
+ * 合在一张表里列头对不上，用起来只会两头别扭。被拦下的次数单独一列，
+ * 绝不并进执行次数——混在一起会把风险说小。
+ */
+function buildActionAuditCsv(actions, options) {
+  const payload = actions && typeof actions === 'object' ? actions : {};
+  const types = Array.isArray(payload.types) ? payload.types : [];
+  const now = options && Number.isFinite(options.now) ? new Date(options.now) : new Date();
+  const lines = [['动作', '执行次数', '最近一次', '主要站点', '被拦下或拒绝'].join(',')];
+  const deniedTotal = Number.isFinite(payload.denied) ? payload.denied : 0;
+  types.forEach((row, index) => {
+    const item = row && typeof row === 'object' ? row : {};
+    const at = Number.isFinite(item.lastAt) && item.lastAt > 0 ? new Date(item.lastAt) : null;
+    const sites = Array.isArray(item.sites) ? item.sites.slice(0, 5).join(' / ') : '';
+    lines.push([
+      csvCell(item.label || labelOfAction(item.type)),
+      csvCell(Number.isFinite(item.count) ? item.count : ''),
+      csvCell(at ? at.toISOString() : ''),
+      csvCell(sites),
+      // 被拦下/被拒是整段时间的总数，只写在第一行，免得同一张表里每行都重复同一个数
+      csvCell(index === 0 ? deniedTotal : ''),
+    ].join(','));
+  });
+  if (types.length === 0) {
+    lines.push(['说明', '0', now.toISOString(), '这段时间里 agent 没有执行过动作', csvCell(deniedTotal)].join(','));
+  }
+  return `${lines.join('\r\n')}\r\n`;
+}
+
 /** 把设置值写成人能读的字（导出 CSV 与界面共用一套说法） */
 function describeSettingValue(value) {
   if (value === true) return '开';
@@ -800,6 +832,7 @@ module.exports = {
   ACTION_LABELS,
   aggregateAgentActions,
   aggregateSettingChanges,
+  buildActionAuditCsv,
   buildSettingAuditCsv,
   describeSettingValue,
   describeSettingsSchema,

@@ -4866,14 +4866,21 @@ async function loadFootprint() {
         loadSettingAudit();
       });
     }
-    const button = byId('btn-agent-audit-export');
+    // 两张表各有一个导出按钮：同样的对话框、同样的时间范围，只有 kind 不同。
+    bindAuditExport('btn-agent-audit-export', 'settings', 'agent-settings-audit-note');
+    bindAuditExport('btn-agent-actions-export', 'actions', 'agent-actions-audit-note');
+  }
+
+  function bindAuditExport(buttonId, kind, noteId) {
+    const button = byId(buttonId);
     if (!button || button.dataset.wired === 'true') return;
     button.dataset.wired = 'true';
+    const what = kind === 'actions' ? '动作记录' : '改动记录';
     button.addEventListener('click', async () => {
-      const note = byId('agent-settings-audit-note');
+      const note = byId(noteId);
       if (!window.nyx || typeof window.nyx.agentSettingsAuditExport !== 'function') {
         if (note) {
-          note.textContent = '当前内核不支持导出改动记录。';
+          note.textContent = `当前内核不支持导出${what}。`;
           note.className = 'hint is-warn';
         }
         return;
@@ -4887,7 +4894,7 @@ async function loadFootprint() {
       }
       let res = null;
       try {
-        res = await window.nyx.agentSettingsAuditExport({ days });
+        res = await window.nyx.agentSettingsAuditExport({ days, kind });
       } catch (err) {
         res = { ok: false, error: err && err.message ? err.message : '未知原因' };
       }

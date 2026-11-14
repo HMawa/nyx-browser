@@ -85,6 +85,7 @@ const {
   SETTING_SCHEMA,
   aggregateAgentActions,
   aggregateSettingChanges: aggregateAgentSettingChanges,
+  buildActionAuditCsv: buildAgentActionAuditCsv,
   buildSettingAuditCsv: buildAgentSettingAuditCsv,
   describeSettingsSchema,
   planPresetChange: planAgentPresetChange,
@@ -9639,10 +9640,12 @@ function registerAgentSettingsIpc() {
     });
   });
 
-  // 导出聚合结果为 CSV：导的是"每个设置项一行"，不是原始流水账。
+  // 导出聚合结果为 CSV：导的是"每个设置项一行"或"每个动作一行"，不是原始流水账。
+  // `kind: 'actions'` 时导「它都干过什么」（第九轮 ④）——两张表列头不同，刻意不合并。
   // 同步对话框：异步那条路在下载那边踩过「窗口先关、Promise 永挂」的坑。
   ipcMain.handle('nyx:agent:settings-audit-export', (_event, payload) => {
     const input = payload && typeof payload === 'object' ? payload : {};
+    const kind = String(input.kind || 'settings') === 'actions' ? 'actions' : 'settings';
     let records = [];
     try {
       records = runtime.agentAudit && typeof runtime.agentAudit.list === 'function' ? runtime.agentAudit.list() : [];
@@ -9651,22 +9654,34 @@ function registerAgentSettingsIpc() {
         error: err && err.message ? err.message : String(err),
       });
     }
-    const aggregated = aggregateAgentSettingChanges(records, {
+    const scope = {
       limit: Number.isFinite(input.limit) ? input.limit : 200,
       includeUndo: input.includeUndo === true,
       since: readAuditSince(input.days),
-    });
-    if (aggregated.empty) {
-      return { ok: false, code: 'NOTHING_TO_EXPORT', error: aggregated.note };
+    };
+    const aggregated = aggregateAgentSettingChanges(records, scope);
+    const actions = kind === 'actions' ? aggregateAgentActions(records, scope) : null;
+    const empty = kind === 'actions' ? (!actions || actions.empty === true) : aggregated.empty === true;
+    if (empty) {
+      return {
+        ok: false,
+        code: 'NOTHING_TO_EXPORT',
+        error: (kind === 'actions' ? (actions && actions.note) : aggregated.note) || '这段时间里没有可导出的记录。',
+      };
     }
-    const body = buildAgentSettingAuditCsv(aggregated.keys, { now: Date.now() });
+    const body = kind === 'actions'
+      ? buildAgentActionAuditCsv(actions, { now: Date.now() })
+      : buildAgentSettingAuditCsv(aggregated.keys, { now: Date.now() });
+    const rowCount = kind === 'actions' ? actions.types.length : aggregated.keys.length;
     const stamp = new Date();
     const pad = (v) => String(v).padStart(2, '0');
-    const defaultName = `agent设置改动-${stamp.getFullYear()}-${pad(stamp.getMonth() + 1)}-${pad(stamp.getDate())}.csv`;
+    const baseName = kind === 'actions' ? 'agent动作记录' : 'agent设置改动';
+    const defaultName = `${baseName}-${stamp.getFullYear()}-${pad(stamp.getMonth() + 1)}-${pad(stamp.getDate())}.csv`;
+    const title = kind === 'actions' ? '导出 agent 做过的动作（CSV）' : '导出 agent 改设置的记录（CSV）';
     let target = '';
     try {
       target = dialog.showSaveDialogSync(win, {
-        title: '导出 agent 改设置的记录（CSV）',
+        title,
         defaultPath: path.join(app.getPath('documents'), defaultName),
         filters: [{ name: 'CSV', extensions: ['csv'] }],
         buttonLabel: '导出',
@@ -9686,11 +9701,12 @@ function registerAgentSettingsIpc() {
       });
       return { ok: false, error: `没能写到磁盘上：${err && err.message ? err.message : String(err)}` };
     }
-    diagnostics.info('AGENT_SETTINGS_AUDIT_EXPORTED', '导出了 agent 改设置的记录', {
-      rows: aggregated.keys.length,
+    diagnostics.info('AGENT_SETTINGS_AUDIT_EXPORTED', kind === 'actions' ? '导出了 agent 动作记录' : '导出了 agent 改设置的记录', {
+      kind,
+      rows: rowCount,
       bytes: Buffer.byteLength(body, 'utf8'),
     });
-    return { ok: true, path: target, rows: aggregated.keys.length, bytes: Buffer.byteLength(body, 'utf8') };
+    return { ok: true, kind, path: target, rows: rowCount, bytes: Buffer.byteLength(body, 'utf8') };
   });
 }
 

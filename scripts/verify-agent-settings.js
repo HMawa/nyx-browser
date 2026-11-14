@@ -512,7 +512,8 @@ check('导出的接线：同步对话框 + 默认文件名 + preload 与界面�
   assert(/buildSettingAuditCsv: buildAgentSettingAuditCsv/.test(main), '主进程要引入 CSV 构造器');
   assert(/buildAgentSettingAuditCsv\(aggregated\.keys/.test(main), '要拿聚合结果去拼 CSV');
   assert(/dialog\.showSaveDialogSync\(/.test(main), '导出要用同步对话框（异步那条路踩过窗口先关的坑）');
-  assert(/agent设置改动-\$\{stamp\.getFullYear\(\)\}/.test(main), '默认文件名要带日期');
+  assert(/const baseName = kind === 'actions' \? 'agent动作记录' : 'agent设置改动';/.test(main), '要按导哪张表选文件名前缀');
+  assert(/\$\{baseName\}-\$\{stamp\.getFullYear\(\)\}/.test(main), '默认文件名要带日期');
   assert(/filters: \[\{ name: 'CSV', extensions: \['csv'\] \}\]/.test(main), '要限定 csv 扩展名');
   assert(/AGENT_SETTINGS_AUDIT_EXPORTED/.test(main), '导出成功要留诊断');
   assert(/NOTHING_TO_EXPORT/.test(main), '没有记录要明确拒绝导出');
@@ -525,7 +526,7 @@ check('导出的接线：同步对话框 + 默认文件名 + preload 与界面�
   assert(/最近 24 小时/.test(html) && /最近 7 天/.test(html), '时间范围要有 24 小时与 7 天两档');
   const js = read('src/renderer/settings.js');
   assert(/function wireSettingAuditTools\(\)/.test(js), '缺界面接线函数');
-  assert(/agentSettingsAuditExport\(\{ days \}\)/.test(js), '导出要带上当前时间范围');
+  assert(/agentSettingsAuditExport\(\{ days, kind \}\)/.test(js), '导出要带上当前时间范围与要导哪张表');
   assert(/dataset\.wired !== 'true'/.test(js) && /dataset\.wired = 'true'/.test(js), '下拉与按钮只许绑一次');
   return 'ok';
 });
@@ -595,6 +596,54 @@ check('31. 接线：「它都干过什么」两块表在界面里，IPC 同时�
   assert(/function renderActionAudit\(actions\)/.test(js), '缺渲染动作表的函数');
   assert(/renderActionAudit\(payload\.actions\)/.test(js), '读到记录后要渲染动作表');
   assert(/主要在哪些站点/.test(js), '要给出站点分布');
+  return 'ok';
+});
+
+check('32. 动作记录也能导出成 CSV：表头按动作写、CRLF、被拦下的总数只写在第一行（第十轮 ④）', () => {
+  const now = Date.UTC(2026, 10, 15);
+  const records = [
+    { type: 'click', site: 'a.test', ts: now - 1000, decision: 'allow', ok: true },
+    { type: 'click', site: 'a.test', ts: now - 2000, decision: 'allow', ok: true },
+    { type: 'readPage', site: 'b.test', ts: now - 3000, decision: 'allow', ok: true },
+    { type: 'click', site: 'a.test', ts: now - 4000, decision: 'deny', ok: false },
+    { type: 'type', site: 'b.test', ts: now - 5000, decision: 'deny', ok: false },
+  ];
+  const actions = settings.aggregateAgentActions(records);
+  const csv = settings.buildActionAuditCsv(actions, { now });
+  const lines = csv.split('\r\n');
+  assert(lines[0] === '动作,执行次数,最近一次,主要站点,被拦下或拒绝', `表头不对：${lines[0]}`);
+  assert(!/(^|[^\r])\n/.test(csv), '只许用 CRLF，不许出现裸 LF');
+  assert(/,2,.*a\.test,2$/.test(lines[1]), `第一行要带执行次数、站点和被拦下总数：${lines[1]}`);
+  assert(/,1,.*b\.test,$/.test(lines[2]), `后面的行不许重复被拦下总数：${lines[2]}`);
+  assert(csv.trim().split('\r\n').length === 3, '两类动作就两行数据');
+  const emptyCsv = settings.buildActionAuditCsv({ ok: true, types: [], denied: 3, empty: true }, { now });
+  assert(/没有执行过动作/.test(emptyCsv), '空名单要有说明行');
+  assert(/,3$/.test(emptyCsv.trim().split('\r\n')[1]), '空名单也要把被拦下次数写出来');
+  return `header=${lines[0]}`;
+});
+
+check('33. 导出的接线：两张表共用对话框，用 kind 区分导哪一张', () => {
+  const main = read('src/main.js');
+  assert(/buildActionAuditCsv: buildAgentActionAuditCsv/.test(main), '主进程要引入动作 CSV 构造器');
+  assert(/const kind = String\(input\.kind \|\| 'settings'\) === 'actions' \? 'actions' : 'settings';/.test(main), '要认 kind');
+  assert(/const actions = kind === 'actions' \? aggregateAgentActions\(records, scope\) : null;/.test(main), 'kind=actions 时才聚合动作');
+  assert(/buildAgentActionAuditCsv\(actions, \{ now: Date\.now\(\) \}\)/.test(main), '要拿动作聚合结果去拼 CSV');
+  assert(/agent动作记录/.test(main) && /agent设置改动/.test(main), '两个文件名前缀要分开');
+  assert(/kind,\n\s+rows: rowCount,/.test(main), '返回体要带 kind');
+  const preload = read('src/preload.js');
+  assert(/agentSettingsAuditExport: \(payload\) => ipcRenderer\.invoke\('nyx:agent:settings-audit-export', payload \|\| \{\}\)/.test(preload), 'preload 要原样透传 kind');
+  return 'ok';
+});
+
+check('34. 界面：动作表旁边也有「导出 CSV」，走同一个时间范围', () => {
+  const html = read('src/renderer/settings.html');
+  const js = read('src/renderer/settings.js');
+  assert(html.includes('id="btn-agent-actions-export"'), '设置页缺动作表的导出按钮');
+  assert(/bindAuditExport\('btn-agent-audit-export', 'settings', 'agent-settings-audit-note'\);/.test(js), '改动表要绑成 settings');
+  assert(/bindAuditExport\('btn-agent-actions-export', 'actions', 'agent-actions-audit-note'\);/.test(js), '动作表要绑成 actions');
+  assert(/function bindAuditExport\(buttonId, kind, noteId\)/.test(js), '缺共用绑定函数');
+  assert(/agentSettingsAuditExport\(\{ days, kind \}\)/.test(js), '导出要带上 kind');
+  assert(/当前内核不支持导出\$\{what\}/.test(js), '不支持时要说清是哪一张表');
   return 'ok';
 });
 

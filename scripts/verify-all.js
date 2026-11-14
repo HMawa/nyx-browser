@@ -189,7 +189,7 @@ const STEPS = [
   {
     label: 'agent 改设置回归',
     script: 'verify-agent-settings.js',
-    items: '31 项',
+    items: '34 项',
     timeoutMs: 60000,
   },
   {
