@@ -32,7 +32,7 @@
 - 版本：`package.json` = **1.17.0**；产物 `dist/Nyx-Setup-1.17.0.exe`（118,754,042 字节，sha256 `e2a4dab25ba4a278cb65b55ceef67997cf5b48989719c32201b44fadc299cc52`），`dist/win-unpacked` = 1.17.0。
 - 运行时：Electron 43.7.4 / Chromium 150 / Node 24；Windows。
 - 运行时依赖只有两个：`@modelcontextprotocol/sdk`、`zod`（MCP server 用）。
-- 回归基线（本轮实测，全绿）：`npm run verify` = 地址栏建议 **68 项** + 界面体验 **93 项** + 出站链路守卫 **12 项** + 下载链路 **16 项** + 图形性能策略 **14 项** + 安全基线对照 **20 项** + 外壳防护基线 **19 项** + 录屏检测 **14 项** + 打包冒烟 **11 项** = **267 项 / 9 个脚本 / 179 秒**。
+- 回归基线（本轮实测，全绿）：`npm run verify` = 地址栏建议 **68 项** + 界面体验 **95 项** + 出站链路守卫 **12 项** + 下载链路 **16 项** + 图形性能策略 **14 项** + 安全基线对照 **20 项** + 外壳防护基线 **19 项** + 录屏检测 **14 项** + 动作通道 **20 项** + 打包冒烟 **11 项** = **289 项 / 10 个脚本 / 145 秒**。
 - 更新源：`%APPDATA%\Nyx\updates`（`latest.json` + 安装包 + `.blocks.json` + `extensions.json`）；留档 `%APPDATA%\Nyx\updates-archive\<版本>`。
 - 安装器：NSIS，`perMachine:false`（装到用户目录），自定义脚本 `build/installer.nsh`、打包后钩子 `build/after-pack.js`。
 - npm 命令必须用 `& 'C:\Program Files\nodejs\npm.cmd' run <script>`（`npm.ps1` 被执行策略拦）。
@@ -80,7 +80,7 @@
 
 ## 6. 验证脚本约定
 
-- 九个脚本：`verify-address-suggest.js`（地址栏 68）、`verify-ui-polish.js`（界面 93）、`verify-link-guard.js`（出站链路守卫 12，纯 Node 不启动 Electron）、`verify-downloads.js`（下载链路 16，纯 Node 不启动 Electron）、`verify-gpu-policy.js`（图形性能策略 14，纯 Node 不启动 Electron）、`verify-security-baseline.js`（安全基线对照 20，纯 Node 不启动 Electron）、`verify-security-switches.js`（外壳防护基线 19，纯 Node 不启动 Electron）、`verify-screen-watch.js`（录屏 / 被远控检测 14，纯 Node 不启动 Electron）、`verify-packaged-smoke.js`（包内 11，缺 `dist/win-unpacked` 时跳过）。另有 `bench-transfer.js`（吞吐基线，**不进回归**，测大文件快慢用）。
+- 十个脚本：`verify-address-suggest.js`（地址栏 68）、`verify-ui-polish.js`（界面 95）、`verify-link-guard.js`（出站链路守卫 12，纯 Node 不启动 Electron）、`verify-downloads.js`（下载链路 16，纯 Node 不启动 Electron）、`verify-gpu-policy.js`（图形性能策略 14，纯 Node 不启动 Electron）、`verify-security-baseline.js`（安全基线对照 20，纯 Node 不启动 Electron）、`verify-security-switches.js`（外壳防护基线 19，纯 Node 不启动 Electron）、`verify-screen-watch.js`（录屏 / 被远控检测 14，纯 Node 不启动 Electron）、`verify-agent-dispatch.js`（agent 统一动作通道 20，纯 Node 不启动 Electron）、`verify-packaged-smoke.js`（包内 11，缺 `dist/win-unpacked` 时跳过）。另有 `bench-transfer.js`（吞吐基线，**不进回归**，测大文件快慢用）。
 - 环境不满足而无法验证的断言（例如系统剪贴板被别的进程独占时）要**显式记为「跳过」并打印原因**，既不许静默通过，也不许删断言（红线 7）。
 - 新增断言写在对应脚本里，标签复用中文「（vX.Y.Z）」后缀；项数必须同步到 `scripts/verify-all.js` 的 `items` 与注释。
 - CDP 端到端：Node 24 全局 `WebSocket`，`--remote-debugging-port` 用 `pickFreePort()`。
@@ -124,11 +124,12 @@
 - 进度：C1（`b848b6b`）、A4（`d33be32` + `018780b` + `2c9f248`）、A2（`4919583`）、A1（`e214f9d`）、B4+B5（`533ea57`）、B1（`e7c5288`）、B2（`6bb61f0`）、B3（`1a6e6e1`）、A3（`8942dab`，已测基线 + 已可量化）、A5（`9d76966`，默认核显优先）、C2（`321da29`，安全基线可自查）、C3（`9533ef8`，外壳防护现值 + 注入演示）、C4（`a8e42d8`，进隐私模式前查录屏与被远控）**已全部完成（12/12）**。
 - 清单已清空：下一步等用户决定（候选：发版 1.17.1 / 安装器端到端复验 / 修更新源 `latest.json` 指向已删 exe 的 404 / 补 `extensions.json` 的 history / 做一次真机安装版冒烟）。
 
-### 9.1 下一份清单（已读单、未开工：2026-11-13 晚接手，用户说「明天做」）
+### 9.1 当前清单：Agent 化 A–G（2026-11-14 开工）
 
 - 来源：`Nyx浏览器Agent化实现清单.md`（A–G 七项 + §4 验收清单 + 六条不可回退约束）。
 - 执行顺序（已与清单 §0 的意图对齐，**C 是枢纽必须最先**）：**C → B → D → E → A → F → G**，一项一提交。
-- 现状取证（开工前别再重复挖）：`src/core/actions.js:96` 已有 8 种动作但**没有 dispatch 层**（无权限判定/确认挂起/留痕/取消）；`src/api/http-api.js:82` 只绑回环 + Token；`src/mcp/server.js:112` 是**独立 stdio 进程转发 HTTP**，`nyx_screenshot` 还把截图当主通道；`downloads.js` 的 `attach()` 正好挂下载审计。grep 确认**不存在** `agent-audit` / `agentMode` / `allowlist` / `blocklist` / `emergencyStop` / `read_page`。
+- 进度：**C 完成（`79c9477`）**，B 进行中，D/E/A/F/G 待开始（明细见 `docs/实测修复台账.md` 的「Agent 化清单（A–G）状态」表）。
+- 现状取证（开工前别再重复挖）：`src/core/actions.js:96` 已有 8 种动作但**没有 dispatch 层**（无权限判定/确认挂起/留痕/取消）——**已在 C 修掉**；`src/api/http-api.js:82` 只绑回环 + Token；`src/mcp/server.js:112` 是**独立 stdio 进程转发 HTTP**，`nyx_screenshot` 还把截图当主通道（B 要把结构化的 `read_page` 顶上去）；`downloads.js` 的 `attach()` 正好挂下载审计。
 - 已定的四个决策（清单 §5 待确认项，用户未反对即按此执行）：
   1. 未命中站点**每次进站问一次**，确认框带「这次会话信任该域名」勾选（仅本进程有效、不落盘）。
   2. 名单**先域名级**（子域继承；两条都在名单里时屏蔽赢），数据留 `mode: 'host'|'prefix'` 字段以便日后扩 URL 前缀。
