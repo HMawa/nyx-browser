@@ -192,6 +192,10 @@ const {
   parseSignaturePayload: parsePackageSignaturePayload,
 } = require('./core/signing-status');
 
+// 夜间安装器 e2e 的最近一次结果（第八轮 ③）：结果文件 → 中文结论
+const { describeNightlyStatus } = require('./core/nightly-status');
+const NIGHTLY_STATUS_FILE = 'nightly-e2e.json';
+
 // 外壳防护现值表（C3）：每个窗口角色的期望开关值 + CSP 审计 + preload 暴露面分类
 const {
   WINDOW_ROLES: SECURITY_WINDOW_ROLES,
@@ -8015,6 +8019,33 @@ function registerUpdateIpc() {
   ipcMain.handle('nyx:update:delta-check', async (_event, payload) =>
     measureDeltaHitRate({ blockSize: payload && payload.blockSize }),
   );
+
+  /**
+   * 夜间安装器 e2e 的最近一次结果（候选③）。
+   * 数据源是 `scripts/nightly-e2e.js --run` 写下的 `<userData>/nightly-e2e.json`——
+   * 读取失败不当"没跑过"，而是如实说"读不出来"：两者对用户是不同的处置。
+   */
+  ipcMain.handle('nyx:nightly:status', () => {
+    const file = userDataFile(NIGHTLY_STATUS_FILE);
+    let raw = null;
+    let readError = '';
+    try {
+      raw = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+    } catch (error) {
+      if (error && error.code !== 'ENOENT') readError = String(error.message || error);
+    }
+    const described = describeNightlyStatus(raw, { now: Date.now() });
+    return {
+      ...described,
+      file,
+      readError,
+      ok: readError ? false : described.ok,
+      level: readError ? 'unknown' : described.level,
+      text: readError
+        ? `夜间 e2e 的状态文件读不出来（${readError}）。它应该在 ${file}；没有这个文件说明这台机器还没跑过。`
+        : described.text,
+    };
+  });
 
   /** 打开更新源目录（不存在时先建出来，避免 explorer 报错） */
   ipcMain.handle('nyx:update:open-source', async () => {

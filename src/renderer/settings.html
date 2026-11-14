@@ -1331,6 +1331,28 @@
               </div>
             </section>
 
+            <!-- 夜间安装器 e2e（第八轮 ③）：最近一次真机跑升级路径的结果 -->
+            <section class="info-card">
+              <div class="info-head">
+                <h3>夜间安装器 e2e</h3>
+                <span class="badge" id="nightly-badge">—</span>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  这条检查会真的装一遍旧版、再覆盖装当前版，要管理员权限、会临时搬走用户数据，
+                  所以它不在 <code>npm run verify</code> 里，而是固定成夜间的命令行任务。
+                  这里只显示最近一次的结果，不提供「现在就跑」的按钮——跑一次要十几分钟，
+                  而且会动到真实安装目录，必须由你自己在命令行里执行
+                  <code>node scripts/nightly-e2e.js --run</code>。
+                </p>
+                <div class="kv-grid" id="nightly-grid"></div>
+                <p class="hint" id="nightly-summary" role="status" aria-live="polite">读取中…</p>
+                <div class="sec-actions">
+                  <button type="button" class="btn btn-mini" id="btn-nightly-refresh">重新读取</button>
+                </div>
+              </div>
+            </section>
+
             <section class="info-card">
               <div class="info-head">
                 <h3>关于 Nyx</h3>

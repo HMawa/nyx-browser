@@ -28,6 +28,10 @@ const ROOT = path.resolve(__dirname, '..');
 const RECORD = path.join(ROOT, 'docs', '安装器e2e夜间记录.md');
 const LOG_DIR = path.join(ROOT, 'temp');
 const TASK_NAME = 'Nyx-Installer-E2E-Nightly';
+// 状态文件落在应用的 userData 里：设置页读的就是这一个，换台机器/换用户各看各的。
+const USER_DATA =
+  process.env.NYX_USER_DATA || path.join(process.env.APPDATA || path.join(process.env.USERPROFILE || ROOT, 'AppData', 'Roaming'), 'Nyx');
+const STATUS_FILE = path.join(USER_DATA, 'nightly-e2e.json');
 
 function say(line) {
   console.log(`[夜间 e2e] ${line}`);
@@ -149,6 +153,34 @@ function appendRecord(row) {
   say(`记录已追加：${path.relative(ROOT, RECORD)}`);
 }
 
+/**
+ * 把这次结果也写成 JSON 状态，给设置页读（`<userData>/nightly-e2e.json`）。
+ * 写失败不中断：记录表已经追加过了，状态卡只是"顺手能让用户看见"，不该反过来把跑失败判成失败。
+ */
+function writeStatus(row, extra = {}) {
+  const status = {
+    at: extra.at || Date.now(),
+    ok: row.ok === true,
+    baseline: row.baseline || '',
+    total: row.total === null ? null : row.total,
+    passed: row.passed === null ? null : row.passed,
+    failed: row.failed === null ? null : row.failed,
+    skipped: row.skipped === null ? null : row.skipped,
+    error: row.ok ? '' : row.error || '见日志',
+    log: row.note || '',
+    task: TASK_NAME,
+  };
+  try {
+    ensureDir(path.dirname(STATUS_FILE));
+    fs.writeFileSync(STATUS_FILE, `${JSON.stringify(status, null, 2)}\n`, 'utf8');
+    say(`状态已写入：${STATUS_FILE}`);
+    return true;
+  } catch (error) {
+    console.warn(`[夜间 e2e] 状态文件没能写入 ${STATUS_FILE}：${error && error.message}`);
+    return false;
+  }
+}
+
 function main() {
   const options = readArgs(process.argv.slice(2));
   if (options.unknown) {
@@ -212,6 +244,19 @@ function main() {
     error: failedStep ? failedStep.result.error : '',
     note: `日志：temp\\${path.basename(logFile)}`,
   });
+  writeStatus(
+    {
+      baseline: summary.baseline,
+      total: summary.total,
+      passed: summary.passed,
+      failed: summary.failed,
+      skipped: summary.skipped,
+      ok: !failedStep,
+      error: failedStep ? failedStep.result.error : '',
+      note: `日志：temp\\${path.basename(logFile)}`,
+    },
+    { at: now.getTime() },
+  );
   if (failedStep) {
     console.error(`[夜间 e2e] 第 ${steps.indexOf(failedStep.step) + 1} 步失败：${failedStep.step.name}｜${failedStep.result.error}`);
     return 1;

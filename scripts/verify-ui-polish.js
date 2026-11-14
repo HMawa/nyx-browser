@@ -3537,6 +3537,42 @@ async function main() {
       }
     }
 
+    // 夜间安装器 e2e 状态卡（第八轮 ③）：隔离 userData 里没有结果文件，
+    // 界面就必须说「还没跑过」并给出怎么跑，而不是一片空白或装作通过。
+    if (settings) {
+      try {
+        const nightly = await settings.eval(`(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          document.querySelector('[data-sec="about"]')?.click();
+          await wait(600);
+          const api = window.nyx.nightlyStatus ? await window.nyx.nightlyStatus() : null;
+          const badge = (document.getElementById('nightly-badge') || {}).textContent || '';
+          const summary = (document.getElementById('nightly-summary') || {}).textContent || '';
+          return {
+            hasApi: Boolean(window.nyx.nightlyStatus),
+            apiLevel: (api && api.level) || '',
+            apiText: (api && api.text) || '',
+            hasRunButton: Boolean(document.querySelector('[data-nightly-run],#btn-nightly-run')),
+            badge,
+            summary,
+          };
+        })()`);
+        check(
+          '设置页如实说夜间 e2e「还没跑过」并给出怎么跑，且不提供任何「现在就跑」的按钮（第八轮 ③）',
+          nightly
+            && nightly.hasApi === true
+            && nightly.apiLevel === 'never'
+            && /还没跑过/.test(nightly.apiText)
+            && /nightly-e2e\.js --run/.test(nightly.apiText)
+            && nightly.summary.includes('还没跑过')
+            && nightly.hasRunButton === false,
+          JSON.stringify(nightly),
+        );
+      } catch (err) {
+        check('夜间 e2e 状态卡端到端检查未中断', false, err && err.message);
+      }
+    }
+
     if (settings) {
       const settingsErrors = settings.exceptions();
       check('设置窗口无未捕获脚本异常', settingsErrors.length === 0, settingsErrors.slice(0, 3).join(' | '));

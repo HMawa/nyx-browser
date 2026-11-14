@@ -544,6 +544,9 @@ contextBridge.exposeInMainWorld('nyx', {
   // 差分命中率实测（只在用户点按钮时跑，结果落盘）
   updateDeltaCheck: (payload) => ipcRenderer.invoke('nyx:update:delta-check', payload || {}),
 
+  // 夜间安装器 e2e 的最近一次结果（只读；跑不跑是命令行的事）
+  nightlyStatus: () => ipcRenderer.invoke('nyx:nightly:status'),
+
   /** 在资源管理器里打开更新源目录 */
   updateOpenSource: () => ipcRenderer.invoke('nyx:update:open-source'),
 

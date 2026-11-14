@@ -409,6 +409,64 @@ check(
 );
 
 
+check(
+  '夜间 e2e：跑完也写一份 JSON 状态，落在应用 userData 里给设置页读',
+  (() => {
+    const code = read(path.join(ROOT, 'scripts', 'nightly-e2e.js'));
+    const sameDir = /process\.env\.NYX_USER_DATA/.test(code) && /path\.join\(USER_DATA, 'nightly-e2e\.json'\)/.test(code);
+    const writer = /function writeStatus\(row, extra = \{\}\)/.test(code) && /fs\.writeFileSync\(STATUS_FILE/.test(code);
+    const calledInRun = /appendRecord\(\{[\s\S]{0,400}?\}\);\s*writeStatus\(/.test(code);
+    // 写状态失败不许把一次跑成功的 e2e 判成失败
+    const warnOnly = /状态文件没能写入/.test(code) && !/if \(!writeStatus\(/.test(code);
+    return sameDir && writer && calledInRun && warnOnly;
+  })(),
+  'USER_DATA 同源、writeStatus 定义、在 appendRecord 之后调用、写失败只告警',
+);
+
+check(
+  '夜间 e2e 状态：没跑过/通过/失败/太久没更新四种说法分开，坏数据不当成「跑过」',
+  (() => {
+    const { describeNightlyStatus, normalizeNightlyStatus } = require(path.join(ROOT, 'src', 'core', 'nightly-status.js'));
+    const now = Date.UTC(2026, 10, 15, 0, 0, 0);
+    const never = describeNightlyStatus(null, { now });
+    const pass = describeNightlyStatus({ at: now - 3600e3, ok: true, total: 57, passed: 56, failed: 0, skipped: 1, baseline: '1.16.0' }, { now });
+    const fail = describeNightlyStatus({ at: now - 3600e3, ok: false, error: 'exit=1', total: 57 }, { now });
+    const stale = describeNightlyStatus({ at: now - 5 * 24 * 3600e3, ok: true, total: 57 }, { now });
+    return never.level === 'never' && /还没跑过/.test(never.text)
+      && pass.level === 'pass' && pass.rows.length >= 4 && /57 项断言 \/ 通过 56 \/ 失败 0 \/ 跳过 1/.test(pass.text)
+      && fail.level === 'fail' && /exit=1/.test(fail.text)
+      && stale.level === 'stale' && /别当成今天的状态/.test(stale.text)
+      && normalizeNightlyStatus({}) === null
+      && normalizeNightlyStatus({ at: 'x' }) === null
+      && normalizeNightlyStatus({ at: now }) !== null;
+  })(),
+  '四种 level 与文案、`{}` 与非法 at 一律返回 null',
+);
+
+check(
+  '夜间 e2e 状态：设置页只读展示，界面里没有任何「现在就跑」的入口',
+  (() => {
+    const mainCode = read(path.join(ROOT, 'src', 'main.js'));
+    const preloadCode = read(path.join(ROOT, 'src', 'preload.js'));
+    const htmlCode = read(path.join(ROOT, 'src', 'renderer', 'settings.html'));
+    const settingsCode = read(path.join(ROOT, 'src', 'renderer', 'settings.js'));
+    const wired = /ipcMain\.handle\('nyx:nightly:status'/.test(mainCode)
+      && /userDataFile\(NIGHTLY_STATUS_FILE\)/.test(mainCode)
+      && /nightlyStatus: \(\) => ipcRenderer\.invoke\('nyx:nightly:status'\)/.test(preloadCode)
+      && /id="nightly-badge"/.test(htmlCode) && /id="nightly-grid"/.test(htmlCode)
+      && /id="btn-nightly-refresh"/.test(htmlCode)
+      && /async function loadNightlyStatus\(/.test(settingsCode)
+      && /loadNightlyStatus\(\);/.test(settingsCode);
+    // 只读的硬约束：整个界面里不存在"触发一次夜间 e2e"的通道
+    const readOnly = !/nightlyRun|nightly-run|nightlyE2eRun/.test(preloadCode)
+      && !/nightlyRun|nightly-run/.test(settingsCode)
+      && !/nightlyRun|nightly-run/.test(mainCode);
+    return wired && readOnly;
+  })(),
+  'IPC + preload + 四个 id + 加载函数都在，且没有任何触发跑 e2e 的入口',
+);
+
+
 const failed = checks.filter((item) => !item.ok);
 console.log(`\n[Nyx] 发版门禁接线检查（${checks.length} 项）`);
 for (const item of checks) {

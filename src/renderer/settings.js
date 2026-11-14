@@ -319,6 +319,8 @@
       loadSecurityBaseline();
       // 安装包签名（第五轮 ②）：exe 的签名与证书有效期，内核侧有十分钟缓存
       loadSigningStatus();
+      // 夜间安装器 e2e（第八轮 ③）：最近一次真机跑升级路径的结果，只读
+      loadNightlyStatus();
     }
 
     // 诊断（清单 C1）：状态与错误记录随时会变，每次进入都重新拉
@@ -3189,6 +3191,65 @@ async function loadSigningStatus(force) {
     summary.textContent = res.message || '';
     const bad = res.level !== 'valid' && res.level !== 'expiring';
     summary.className = bad ? 'hint is-warn' : 'hint';
+  }
+}
+
+/**
+ * 夜间安装器 e2e 的最近一次结果（第八轮 ③）。
+ * 只读：跑一次要管理员权限、十几分钟，还会动真实安装目录，所以界面不提供"现在就跑"。
+ */
+async function loadNightlyStatus() {
+  const grid = byId('nightly-grid');
+  const badge = byId('nightly-badge');
+  const summary = byId('nightly-summary');
+  const btn = byId('btn-nightly-refresh');
+  if (!grid) return;
+
+  if (btn && !btn.dataset.wired) {
+    btn.dataset.wired = '1';
+    btn.addEventListener('click', () => {
+      btn.disabled = true;
+      loadNightlyStatus().finally(() => {
+        btn.disabled = false;
+      });
+    });
+  }
+
+  if (typeof window.nyx.nightlyStatus !== 'function') {
+    if (badge) {
+      badge.textContent = '不支持';
+      badge.className = 'badge';
+    }
+    grid.textContent = '';
+    if (summary) {
+      summary.textContent = '当前内核不支持读取夜间 e2e 结果。';
+      summary.className = 'hint';
+    }
+    return;
+  }
+
+  const res = await window.nyx.nightlyStatus().catch((err) => ({
+    ok: false,
+    level: 'unknown',
+    label: '读不出',
+    text: `读取失败：${err && err.message ? err.message : String(err)}`,
+    rows: [],
+  }));
+
+  const level = res && typeof res.level === 'string' ? res.level : 'unknown';
+  const rows = Array.isArray(res && res.rows) ? res.rows : [];
+  if (rows.length) {
+    renderKvGrid(grid, rows.map((item) => [item.label, item.value]));
+  } else {
+    grid.textContent = '';
+  }
+  if (badge) {
+    badge.textContent = (res && res.label) || '未知';
+    badge.className = `badge ${level === 'pass' ? 'ok' : level === 'never' || level === 'stale' ? 'warn' : 'bad'}`;
+  }
+  if (summary) {
+    summary.textContent = (res && res.text) || '';
+    summary.className = level === 'pass' ? 'hint' : 'hint is-warn';
   }
 }
 
