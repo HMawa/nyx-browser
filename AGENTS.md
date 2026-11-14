@@ -29,7 +29,7 @@
 
 ## 2. 固定事实（2026-11-12 基线）
 
-- 版本：`package.json` = **1.17.6**；**已发布**的产物 `dist/Nyx-Setup-1.17.6.exe`（Electron 45.3.2，127,217,296 字节，sha256 `99d4d0e8d3b162e8bf27e68d683f1363c0b4b0e59f4a99f208ca212f2dd835c6`，签名 `CN=Nyx Self-Signed, O=Nyx contributors, OU=local build`，指纹 `256F208A5D31782DAF9DA041CF1D7A2A382931D0`）；更新源 `latest.json` 已指向它。留档保留 1.17.6 / 1.17.5 / 1.17.4（1.17.3 已清理）；`dist-sign` 里还留着旧版本，**验签按版本号挑包**（`scripts/lib/pick-artifact.js`），不会再验到旧包。
+- 版本：`package.json` = **1.17.7**；**已发布**的产物 `dist/Nyx-Setup-1.17.7.exe`（Electron 45.3.2，127,225,416 字节，sha256 `ffb68720c5f26353177efc3870ab6327e9c11c6495d3f77cc72429c08f497e96`，签名 `CN=Nyx Self-Signed, O=Nyx contributors, OU=local build`，指纹 `256F208A5D31782DAF9DA041CF1D7A2A382931D0`）；更新源 `latest.json` 已指向它。留档保留 1.17.7 / 1.17.6 / 1.17.5（1.17.4 已清理）；`dist-sign` 里还留着旧版本，**验签按版本号挑包**（`scripts/lib/pick-artifact.js`），不会再验到旧包。
 - 运行时：Electron 45.3.2 / Chromium 156.0.8078.100 / Node 24.22.2；Windows。
 - 运行时依赖只有两个：`@modelcontextprotocol/sdk`、`zod`（MCP server 用）。
 - 回归基线（本轮实测，全绿）：`npm run verify` = 地址栏建议 **68 项** + 界面体验 **121 项** + 出站链路守卫 **14 项** + 下载链路 **16 项** + 图形性能策略 **14 项** + 安全基线对照 **20 项** + 外壳防护基线 **19 项** + 录屏检测 **14 项** + 动作通道 **20 项** + 页面读取 **19 项** + agent 审计 **17 项** + agent 站点授权 **34 项** + agent 接入模式 **16 项** + 页面摘要（Markdown / CSV 导出）**26 项** + 标签生命周期 **18 项** + 标签休眠 **10 项** + 断网判定 **10 项** + 离线页面缓存（隐私加密·两份站点名单·各自的名单导入导出·「只存这些」与自定义模板及其导出导入·模板并进/替换与同时套到普通模式·名单是否真生效）**67 项** + 运行时兼容 **9 项** + 发版门禁接线（验签挑包·差分闸门·asar 差分结论·差分命中率实测与新鲜度·夜间 e2e 注册与状态卡·发版后自动量差分·计划任务改时间与删任务且必须复核）**45 项** + 代码签名（证书有效期·凭据管理器·签名状态进界面）**35 项** + agent 改设置（多步撤销·场景预设·改动聚合视图·按时间筛选与 CSV 导出·动作聚合·动作记录也导出 CSV）**34 项** + 打包冒烟 **11 项** = **657 项 / 23 个脚本 / 215 秒**。
@@ -245,7 +245,7 @@
 - 三个新坑：① 冒烟启动前必须 `Remove-Item Env:ELECTRON_RUN_AS_NODE`，否则进程静默退出（0 输出、0 诊断），看着像"新版本启动崩了"（红线 10 的老坑换了个马甲）；② 次序类断言要比**调用点标记**（`: autoMeasureDelta(setupPath);` vs `pruneResult = pruneMode();`），`indexOf('autoMeasureDelta(setupPath)')` 会命中函数定义；③ 一次 `edit` 的 old_string 选太窄/太宽都会吃掉相邻行（本轮吃掉 `const header = [` 与 `saveCacheSitePolicy` 的函数头），改完立刻 `node --check` 是固定动作。
 - 待办（等用户决定）：发版后的新候选；`delta-report.json` 是否要在界面里给「重新量一次」按钮；夜间 e2e 是否真注册计划任务；自定义模板是否要支持导入导出成文件；聚合视图是否要连 agent 侧的动作（不只设置改动）一起看。
 
-### 9.12 第九轮批次（2026-11-15 凌晨，五项，**代码完成，待发版**）
+### 9.12 第九轮批次（2026-11-15 凌晨，五项，**已随 1.17.7 发布**）
 
 - 来源：1.17.6 交付后用户回「全做」。顺序：①差分新鲜度 → ②夜间计划任务 → ③模板导出导入 → ④动作聚合 → ⑤名单是否真生效，一项一提交，最后跑一次全量。
 - ① `d1cce41` 差分新鲜度：`src/core/delta-stats.js` 的 `STALE_DAYS = 30` / `DAY_MS` / `describeDeltaFreshness(report, {currentVersion, staleDays, now})`（五级 `missing|failed|stale|aged|current` + `needsRemeasure`）；`main.js` 的 `latestVersionInSource()`、`updateFootprint()` 带 `deltaFreshness`、`nyx:update:delta-check` 回 `freshness`；`settings.js` 的 `renderDeltaReport(report, freshness)`（判定只在主进程与纯函数里做，界面不再自己判一遍）；`settings.html` 按钮改「重新量一次」。**取证结论：按钮第七轮就有，「加按钮」不成立**，真缺陷是配对变了以后旧数字照挂（静默误导）。门禁 38 → **40**。
@@ -257,7 +257,7 @@
 - 三个新坑：① 改实现后原有静态断言会假红（`delta: readDeltaReport()` → `const delta = readDeltaReport()`；`applySiteTemplate` 加参数后旧正则不锚定参数列表照样通过），必须连断言一起改；② 断言自己也要写对（`/effective,$/` 少了 `m` 标志恒假）；③ Windows 命令输出统一按 GBK 解（`TextDecoder('gbk')`），否则中文报错变乱码导致"读不出来"。
 - 待办（等用户决定）：是否发 1.17.7；计划任务是否支持改时间/删任务的界面入口；模板导出是否带「套用到普通模式名单」选项；动作聚合是否支持导出 CSV；隐私名单是否允许按模板切换。
 
-### 9.13 第十轮批次（2026-11-15 凌晨，五项，**代码完成，待发版**）
+### 9.13 第十轮批次（2026-11-15 凌晨，五项，**已随 1.17.7 发布**）
 
 - 来源：第九轮交付后用户回「全做」。顺序：先做完 ②计划任务界面入口 ③模板替换并顺带套普通模式 ⑤隐私名单按模板切换 ④动作聚合导出 CSV，最后统一发 ①1.17.7（避免连发两版）。
 - ② `a595297` 计划任务改时间/删任务：把 `scripts/lib/nightly-plan.js` 的实现**搬到 `src/core/nightly-task.js`**（主进程与命令行必须共用一份「参数怎么拼、输出怎么读」，两处各写一份迟早走样），`scripts/lib/nightly-plan.js` 改成一行转出口；新增 `buildQueryArgs`、`isValidTime`（区分"写对了"与"悄悄回落默认"）、`describeTaskAction(action, result, verify)`（命令说成功但复核查不到 → 一律算失败）、`resolveTaskPaths({isPackaged, …})`（安装版没有 `scripts/` → `NOT_AVAILABLE`）。`main.js` 的 `runNightlySchtasks/queryNightlyTask/resolveNightlyNode/nightlyTaskPayload` + 三个 IPC，全部复核；设置页夜间卡加时间输入与「注册 / 改时间」「删掉任务」两颗按钮。**刻意不给「现在就跑一次」**（那是另一件事，且会在用户不知情时启动安装包）。
@@ -267,5 +267,6 @@
 - 拆提交的新方法（值得复用）：同一文件混多组改动时，`git apply` 用 `-U0`（无上下文，校验不了位置）与 `-U1`（new 侧行号假设所有桶都在）都会失败。改用 **`temp/apply-r10.js`**：`git show HEAD:<file>` 取旧内容 + 完整备份做 `git diff --no-index --unified=1`，按新增行关键词把 hunk 分桶，再**整段（含上下文）替换**合成「HEAD + 指定桶」，逐轮 `node temp/apply-r10.js nightly` → 提交 → `nightly,template` → 提交 → 全部；最后与备份逐 sha256 比对必须全部 `SAME`。
 - 三个新坑：① 取数函数名字想当然（普通模式那份叫 `cacheSitePolicy()`，**没有** `normalSitePolicy`）；② 改实现后旧断言假红（`message: effective.active ? result.message : …` 那条正则跟着新实现改）；③ 插 check 时把紧随其后的 `const failed = checks.filter(…)` 一起替换掉 → `ReferenceError: failed is not defined`，改完必须立刻跑一次该脚本。
 - 待办（等用户决定）：是否发 1.17.7；计划任务在安装版里能不能用（现在只支持源码目录）；模板替换是否要「先备份当前名单再换」；动作 CSV 是否要带每条记录的时间序列；隐私名单是否要按站点模板批量切换（现在是一次一个模板）。
+- **1.17.7 发布凭据**：`dist/Nyx-Setup-1.17.7.exe` 127,225,416 字节、sha256 `ffb68720c5f26353177efc3870ab6327e9c11c6495d3f77cc72429c08f497e96`；完整性 9/9、冒烟 11/11、安装器 e2e 56/56（升级基线 1.17.6）、发版收尾自动量差分「1.17.6 → 1.17.7：243 块 / 命中 0 / 0.00%」；真机静默安装 FileVersion 1.17.7 + 启动 5 进程 661 MB；留档 1.17.7 / 1.17.6 / 1.17.5（清理 1.17.4）；tag `v1.17.7`；文档见 `docs/Nyx-1.17.7-发版记录.md`。**这一版同时含第九轮五项**（它当时只差发版）。
 
 
