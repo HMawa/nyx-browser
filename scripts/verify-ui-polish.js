@@ -2767,6 +2767,106 @@ async function main() {
       JSON.stringify(modeFlow.done) + JSON.stringify(modeFlow.back),
     );
 
+    /* ---------- 页面摘要（清单 F）：默认关 → 明确原因；开启后能抽取正文 + 网络结论 ---------- */
+    // 先确认默认是关的（userData 是隔离的，没写过 digestEnabled）
+    const digestDefault = await shell.eval(`window.nyx.digestGet()`);
+    await shell.eval(`document.getElementById('btn-digest').click()`);
+    await sleep(400);
+    await shell.eval(`document.getElementById('digest-run').click()`);
+    await sleep(700);
+    const digestOff = await shell.eval(`(() => ({
+      panelOpen: !document.getElementById('digest-panel').hidden,
+      enabled: document.getElementById('digest-enabled').checked,
+      status: (document.getElementById('digest-status') || {}).textContent || '',
+      statusWarn: (document.getElementById('digest-status') || {}).className || '',
+      bodyText: (document.getElementById('digest-body') || {}).textContent || '',
+    }))()`);
+    check(
+      '页面摘要默认关闭，点生成会给出明确原因而不是静默什么都不做（F）',
+      digestDefault && digestDefault.enabled === false
+        && digestOff.panelOpen === true
+        && digestOff.enabled === false
+        && /没有开启|默认/.test(digestOff.status)
+        && /is-warn/.test(digestOff.statusWarn)
+        && digestOff.bodyText.trim() === '',
+      JSON.stringify(digestDefault) + JSON.stringify(digestOff),
+    );
+
+    // 打开开关，新开一个标签到结构化测试页，再生成一次
+    await shell.eval(`(() => {
+      const box = document.getElementById('digest-enabled');
+      box.checked = true;
+      box.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    })()`);
+    await sleep(500);
+    const digestPageUrl = `http://127.0.0.1:${httpPort}/b-page?digest=${Date.now()}`;
+    await shell.eval(`window.nyx.createTab(${JSON.stringify(digestPageUrl)})`);
+    // 等这一页真的成为活动标签且加载完（否则生成摘要会说"当前没有打开的页面"）
+    let digestReady = null;
+    for (let i = 0; i < 40; i += 1) {
+      digestReady = await shell.eval(`(async () => {
+        const snapshot = await window.nyx.getState();
+        const tab = (snapshot.tabs || []).find((t) => t.id === snapshot.activeId);
+        return tab ? { url: tab.url, loading: tab.loading } : null;
+      })()`);
+      if (digestReady && /b-page/.test(digestReady.url || '') && digestReady.loading === false) break;
+      await sleep(250);
+    }
+    await sleep(400);
+    await shell.eval(`document.getElementById('digest-run').click()`);
+    let digestBody = '';
+    for (let i = 0; i < 24; i += 1) {
+      digestBody = await shell.eval(`(document.getElementById('digest-body') || {}).textContent || ''`);
+      if (/这段正文/.test(digestBody) && /个请求/.test(digestBody)) break;
+      await sleep(250);
+    }
+    const digestPayload = await shell.eval(`(() => ({
+      enabled: document.getElementById('digest-enabled').checked,
+      status: (document.getElementById('digest-status') || {}).textContent || '',
+      body: (document.getElementById('digest-body') || {}).textContent || '',
+      blocks: document.querySelectorAll('#digest-body .digest-block').length,
+    }))()`);
+    check(
+      '打开开关后能抽取正文摘要，并把抓包结论一起给出来（F）',
+      digestReady !== null
+        && /b-page/.test(digestReady.url || '')
+        && digestPayload.enabled === true
+        && /这段正文/.test(digestPayload.body)
+        && /个请求，失败 \d+ 个/.test(digestPayload.body)
+        && digestPayload.blocks >= 3,
+      JSON.stringify({
+        tab: digestReady,
+        status: digestPayload.status,
+        blocks: digestPayload.blocks,
+        body: digestPayload.body.slice(0, 160),
+      }),
+    );
+    // 收尾：关掉开关并收起侧栏，避免影响后面的用例
+    await shell.eval(`(() => {
+      const box = document.getElementById('digest-enabled');
+      if (box && box.checked) {
+        box.checked = false;
+        box.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      document.getElementById('digest-close').click();
+      return true;
+    })()`);
+    await sleep(400);
+    // 这一页会把 127.0.0.1 写进历史，后面「按站点聚合出 3 个站点」会被多出一条搞红——清掉本次的痕迹
+    await shell.eval(`(async () => {
+      const snapshot = await window.nyx.getState();
+      const target = (snapshot.tabs || []).find((t) => /b-page/.test(t.url || '')) || null;
+      if (target) await window.nyx.closeTab(target.id);
+      const listed = await window.nyx.historyList({ limit: 50 });
+      const rows = (listed && (listed.items || listed.records)) || [];
+      for (const row of rows) {
+        if (row && /127\\.0\\.0\\.1/.test(String(row.url || ''))) await window.nyx.historyRemove({ id: row.id });
+      }
+      return true;
+    })()`);
+    await sleep(500);
+
     /* ---------- 运行时无脚本异常 ---------- */
     const shellErrors = shell.exceptions();
     /* ---------- B3（设置页侧）：卡片 / 未勾确认被拦 / 勾选后可改可回 ---------- */

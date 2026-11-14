@@ -155,6 +155,11 @@ contextBridge.exposeInMainWorld('nyx', {
   // agent 接入模式（清单 A）：切换要两次确认，第二次还得勾风险；改完要重启才生效。
   agentMode: () => ipcRenderer.invoke('nyx:agent:mode'),
   agentModeSet: (payload) => ipcRenderer.invoke('nyx:agent:mode-set', payload || {}),
+  // 页面摘要（清单 F）：纯抽取式，默认关；关着时 run 会回一个明确原因
+  digestGet: () => ipcRenderer.invoke('nyx:digest:get'),
+  digestSet: (payload) => ipcRenderer.invoke('nyx:digest:set', payload || {}),
+  digestRun: (payload) => ipcRenderer.invoke('nyx:digest:run', payload || {}),
+  digestCopy: (text) => ipcRenderer.invoke('nyx:digest:copy', { text: String(text || '') }),
 
 
   /** 权限决策轨迹（默认最近 50 条） */

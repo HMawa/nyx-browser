@@ -42,6 +42,11 @@
         <!-- 书签星标（v1.4.0）：收藏 / 取消收藏当前页；状态由 renderer.js 按当前标签刷新 -->
         <button class="icon-btn bm-star" id="btn-bookmark" title="收藏当前页">☆</button>
 
+        <!-- 页面摘要（F）：侧栏展示 + 一键复制；默认关，开关本身在这里，用户点了才读页面 -->
+        <button class="icon-btn" id="btn-digest" title="页面摘要（纯抽取，默认关闭）">
+          <span aria-hidden="true">≡</span>
+        </button>
+
         <button
           class="icon-btn"
           id="btn-toolbox"
@@ -408,6 +413,27 @@
         <p class="pe-foot" id="pe-foot"></p>
       </div>
     </div>
+
+    <!-- 页面摘要（F）：右侧栏。纯抽取式，开关在栏内；关着时按钮点开会说明原因，不静默 -->
+    <aside class="digest-panel" id="digest-panel" hidden aria-label="页面摘要">
+      <div class="digest-head">
+        <h2 class="digest-title">页面摘要</h2>
+        <label class="digest-switch">
+          <input type="checkbox" id="digest-enabled" />
+          <span>允许读取这一页</span>
+        </label>
+        <button class="digest-close" id="digest-close" type="button" aria-label="关闭摘要栏">✕</button>
+      </div>
+      <p class="digest-hint" id="digest-hint">
+        摘要只从页面原文里抽取句子，不调用任何生成式接口；每句话都能在页面上找到。
+      </p>
+      <div class="digest-actions">
+        <button class="tb-btn tb-btn-primary" id="digest-run" type="button">生成摘要</button>
+        <button class="tb-btn" id="digest-copy" type="button">复制</button>
+      </div>
+      <p class="digest-status" id="digest-status" role="status" aria-live="polite"></p>
+      <div class="digest-body" id="digest-body"></div>
+    </aside>
 
     <script src="renderer.js"></script>
     <script src="bookmark-bar.js"></script>

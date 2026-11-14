@@ -38,6 +38,12 @@ const UI_PREF_DEFAULTS = {
    * 只在下次启动生效（Chromium 的 GPU 选择发生在 ready 之前）。
    */
   gpuPolicy: 'low-power',
+
+  /**
+   * 页面摘要（清单 F）：默认**关闭**。
+   * 它是纯抽取式的（不调生成式 API），但"要不要让 Nyx 读这一页"仍然应该由用户点开关决定。
+   */
+  digestEnabled: false,
 };
 
 /** 枚举型偏好的合法取值（键 → 允许值）。

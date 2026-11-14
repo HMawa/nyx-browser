@@ -42,6 +42,15 @@ const els = {
   peDiagnostics: document.getElementById('pe-diagnostics'),
   peCopy: document.getElementById('pe-copy'),
   peFoot: document.getElementById('pe-foot'),
+  // 页面摘要侧栏（F）：纯抽取式，默认关
+  btnDigest: document.getElementById('btn-digest'),
+  digestPanel: document.getElementById('digest-panel'),
+  digestEnabled: document.getElementById('digest-enabled'),
+  digestClose: document.getElementById('digest-close'),
+  digestRun: document.getElementById('digest-run'),
+  digestCopy: document.getElementById('digest-copy'),
+  digestStatus: document.getElementById('digest-status'),
+  digestBody: document.getElementById('digest-body'),
 };
 
 /** 当前界面状态快照 */
@@ -937,6 +946,210 @@ if (window.nyx.onAgentStatus) {
 if (window.nyx.agentStatus) {
   window.nyx.agentStatus().then((res) => {
     if (res && res.ok) applyAgentStatus(res);
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* 页面摘要侧栏（清单 F）                                              */
+/* 纯抽取式：只把页面原文里的句子挑出来，不调用任何生成式接口。        */
+/* 抓包摘要一起给——"页面显示成功、接口其实 500"是最容易被骗的地方。  */
+/* ------------------------------------------------------------------ */
+
+/** 上一次生成的纯文本（复制用），为空时说明还没生成过 */
+let lastDigestText = '';
+
+function setDigestStatus(text, kind) {
+  if (!els.digestStatus) return;
+  els.digestStatus.textContent = text || '';
+  els.digestStatus.className = `digest-status${kind ? ` is-${kind}` : ''}`;
+}
+
+function buildDigestBlock(title, lines, extraClass) {
+  const block = document.createElement('div');
+  block.className = `digest-block${extraClass ? ` ${extraClass}` : ''}`;
+  const heading = document.createElement('h3');
+  heading.textContent = title;
+  block.appendChild(heading);
+  const list = document.createElement('ul');
+  for (const line of lines) {
+    const item = document.createElement('li');
+    item.textContent = line;
+    list.appendChild(item);
+  }
+  block.appendChild(list);
+  return block;
+}
+
+function buildDigestMeta(page) {
+  const block = document.createElement('div');
+  block.className = 'digest-block';
+  const heading = document.createElement('h3');
+  heading.textContent = '来源';
+  block.appendChild(heading);
+  const title = document.createElement('p');
+  title.textContent = page.title || '（没有标题）';
+  title.style.margin = '0 0 4px';
+  block.appendChild(title);
+  const url = document.createElement('p');
+  url.className = 'digest-url';
+  url.textContent = page.url || '';
+  url.style.margin = '0';
+  url.style.wordBreak = 'break-all';
+  url.style.color = 'var(--text-faint)';
+  url.style.fontSize = '11px';
+  block.appendChild(url);
+  return block;
+}
+
+/** 把一次摘要结果画到侧栏上 */
+function renderDigest(payload) {
+  if (!els.digestBody) return;
+  els.digestBody.textContent = '';
+  lastDigestText = payload && typeof payload.text === 'string' ? payload.text : '';
+
+  const page = (payload && payload.page) || null;
+  const network = (payload && payload.network) || null;
+
+  if (page) {
+    els.digestBody.appendChild(buildDigestMeta(page));
+    if (Array.isArray(page.headings) && page.headings.length) {
+      els.digestBody.appendChild(buildDigestBlock('小标题', page.headings.slice(0, 6)));
+    }
+    if (Array.isArray(page.bullets) && page.bullets.length) {
+      els.digestBody.appendChild(buildDigestBlock('摘要（抽取自页面原文）', page.bullets));
+    }
+    if (Array.isArray(page.keywords) && page.keywords.length) {
+      const block = document.createElement('div');
+      block.className = 'digest-block';
+      const heading = document.createElement('h3');
+      heading.textContent = '关键词';
+      block.appendChild(heading);
+      const line = document.createElement('p');
+      line.textContent = page.keywords.map((item) => (item && item.word) || item).join(' · ');
+      line.style.margin = '0';
+      line.style.color = 'var(--text-dim)';
+      block.appendChild(line);
+      els.digestBody.appendChild(block);
+    }
+  }
+
+  if (network) {
+    const lines = [`${network.total} 个请求，失败 ${network.failed} 个`];
+    if (Array.isArray(network.hosts) && network.hosts.length) {
+      lines.push(`主要域名：${network.hosts.map((h) => `${h.host}（${h.count}）`).join('、')}`);
+    }
+    if (Array.isArray(network.apis) && network.apis.length) {
+      lines.push(`主要接口：${network.apis.map((a) => `${a.key}（${a.count}）`).join('、')}`);
+    }
+    const block = buildDigestBlock(
+      network.missing ? '网络（这次没取到抓包记录）' : '网络',
+      lines,
+      network.warning ? 'warn' : '',
+    );
+    if (network.warning) {
+      const warn = document.createElement('p');
+      warn.textContent = network.warning;
+      warn.style.margin = '6px 0 0';
+      block.appendChild(warn);
+    }
+    els.digestBody.appendChild(block);
+  }
+}
+
+function openDigestPanel() {
+  if (!els.digestPanel) return;
+  els.digestPanel.hidden = false;
+  setDigestStatus('', '');
+  if (!window.nyx.digestGet) {
+    setDigestStatus('当前内核不支持页面摘要。', 'warn');
+    return;
+  }
+  window.nyx.digestGet().then((res) => {
+    if (els.digestEnabled) els.digestEnabled.checked = Boolean(res && res.enabled);
+  }).catch((err) => {
+    setDigestStatus(`读不到摘要开关：${String(err && err.message ? err.message : err)}`, 'warn');
+  });
+}
+
+function closeDigestPanel() {
+  if (els.digestPanel) els.digestPanel.hidden = true;
+}
+
+async function runDigest() {
+  if (!window.nyx.digestRun) {
+    setDigestStatus('当前内核不支持页面摘要。', 'warn');
+    return;
+  }
+  els.digestRun.disabled = true;
+  setDigestStatus('正在读取这一页…（只抽取原文，不联网）', '');
+  try {
+    const res = await window.nyx.digestRun({});
+    if (!res || res.ok !== true) {
+      // 关着的时候主进程会回 DIGEST_DISABLED 与明确原因——不许静默什么都不做
+      const reason = res && res.error ? res.error : '没能生成摘要';
+      setDigestStatus(reason, 'warn');
+      if (res && res.code === 'DIGEST_DISABLED') {
+        showNotice({ level: 'info', title: '页面摘要没有开启', message: reason });
+      }
+      return;
+    }
+    renderDigest(res);
+    setDigestStatus(`已生成：抽取 ${res.page.bullets.length} 句（候选 ${res.page.candidates} 句）`, 'ok');
+  } catch (err) {
+    setDigestStatus(`生成失败：${String(err && err.message ? err.message : err)}`, 'warn');
+  } finally {
+    els.digestRun.disabled = false;
+  }
+}
+
+async function copyDigest() {
+  if (!lastDigestText) {
+    setDigestStatus('还没有摘要可以复制，先生成一次。', 'warn');
+    return;
+  }
+  if (!window.nyx.digestCopy) {
+    setDigestStatus('当前内核不支持复制。', 'warn');
+    return;
+  }
+  try {
+    const res = await window.nyx.digestCopy(lastDigestText);
+    if (res && res.ok) setDigestStatus('摘要已复制到剪贴板', 'ok');
+    else setDigestStatus(res && res.error ? res.error : '复制失败', 'warn');
+  } catch (err) {
+    setDigestStatus(`复制失败：${String(err && err.message ? err.message : err)}`, 'warn');
+  }
+}
+
+if (els.btnDigest) {
+  els.btnDigest.addEventListener('click', () => {
+    if (!els.digestPanel) return;
+    if (els.digestPanel.hidden) openDigestPanel();
+    else closeDigestPanel();
+  });
+}
+if (els.digestClose) els.digestClose.addEventListener('click', closeDigestPanel);
+if (els.digestRun) els.digestRun.addEventListener('click', () => { runDigest(); });
+if (els.digestCopy) els.digestCopy.addEventListener('click', () => { copyDigest(); });
+if (els.digestEnabled) {
+  els.digestEnabled.addEventListener('change', async () => {
+    const enabled = els.digestEnabled.checked;
+    if (!window.nyx.digestSet) return;
+    try {
+      const res = await window.nyx.digestSet({ enabled });
+      if (!res || res.ok !== true) {
+        setDigestStatus(res && res.error ? res.error : '开关没能保存', 'warn');
+        return;
+      }
+      if (!enabled) {
+        if (els.digestBody) els.digestBody.textContent = '';
+        lastDigestText = '';
+        setDigestStatus('已关闭：不再读取页面。需要时再打开开关重新生成。', '');
+      } else {
+        setDigestStatus('已开启：点「生成摘要」读取当前页。', 'ok');
+      }
+    } catch (err) {
+      setDigestStatus(`开关没能保存：${String(err && err.message ? err.message : err)}`, 'warn');
+    }
   });
 }
 

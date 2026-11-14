@@ -76,6 +76,13 @@ const {
   planAgentModeSwitch,
   readAgentModeFromPrefs,
 } = require('./core/agent-mode');
+const {
+  buildDigestText,
+  buildExtractScript,
+  digestDisabledPayload,
+  summarize: summarizePage,
+  summarizeNetwork,
+} = require('./core/page-digest');
 const { getRiskLog } = require('./core/risk-guard');
 const { startHttpApi } = require('./api/http-api');
 const { createModeEventLog } = require('./core/mode-events');
@@ -3433,6 +3440,7 @@ function registerIpc() {
   registerAgentAuditIpc();
   registerAgentSitesIpc();
   registerAgentModeIpc();
+  registerDigestIpc();
 
   registerUpdateIpc();
 
@@ -7641,6 +7649,106 @@ function agentModeStatus() {
     mode: runtime.agentMode,
     bootMode: runtime.bootAgentMode,
     debugPort: runtime.agentDebugPort,
+  });
+}
+
+/**
+ * 页面摘要的 IPC（清单 F）。
+ *
+ * 三个约束写在这里，因为都容易被"顺手优化"掉：
+ *  1. 默认关闭，关着就返回明确原因（不许静默不干活）；
+ *  2. 只抽取页面原文，不调任何生成式接口——每句话都能在页面上找到出处；
+ *  3. 一定要把抓包摘要一起给：页面说"成功"、接口其实 500 是这类工具最容易骗人的地方。
+ */
+function registerDigestIpc() {
+  ipcMain.handle('nyx:digest:get', () => ({
+    ok: true,
+    enabled: runtime.uiStore ? runtime.uiStore.get().digestEnabled === true : false,
+  }));
+
+  ipcMain.handle('nyx:digest:set', (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    const enabled = input.enabled === true;
+    let result = null;
+    try {
+      result = runtime.uiStore.set('digestEnabled', enabled);
+    } catch (err) {
+      diagnostics.error('DIGEST_TOGGLE_FAILED', '页面摘要开关没能保存', { error: err && err.message });
+      return { ok: false, error: `没能保存开关：${err && err.message ? err.message : err}` };
+    }
+    diagnostics.info('DIGEST_TOGGLED', `页面摘要已${enabled ? '开启' : '关闭'}`, { enabled });
+    return { ok: true, enabled, ui: result && result.ui ? result.ui : null };
+  });
+
+  ipcMain.handle('nyx:digest:run', async (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    const enabled = runtime.uiStore ? runtime.uiStore.get().digestEnabled === true : false;
+    if (!enabled && input.force !== true) return digestDisabledPayload();
+
+    const manager = runtime.tabManager;
+    // 注意：TabManager 的 active 是 getter（`get active()`），不是函数——写成 active() 会静默拿到 undefined
+    const tab = manager ? manager.active : null;
+    const wc = manager && typeof manager.getActiveWebContents === 'function'
+      ? manager.getActiveWebContents()
+      : tab && tab.view
+        ? tab.view.webContents
+        : null;
+    if (!tab || !wc || wc.isDestroyed()) {
+      return { ok: false, code: 'NO_PAGE', error: '当前没有打开的页面，先把要总结的页面打开。' };
+    }
+    try {
+      const raw = await wc.executeJavaScript(buildExtractScript({}), true);
+      const page = summarizePage(raw);
+      if (page.ok === false) {
+        diagnostics.warn('DIGEST_EMPTY', '这一页没有可读正文', { url: redactUrlForLog(tab.url || '') });
+        return { ok: false, code: 'DIGEST_EMPTY', error: page.error, page };
+      }
+
+      let network = null;
+      try {
+        const listed = runtime.toolbox && typeof runtime.toolbox.list === 'function'
+          ? runtime.toolbox.list(wc.id)
+          : { ok: false, records: [] };
+        network = summarizeNetwork((listed && listed.records) || []);
+      } catch (err) {
+        // 抓包没数据不算失败：摘要本身还能看，但要在界面说清"网络部分缺失"
+        network = summarizeNetwork([]);
+        network.missing = true;
+        console.warn('[Nyx] 页面摘要拿不到抓包记录：', err && err.message);
+      }
+
+      const result = { ok: true, page, network, ranAt: Date.now() };
+      result.text = buildDigestText(result);
+      diagnostics.info('DIGEST_RUN', '生成了页面摘要（纯抽取）', {
+        url: redactUrlForLog(page.url || ''),
+        sentences: page.bullets.length,
+        candidates: page.candidates,
+        requests: network.total,
+        failed: network.failed,
+      });
+      return result;
+    } catch (err) {
+      diagnostics.error('DIGEST_FAILED', '生成页面摘要失败', { error: err && err.message });
+      return { ok: false, code: 'DIGEST_FAILED', error: `没能读取这一页：${err && err.message ? err.message : err}` };
+    }
+  });
+
+  // 复制走主进程：写完回读校对，和失败页「复制详情」保持一致（剪贴板被占用时不许假装成功）
+  ipcMain.handle('nyx:digest:copy', (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    const text = typeof input.text === 'string' ? input.text : '';
+    if (!text) return { ok: false, error: '没有可复制的内容' };
+    try {
+      clipboard.writeText(text);
+      const readback = clipboard.readText();
+      const head = text.split('\n')[0].slice(0, 40);
+      if (!readback || (head && !readback.includes(head))) {
+        return { ok: false, error: '系统剪贴板当前不可用（可能被其它程序占用），摘要没能复制' };
+      }
+      return { ok: true, readback };
+    } catch (err) {
+      return { ok: false, error: `复制失败：${err && err.message ? err.message : err}` };
+    }
   });
 }
 

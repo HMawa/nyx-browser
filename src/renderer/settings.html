@@ -949,6 +949,26 @@
 
             <section class="info-card">
               <div class="info-head">
+                <h3>页面摘要</h3>
+                <span class="badge" id="digest-badge">—</span>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  摘要只从页面原文里抽取句子，<strong>不调用任何生成式接口</strong>；每句话都能在页面上找到出处。
+                  它把网络请求里失败的数量一起给出来——页面显示成功、接口其实 500 是最容易被骗的地方。
+                </p>
+                <div class="ack-row">
+                  <label class="checkbox">
+                    <input type="checkbox" id="digest-setting-enabled" />
+                    允许读取我打开的页面来生成摘要（默认关闭）
+                  </label>
+                </div>
+                <p class="hint" id="digest-setting-status" role="status" aria-live="polite"></p>
+              </div>
+            </section>
+
+            <section class="info-card">
+              <div class="info-head">
                 <h3>紧急停止</h3>
                 <span class="badge" id="agent-badge">—</span>
               </div>

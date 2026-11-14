@@ -3423,14 +3423,88 @@ async function loadFootprint() {
     }
   }
 
+  /* ---------- 页面摘要（清单 F） ---------- */
+
+  let digestSettingWired = false;
+
+  function renderDigestSetting(payload) {
+    const badge = byId('digest-badge');
+    const toggle = byId('digest-setting-enabled');
+    const status = byId('digest-setting-status');
+    const enabled = Boolean(payload && payload.enabled);
+    if (badge) {
+      badge.textContent = enabled ? '已开启' : '已关闭';
+      badge.className = `badge ${enabled ? 'ok' : 'warn'}`;
+    }
+    if (toggle) toggle.checked = enabled;
+    if (status) {
+      status.textContent = enabled
+        ? '当前允许读取页面。生成摘要时会在右侧栏展示，也可以一键复制。'
+        : '当前关闭：不会读取任何页面。需要时在这里或主界面右侧栏里打开。';
+      status.className = 'hint';
+    }
+  }
+
+  async function loadDigestSetting() {
+    const status = byId('digest-setting-status');
+    if (!window.nyx.digestGet) {
+      if (status) {
+        status.textContent = '当前内核不支持页面摘要。';
+        status.className = 'hint is-warn';
+      }
+      return;
+    }
+    try {
+      const res = await window.nyx.digestGet();
+      renderDigestSetting(res);
+    } catch (err) {
+      if (status) {
+        status.textContent = `读取摘要开关失败：${String(err && err.message ? err.message : err)}`;
+        status.className = 'hint is-warn';
+      }
+    }
+  }
+
+  function wireDigestSetting() {
+    if (digestSettingWired) return;
+    digestSettingWired = true;
+    const toggle = byId('digest-setting-enabled');
+    if (!toggle) return;
+    toggle.addEventListener('change', async () => {
+      const enabled = toggle.checked;
+      const status = byId('digest-setting-status');
+      if (!window.nyx.digestSet) return;
+      try {
+        const res = await window.nyx.digestSet({ enabled });
+        if (!res || res.ok !== true) {
+          if (status) {
+            status.textContent = res && res.error ? res.error : '开关没能保存';
+            status.className = 'hint is-warn';
+          }
+          toggle.checked = !enabled;
+          return;
+        }
+        renderDigestSetting(res);
+      } catch (err) {
+        toggle.checked = !enabled;
+        if (status) {
+          status.textContent = `开关没能保存：${String(err && err.message ? err.message : err)}`;
+          status.className = 'hint is-warn';
+        }
+      }
+    });
+  }
+
   function loadAgentSection() {
     wireAgentSection();
     wireAgentSites();
     wireAgentMode();
+    wireDigestSetting();
     loadAgentStatus();
     loadAgentAudit();
     loadAgentSites();
     loadAgentMode();
+    loadDigestSetting();
   }
 
   // 主界面加载失败页（A4）的「打开诊断」会要求设置窗口直接落到「诊断」分区
