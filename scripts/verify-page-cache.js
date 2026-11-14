@@ -278,7 +278,7 @@ check('20. v2 快照保留语义块结构，而不是一锅纯文本', () => {
   assert.ok(snap.blocks.every((block) => typeof block.text === 'string' && block.text), '每块都要有文本');
 });
 
-check('21. 图片只存说明文字（alt），不存二进制，也不假装存了图', () => {
+check('21. 图片默认只存说明文字（alt），没有本体时不假装存了图', () => {
   const cache = require('../src/core/page-cache');
   const snap = cache.normalizeSnapshot({
     url: 'https://example.com/b',
@@ -286,10 +286,40 @@ check('21. 图片只存说明文字（alt），不存二进制，也不假装存
     images: [{ alt: '一张价格趋势图' }, { alt: '' }, { src: 'https://cdn.example.com/x.png' }],
     skippedImages: 7,
   });
-  assert.equal(snap.images.length, 1, '空 alt 与该丢的条目都不能留下');
+  // 没有 alt 但有 http(s) 地址的条目要留下（它是"能去取本体"的候选），
+  // 既没有 alt 也没有可用地址的才丢。
+  assert.equal(snap.images.length, 2, '空 alt 但有地址的要留；两样都没有的才丢');
   assert.equal(snap.images[0].alt, '一张价格趋势图');
-  assert.ok(!JSON.stringify(snap).includes('base64'), '不许把图片二进制塞进快照');
+  assert.ok(!snap.images[0].dataUrl, '这一条没有本体，不许凭空写 dataUrl');
+  assert.ok(!JSON.stringify(snap).includes('base64'), '没有取过本体就不许出现 base64');
   assert.ok(snap.skippedImages >= 7, '跳过了多少张图要如实记账');
+});
+
+check('21b. 取到的小图能贴回快照，超过上限的一律退回只有说明（候选②）', () => {
+  const cache = require('../src/core/page-cache');
+  const snap = cache.normalizeSnapshot({
+    url: 'https://example.com/img',
+    blocks: [{ type: 'para', text: '正文在这里，大约四十个头，保证超过缓存的最小长度要求，不然快照会被拒。' }],
+    images: [
+      { alt: '小图', src: 'https://cdn.example.com/small.png' },
+      { alt: '大图', src: 'https://cdn.example.com/big.png' },
+      { alt: '没有地址', src: 'data:image/png;base64,AAAA' },
+    ],
+  });
+  assert.deepEqual(cache.imageTargets(snap), ['https://cdn.example.com/small.png', 'https://cdn.example.com/big.png'], '只挑 http(s) 且还没有本体的图');
+
+  const small = 'data:image/png;base64,' + 'A'.repeat(200);
+  const attached = cache.attachImageData(snap, [{ src: 'https://cdn.example.com/small.png', dataUrl: small, bytes: 150 }]);
+  assert.equal(attached.images[0].dataUrl, small, '取到的小图要贴回对应那条');
+  assert.equal(attached.images[0].bytes, 150);
+  assert.ok(!attached.images[1].dataUrl, '没取到的图保持只有说明');
+
+  const huge = 'data:image/png;base64,' + 'A'.repeat(300000);
+  const rejected = cache.attachImageData(snap, [{ src: 'https://cdn.example.com/big.png', dataUrl: huge, bytes: 225000 }]);
+  assert.ok(!rejected.images.some((image) => image.dataUrl), '超过单张上限的图不许贴进去');
+  assert.ok(cache.CACHE_IMAGE_BYTES_MAX <= 120 * 1024, '单张上限不许悄悄放宽');
+  assert.ok(cache.CACHE_IMAGE_TOTAL_MAX <= 480 * 1024, '一页合计上限不许悄悄放宽');
+  assert.ok(cache.CACHE_IMAGE_FETCH_MAX <= 6, '一页最多取 6 张，别把整页图都拉下来');
 });
 
 check('22. v1 旧快照（只有 text）仍然能用，自动降级成段落块', () => {

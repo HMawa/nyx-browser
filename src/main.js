@@ -101,11 +101,16 @@ const { createModeEventLog } = require('./core/mode-events');
 const { ACTIONS: LINK_GUARD_ACTIONS, isProxyFailureCode, decideProxyFailureAction } = require('./core/link-guard');
 const { networkStatePayload } = require('./core/network-state');
 const {
+  CACHE_IMAGE_BYTES_MAX,
+  CACHE_IMAGE_TOTAL_MAX,
   CACHE_LIMIT,
   CACHE_VERSION,
+  attachImageData,
   buildCaptureScript: buildPageCaptureScript,
   describeCachedPage,
   getSnapshot,
+  imageTargets,
+  normalizeSnapshot: normalizePageCacheSnapshot,
   putSnapshot,
   readCache: readPageCache,
 } = require('./core/page-cache');
@@ -118,7 +123,7 @@ const { PageTools, UA_PRESETS, DEVICE_PRESETS, THROTTLE_PRESETS } = require('./c
 const { SmartPatrol } = require('./core/smart-patrol');
 const { getHardwareStatus } = require('./core/hardware');
 const { HistoryStore } = require('./core/history-store');
-const { SiteIcons } = require('./core/site-icons');
+const { SiteIcons, sniffImageMime } = require('./core/site-icons');
 const { BookmarkStore } = require('./core/bookmark-store');
 const { Diagnostics } = require('./core/diagnostics');
 const { DownloadManager, DOWNLOAD_STATES, formatBytes, sanitizeFilename, uniquePath } = require('./core/downloads');
@@ -2595,15 +2600,70 @@ function hookHistoryRecording(tab) {
     if (!isRecordableUrl(url)) return;
     if (wc.isDestroyed()) return;
     wc.executeJavaScript(buildPageCaptureScript(), true)
-      .then((raw) => {
+      .then(async (raw) => {
         if (!raw || raw.ok !== true) return;
-        const saved = savePageCache({ url: raw.url || url, title: raw.title || '', lines: raw.lines || [], at: Date.now() });
-        if (saved && runtime.diagnostics) runtime.diagnostics.info('PAGE_CACHE_SAVED', { url: redactUrlForLog(url) });
+        const snapshot = normalizePageCacheSnapshot({
+          url: raw.url || url,
+          title: raw.title || '',
+          // v2 的块结构与图片必须一起带上：早先这里只传了 lines，
+          // 结果结构化的标题/列表全被丢掉，快照退化成一堆段落（候选②才发现）。
+          blocks: Array.isArray(raw.blocks) ? raw.blocks : [],
+          images: Array.isArray(raw.images) ? raw.images : [],
+          skippedImages: Number(raw.skippedImages) || 0,
+          lines: raw.lines || [],
+          at: Date.now(),
+        });
+        if (!snapshot) return;
+        const withImages = await fetchSnapshotImages(snapshot);
+        const saved = savePageCache(withImages);
+        if (saved && runtime.diagnostics) {
+          runtime.diagnostics.info('PAGE_CACHE_SAVED', {
+            url: redactUrlForLog(url),
+            blocks: withImages.blocks.length,
+            images: withImages.images.filter((image) => image && image.dataUrl).length,
+          });
+        }
       })
       .catch((err) => {
         console.warn('[Nyx] 离线缓存没能抓取这一页：', err && err.message ? err.message : err);
       });
   });
+}
+
+/**
+ * 给快照补上小图本体（候选②）。
+ *
+ * 只取 http(s)、只取前 CACHE_IMAGE_FETCH_MAX 张、单张超 CACHE_IMAGE_BYTES_MAX 直接放弃，
+ * 合计超过 CACHE_IMAGE_TOTAL_MAX 就停手——剩下的图退回"只有说明文字"。
+ * 单张失败不影响正文快照：断网时能读字比有一张图重要。
+ */
+async function fetchSnapshotImages(snapshot) {
+  const targets = imageTargets(snapshot);
+  if (!targets.length) return snapshot;
+  let total = 0;
+  const fetched = [];
+  for (const target of targets) {
+    try {
+      const response = await electronNet.fetch(target, { signal: AbortSignal.timeout(4000) });
+      if (!response || !response.ok) continue;
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (!buffer.length || buffer.length > CACHE_IMAGE_BYTES_MAX) continue;
+      if (total + buffer.length > CACHE_IMAGE_TOTAL_MAX) break;
+      const mime = sniffImageMime(buffer);
+      if (!mime || !/^image\//.test(mime)) continue;
+      total += buffer.length;
+      fetched.push({ src: target, dataUrl: `data:${mime};base64,${buffer.toString('base64')}`, bytes: buffer.length });
+    } catch (err) {
+      // 取不到就只是没有这张图，不当成缓存失败
+      if (runtime.diagnostics) {
+        runtime.diagnostics.warn('PAGE_CACHE_IMAGE_SKIPPED', '离线快照里的一张图没能取到，只保留说明文字', {
+          error: String(err && err.message ? err.message : err),
+        });
+      }
+    }
+  }
+  if (!fetched.length) return snapshot;
+  return attachImageData(snapshot, fetched) || snapshot;
 }
 
 /**
@@ -6445,7 +6505,7 @@ function offlineCachePayload() {
     count: items.length,
     limit: CACHE_LIMIT,
     file: runtime.pageCacheFile || userDataFile('page-cache.json'),
-    note: '只存 http(s) 页面的正文纯文字快照，用来断网时看"上次读到什么"；隐私模式从不写入。',
+    note: '只存 http(s) 页面的正文结构与纯文字，外加最多 6 张小图（单张 ≤120 KB、一页合计 ≤480 KB）；不存 Cookie 与表单内容，隐私模式从不写入。',
   };
 }
 

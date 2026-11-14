@@ -459,11 +459,33 @@ function renderCachedBlocks(res) {
     els.peCachedBlocks.appendChild(para);
   }
   if (images.length) {
+    // 有本体就画出来，没有就只能给一句说明（候选②）。
+    const withBytes = images.filter((image) => image && typeof image.dataUrl === 'string' && image.dataUrl);
     const note = document.createElement('p');
     note.className = 'pe-cached-img-note';
-    note.textContent = `这一页有 ${images.length} 张带说明的图片；离线快照只保留图片说明，不保存图片本身。`;
+    note.textContent = withBytes.length
+      ? `这一页有 ${images.length} 张图，其中 ${withBytes.length} 张存了本地副本（只有小图，单张不超过 120 KB）。`
+      : `这一页有 ${images.length} 张图片；离线快照只保留图片说明，不保存图片本身。`;
     els.peCachedBlocks.appendChild(note);
     for (const image of images) {
+      if (image && typeof image.dataUrl === 'string' && image.dataUrl) {
+        const figure = document.createElement('figure');
+        figure.className = 'pe-cached-figure';
+        const img = document.createElement('img');
+        img.className = 'pe-cached-img-real';
+        img.src = image.dataUrl;
+        img.alt = (image && image.alt) || '离线快照里的图片';
+        img.loading = 'lazy';
+        figure.appendChild(img);
+        if (image.alt) {
+          const caption = document.createElement('figcaption');
+          caption.className = 'pe-cached-caption';
+          caption.textContent = image.alt;
+          figure.appendChild(caption);
+        }
+        els.peCachedBlocks.appendChild(figure);
+        continue;
+      }
       const slot = document.createElement('p');
       slot.className = 'pe-cached-img';
       slot.textContent = `［图片］${(image && image.alt) || ''}`;

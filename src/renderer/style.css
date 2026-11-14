@@ -2672,6 +2672,27 @@ body.private-mode .shell {
   font-size: 12px;
 }
 
+/* 存了本体的小图（候选②）：限量 6 张 ×120KB，所以不需要滚动容器 */
+.pe-cached-figure {
+  margin: 8px 0;
+  padding: 0;
+}
+
+.pe-cached-img-real {
+  display: block;
+  max-width: 100%;
+  max-height: 220px;
+  width: auto;
+  height: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--bg-input) 70%, transparent);
+}
+
+.pe-cached-figure .pe-cached-caption {
+  margin: 4px 0 0;
+}
+
 .pe-foot {
   margin: 16px 0 0;
   color: var(--text-faint);

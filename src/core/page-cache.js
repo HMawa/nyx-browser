@@ -22,6 +22,14 @@ const CACHE_TEXT_MAX = 4000;
 const CACHE_TITLE_MAX = 200;
 const CACHE_BLOCK_MAX = 120;
 const CACHE_IMAGE_MAX = 12;
+/** 单张图最多存多少字节（超过就只留说明文字，不拉本体） */
+const CACHE_IMAGE_BYTES_MAX = 120 * 1024;
+/** 一页最多为图片花多少字节（所有图加起来） */
+const CACHE_IMAGE_TOTAL_MAX = 480 * 1024;
+/** 一页最多为几张图真的去取本体 */
+const CACHE_IMAGE_FETCH_MAX = 6;
+/** data URL 字符串的长度上限（base64 比原字节大约 4/3，留点余量） */
+const CACHE_IMAGE_DATAURL_MAX = Math.ceil((CACHE_IMAGE_BYTES_MAX * 4) / 3) + 128;
 
 /**
  * 缓存正文的页面侧脚本：取「结构化的正文」而不是一坨纯文字。
@@ -33,6 +41,10 @@ const CACHE_IMAGE_MAX = 12;
  *
  * 图片只存 alt 文字，不存二进制：存图等于把别人的图拉到本机磁盘上，
  * 隐私与体积都不该由一次浏览决定（这条写在说明里，不允许悄悄改）。
+ * ——候选② 之后的调整：允许存**小图本体**，但要同时满足单张 ≤120KB、
+ * 一页合计 ≤480KB、一页最多 6 张、且用户开着离线缓存；超限的一律退回"只有说明文字"。
+ * 这个上限不是随手写的：拿一页 6 张 ×120KB 就是 720KB 落盘，50 页会到 30MB+，
+ * 对"顺手看一眼断网内容"这个目标明显过头。
  */
 function buildCaptureScript() {
   return String.raw`(() => {
@@ -78,9 +90,11 @@ function buildCaptureScript() {
     const nodes = root.querySelectorAll('img');
     for (const img of nodes) {
       const alt = clean(img.alt || img.title || '');
-      if (!alt) { skippedImages += 1; continue; }
+      const src = String(img.currentSrc || img.src || '');
+      const usable = /^https?:\/\//i.test(src);
+      if (!alt && !usable) { skippedImages += 1; continue; }
       if (images.length >= 12) break;
-      images.push({ alt: alt.slice(0, 80) });
+      images.push({ alt: alt.slice(0, 80), src: usable ? src.slice(0, 2048) : '' });
     }
     const lines = [];
     const seenLine = new Set();
@@ -165,10 +179,20 @@ function normalizeSnapshot(raw) {
       if (alt) images.push({ alt });
       continue;
     }
-    if (item && typeof item === 'object') {
-      const alt = String(item.alt || '').replace(/\s+/g, ' ').trim().slice(0, 80);
-      if (alt) images.push({ alt });
+    if (!item || typeof item !== 'object') continue;
+    const alt = String(item.alt || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    const src = String(item.src || '').trim();
+    const entry = {};
+    if (alt) entry.alt = alt;
+    if (/^https?:\/\//i.test(src)) entry.src = src.slice(0, 2048);
+    // data URL 只认图片类型，且长度必须在我们自己的上限内（读回来的文件也要过一遍，
+    // 不许因为"磁盘上是老的"就无条件信任）。
+    const dataUrl = String(item.dataUrl || '');
+    if (/^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+$/i.test(dataUrl) && dataUrl.length <= CACHE_IMAGE_DATAURL_MAX) {
+      entry.dataUrl = dataUrl;
+      if (Number(item.bytes) > 0) entry.bytes = Math.floor(Number(item.bytes));
     }
+    if (entry.alt || entry.src || entry.dataUrl) images.push(entry);
   }
 
   return {
@@ -183,6 +207,51 @@ function normalizeSnapshot(raw) {
     skippedImages: Number(input.skippedImages) > 0 ? Math.floor(Number(input.skippedImages)) : 0,
     at: Number(input.at) > 0 ? Number(input.at) : Date.now(),
   };
+}
+
+/**
+ * 这一页还值得去取本体的图片（候选②）。
+ *
+ * 只挑 http(s) 且还没有 dataUrl 的前若干张：已经存过的不要重复下载，
+ * data:/blob: 也没必要（要么本机已有，要么取不到）。
+ * 取不取得到、多大、什么格式，全部由调用方按上限判定——这里只负责"挑谁去取"。
+ */
+function imageTargets(snapshot) {
+  const images = snapshot && Array.isArray(snapshot.images) ? snapshot.images : [];
+  const out = [];
+  for (const item of images) {
+    if (!item || typeof item !== 'object') continue;
+    if (item.dataUrl) continue;
+    if (!/^https?:\/\//i.test(String(item.src || ''))) continue;
+    out.push(item.src);
+    if (out.length >= CACHE_IMAGE_FETCH_MAX) break;
+  }
+  return out;
+}
+
+/**
+ * 把取到的图片本体贴回快照（候选②）。
+ *
+ * `fetched` 形如 `[{ src, dataUrl, bytes }]`；没贴上的图保持"只有说明文字"。
+ * 这里会再走一次 normalizeSnapshot，好处是上限判定只写在一处——
+ * 调用方给什么都不会越过"单张 ≤120KB、一页合计 ≤480KB"这条线。
+ */
+function attachImageData(snapshot, fetched) {
+  const list = Array.isArray(fetched) ? fetched : [];
+  const input = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  if (!list.length) return normalizeSnapshot(input);
+  const bySrc = new Map();
+  for (const item of list) {
+    if (!item || !item.src || !item.dataUrl) continue;
+    bySrc.set(String(item.src), item);
+  }
+  const images = (Array.isArray(input.images) ? input.images : []).map((image) => {
+    if (!image || typeof image !== 'object') return image;
+    const hit = bySrc.get(String(image.src || ''));
+    if (!hit) return image;
+    return { ...image, dataUrl: hit.dataUrl, bytes: Number(hit.bytes) || 0 };
+  });
+  return normalizeSnapshot({ ...input, images });
 }
 
 /** 读盘内容 → 缓存表；脏数据当成空表，不让一个坏文件把离线能力整体搞死。 */
@@ -270,14 +339,20 @@ function describeCachedPage(snapshot, options) {
 module.exports = {
   BLOCK_TYPES,
   CACHE_BLOCK_MAX,
+  CACHE_IMAGE_BYTES_MAX,
+  CACHE_IMAGE_DATAURL_MAX,
+  CACHE_IMAGE_FETCH_MAX,
   CACHE_IMAGE_MAX,
+  CACHE_IMAGE_TOTAL_MAX,
   CACHE_LIMIT,
   CACHE_TEXT_MAX,
   CACHE_VERSION,
+  attachImageData,
   buildCaptureScript,
   cacheKeyOf,
   describeCachedPage,
   getSnapshot,
+  imageTargets,
   normalizeSnapshot,
   putSnapshot,
   readCache,
