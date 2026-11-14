@@ -29,11 +29,11 @@
 
 ## 2. 固定事实（2026-11-12 基线）
 
-- 版本：`package.json` = **1.17.2**；**已发布**的产物 `dist/Nyx-Setup-1.17.2.exe` 是 43.8.10 打的那一个（118,516,372 字节，sha256 `c17386b7c80061f98d8c0d0b3da4abed4a26a2065ef12e07f2bb3d433ea1037c`）；**当前 dist 目录里的是 Electron 45.3.2 重打的同名包**（127,117,707 字节，sha256 `74da45e2b13d902f9c7cfff3c82ebf0a4429329ff9930983221a454107ef90d8`），**没有发布**——同版本号两份不同字节的包会让人以为更新失败，要发就先升 1.17.3。
+- 版本：`package.json` = **1.17.3**；**已发布**的产物 `dist/Nyx-Setup-1.17.3.exe`（Electron 45.3.2，127,123,737 字节，sha256 `848eb392ca31c9bca198dc48343cf6b0242bf716c072e9d7d3418355efed38e8`）；更新源 `latest.json` 已指向它。上一版 1.17.2 的包留在 `updates-archive\1.17.2`（43.8.10 打的那个 118,516,372 字节），`dist` 里不再有同名不同字节的历史包。
 - 运行时：Electron 45.3.2 / Chromium 156.0.8078.100 / Node 24.22.2；Windows。
 - 运行时依赖只有两个：`@modelcontextprotocol/sdk`、`zod`（MCP server 用）。
-- 回归基线（本轮实测，全绿）：`npm run verify` = 地址栏建议 **68 项** + 界面体验 **114 项** + 出站链路守卫 **14 项** + 下载链路 **16 项** + 图形性能策略 **14 项** + 安全基线对照 **20 项** + 外壳防护基线 **19 项** + 录屏检测 **14 项** + 动作通道 **20 项** + 页面读取 **19 项** + agent 审计 **17 项** + agent 站点授权 **34 项** + agent 接入模式 **16 项** + 页面摘要 **20 项** + 标签生命周期 **18 项** + 标签休眠 **10 项** + 断网判定 **10 项** + 离线页面缓存 **23 项** + 运行时兼容 **6 项** + 打包冒烟 **11 项** = **483 项 / 20 个脚本 / 208 秒**。
-- 安装器 e2e（不进 `npm run verify`）：`scripts/test-installer-e2e.js` 真机跑 全新 → 降级 → 升级 → 修复 → 保留数据卸载 → 完全卸载，**56 项断言**；`--cross` 跨两版模式（旧版装→seed 旧格式数据→覆盖装新版→两次启动）**57 项断言（56 通过 / 1 明确跳过）**；`make-release.js --with-installer-test` 已把它接进发版门禁（默认不跑，但摘要必打印原因与命令）。
+- 回归基线（本轮实测，全绿）：`npm run verify` = 地址栏建议 **68 项** + 界面体验 **115 项** + 出站链路守卫 **14 项** + 下载链路 **16 项** + 图形性能策略 **14 项** + 安全基线对照 **20 项** + 外壳防护基线 **19 项** + 录屏检测 **14 项** + 动作通道 **20 项** + 页面读取 **19 项** + agent 审计 **17 项** + agent 站点授权 **34 项** + agent 接入模式 **16 项** + 页面摘要 **22 项** + 标签生命周期 **18 项** + 标签休眠 **10 项** + 断网判定 **10 项** + 离线页面缓存 **24 项** + 运行时兼容 **9 项** + 发版门禁接线 **13 项** + 打包冒烟 **11 项** = **503 项 / 21 个脚本 / 213 秒**。
+- 安装器 e2e（不进 `npm run verify`）：`scripts/test-installer-e2e.js` 真机跑 全新 → 降级 → 升级 → 修复 → 保留数据卸载 → 完全卸载，**56 项断言**；`--cross` 跨两版模式（旧版装→seed 旧格式数据→覆盖装新版→两次启动）**57 项断言（56 通过 / 1 明确跳过）**；归档基线放 `dist\legacy`（当前有 1.16.0 与已发布的 1.17.2），`--cross` 不带 `--from` 会自动选最老那份；`make-release.js --with-installer-test` 已把它接进发版门禁（默认不跑，但摘要必打印原因与命令）。
 - 更新源：`%APPDATA%\Nyx\updates`（`latest.json` + 安装包 + `.blocks.json` + `extensions.json`）；留档 `%APPDATA%\Nyx\updates-archive\<版本>`。
 - 安装器：NSIS，`perMachine:false`（装到用户目录），自定义脚本 `build/installer.nsh`、打包后钩子 `build/after-pack.js`。
 - npm 命令必须用 `& 'C:\Program Files\nodejs\npm.cmd' run <script>`（`npm.ps1` 被执行策略拦）。
@@ -81,7 +81,7 @@
 
 ## 6. 验证脚本约定
 
-- 二十个脚本：`verify-address-suggest.js`（地址栏 68）、`verify-ui-polish.js`（界面 114）、`verify-link-guard.js`（出站链路守卫 14，纯 Node 不启动 Electron）、`verify-downloads.js`（下载链路 16，纯 Node 不启动 Electron）、`verify-gpu-policy.js`（图形性能策略 14，纯 Node 不启动 Electron）、`verify-security-baseline.js`（安全基线对照 20，纯 Node 不启动 Electron）、`verify-security-switches.js`（外壳防护基线 19，纯 Node 不启动 Electron）、`verify-screen-watch.js`（录屏 / 被远控检测 14，纯 Node 不启动 Electron）、`verify-agent-dispatch.js`（agent 统一动作通道 20，纯 Node 不启动 Electron）、`verify-page-reader.js`（页面读取与稳定元素 id 19，纯 Node 不启动 Electron）、`verify-agent-audit.js`（agent 动作留痕 17，纯 Node 不启动 Electron）、`verify-agent-sites.js`（agent 站点三层授权 + 导入导出与格式迁移 34，纯 Node 不启动 Electron）、`verify-agent-mode.js`（agent 接入模式与两步确认 16，纯 Node 不启动 Electron）、`verify-page-digest.js`（页面摘要与拦截统计 20，纯 Node 不启动 Electron）、`verify-tab-lifecycle.js`（标签生命周期判定 18，纯 Node 不启动 Electron）、`verify-tab-sleep.js`（标签休眠与唤醒端到端 10，真实起实例，`NYX_TAB_SLEEP_MS=1200`）、`verify-network-state.js`（断网判定与断网横幅 10，纯 Node 不启动 Electron）、`verify-page-cache.js`（离线页面缓存、开关与 v2 块结构 23，纯 Node 不启动 Electron）、`verify-runtime-compat.js`（运行时兼容：剪贴板异步化与版本三处一致 6，纯 Node 不启动 Electron）、`verify-packaged-smoke.js`（包内 11，缺 `dist/win-unpacked` 时跳过）。另有 `bench-transfer.js`（吞吐基线，**不进回归**，测大文件快慢用）、`test-installer-e2e.js`（安装器四条路径真机复验 + `--cross` 跨两版，需管理员权限与两个版本的安装包，**不进回归**，但已接进 `make-release --with-installer-test`）。
+- 二十一个脚本：`verify-address-suggest.js`（地址栏 68）、`verify-ui-polish.js`（界面 115）、`verify-link-guard.js`（出站链路守卫 14，纯 Node 不启动 Electron）、`verify-downloads.js`（下载链路 16，纯 Node 不启动 Electron）、`verify-gpu-policy.js`（图形性能策略 14，纯 Node 不启动 Electron）、`verify-security-baseline.js`（安全基线对照 20，纯 Node 不启动 Electron）、`verify-security-switches.js`（外壳防护基线 19，纯 Node 不启动 Electron）、`verify-screen-watch.js`（录屏 / 被远控检测 14，纯 Node 不启动 Electron）、`verify-agent-dispatch.js`（agent 统一动作通道 20，纯 Node 不启动 Electron）、`verify-page-reader.js`（页面读取与稳定元素 id 19，纯 Node 不启动 Electron）、`verify-agent-audit.js`（agent 动作留痕 17，纯 Node 不启动 Electron）、`verify-agent-sites.js`（agent 站点三层授权 + 导入导出与格式迁移 34，纯 Node 不启动 Electron）、`verify-agent-mode.js`（agent 接入模式与两步确认 16，纯 Node 不启动 Electron）、`verify-page-digest.js`（页面摘要、拦截统计与跳转接线 22，纯 Node 不启动 Electron）、`verify-tab-lifecycle.js`（标签生命周期判定 18，纯 Node 不启动 Electron）、`verify-tab-sleep.js`（标签休眠与唤醒端到端 10，真实起实例，`NYX_TAB_SLEEP_MS=1200`）、`verify-network-state.js`（断网判定与断网横幅 10，纯 Node 不启动 Electron）、`verify-page-cache.js`（离线页面缓存、开关、v2 块结构与图片上限 24，纯 Node 不启动 Electron）、`verify-runtime-compat.js`（运行时兼容：剪贴板原语收口、形状探测与版本三处一致 9，纯 Node 不启动 Electron）、`verify-release-gate.js`（发版门禁与安装器 e2e 接线 13，纯 Node 不跑安装包）、`verify-packaged-smoke.js`（包内 11，缺 `dist/win-unpacked` 时跳过）。另有 `bench-transfer.js`（吞吐基线，**不进回归**，测大文件快慢用）、`test-installer-e2e.js`（安装器四条路径真机复验 + `--cross` 跨两版，需管理员权限与两个版本的安装包，**不进回归**，但已接进 `make-release --with-installer-test`）。
 - 环境不满足而无法验证的断言（例如系统剪贴板被别的进程独占时）要**显式记为「跳过」并打印原因**，既不许静默通过，也不许删断言（红线 7）。
 - 新增断言写在对应脚本里，标签复用中文「（vX.Y.Z）」后缀；项数必须同步到 `scripts/verify-all.js` 的 `items` 与注释。
 - CDP 端到端：Node 24 全局 `WebSocket`，`--remote-debugging-port` 用 `pickFreePort()`。
@@ -157,11 +157,20 @@
 - 本批次回归：**19 个脚本 / 466 项 / 206 秒**全绿。
 - 待办（未开工，等用户决定）：发版之后的新候选、离线缓存快照是否要支持图片、站点名单的导出格式版本迁移。
 
-### 9.4 Electron 45 批次（2026-11-14 深夜，五项，**未发版**）
+### 9.4 Electron 45 批次（2026-11-14 深夜，五项，已随 1.17.3 发布）
 
 - 顺序：① 升 Electron 45 → ③ 导出格式迁移 → ② 离线快照 v2 → ④ 拦截请求入摘要 → ⑤ 跨两版升级实测，全部完成。
 - 提交：`bfbd057`（摘要区分被拦下/真失败）、`c04ba23`（离线快照 v2：块结构 + 图片说明）、`025717a`（名单导出 v2 + 导入迁移）、`cc00b2c`（安装器 e2e `--cross` 跨两版）、`361b9d6`（Electron 43.8.10 → 45.3.2 + 剪贴板异步兼容层 + `verify-runtime-compat.js`）。
 - 运行时：**Electron 45.3.2 / Chromium 156.0.8078.100 / Node 24.22.2**（Chromium 150 分支漂移就此收口）。
-- 重打包（未发布）：`dist\Nyx-Setup-1.17.2.exe` 127,117,707 字节、sha256 `74da45e2b13d902f9c7cfff3c82ebf0a4429329ff9930983221a454107ef90d8`；完整性 9/9、冒烟 11/11、静默安装 exit 0、启动 5 进程 681.2 MB。
+- 重打包（当时未发布，后来作为 1.17.3 的构建基础发出去）：`dist\Nyx-Setup-1.17.2.exe` 127,117,707 字节、sha256 `74da45e2b13d902f9c7cfff3c82ebf0a4429329ff9930983221a454107ef90d8`；完整性 9/9、冒烟 11/11、静默安装 exit 0、启动 5 进程 681.2 MB。
 - 本批次回归：**20 个脚本 / 483 项 / 208 秒**全绿。
-- 待办：把 Electron 45 这一批发出去要**先升到 1.17.3**（同版本号换字节会让更新判定混乱）；离线快照目前只留图片 alt，没有图片本体；剪贴板兼容层是为了同时兼容 43（同步）与 45（异步），等 43 线彻底退场可以简化。
+- 当时的待办（已解决）：Electron 45 这一批要发出去必须**先升到 1.17.3**（同版本号换字节会让更新判定混乱）——已由 §9.5 完成；离线快照当时只留图片 alt，图片本体在 §9.5 补上；剪贴板兼容层是为了同时兼容 43（同步）与 45（异步），等 43 线彻底退场可以简化。
+
+### 9.5 1.17.3 批次（2026-11-14 深夜第二轮，五项，**已发布**）
+
+- 顺序：① 发 1.17.3 → ② 离线快照存小图 → ③ 剪贴板兼容层收口 → ④ 摘要里被拦下的请求跳抓包 → ⑤ 安装器 e2e 常态化，按「先做完 ②③④⑤ 再统一发版」执行，避免连发两版。
+- 提交：`52b2d9a`（剪贴板只留两处原语 + 启动探测形状 + `verify-runtime-compat.js` 6 → 9 项）、`afb3af2`（摘要里被拦下的站点可点，工具箱按该域名筛抓包 + `verify-page-digest.js` 20 → 22）、`300ed59`（离线快照存 ≤120 KB 小图、单页合计 ≤480 KB、最多 6 张，并修掉 v2 的 `blocks`/`images` 在抓取回调里被丢掉的真 bug + `verify-page-cache.js` 23 → 24）、`bbad0a6`（`dist\legacy` 归档基线 + `--cross` 自动发现 + `make-release` 扫 legacy + 新增 `verify-release-gate.js` 13 项）、`855a563`（回归项数同步 503 + 摘要跳抓包端到端，界面 114 → 115）。
+- 发布：`dist/Nyx-Setup-1.17.3.exe` **127,123,737 字节**、sha256 **`848eb392ca31c9bca198dc48343cf6b0242bf716c072e9d7d3418355efed38e8`**；完整性 9/9、冒烟 11/11、安装器 e2e **56/56（升级基线 1.17.2）**、真机安装 1.17.3 启动正常（5 进程 661.7 MB、诊断里有 `CLIPBOARD_API_SHAPE` info）；留档 1.17.3 / 1.17.2 / 1.17.1，清理 1.16.0 释放 113.4 MB。
+- 本批次回归：**21 个脚本 / 503 项 / 213 秒**全绿。文档：`docs/Nyx-1.17.3-发版记录.md`、`docs/CHANGELOG.md`（索引 + 1.17.3 小节，标题改「1.3.0 → 1.17.3 二十个版本」）、`README.md`（技术栈 Electron 45 / Chromium 156、离线可读含小图上限、摘要含拦截统计与跳抓包）。
+- 待办（等用户决定）：安装包代码签名、快照图片是否加密落盘、摘要导出成 Markdown、`dist\legacy` 归档轮换脚本、离线缓存按站点黑白名单。
+- 三个新踩的坑（已收进 §7 同类问题）：① 断言会数到**自己注释里**写的 `clipboard.readText()` / `availableFormats()`，静态守卫必须先剔注释行；② 同一文件混多组改动要按 hunk 分桶（`temp/patch-*.patch` + `git apply --cached --recount`），`style.css` 这种跨提交共享文件用 `--include=` 限定 + 整份 `git add`；③ `Get-Content | ConvertFrom-Json` 读 `latest.json` 会按 GBK 解码报「传入的对象无效」，复核更新源一律用 node 读。
