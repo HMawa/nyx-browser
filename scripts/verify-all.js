@@ -135,7 +135,7 @@ const STEPS = [
   {
     label: '页面摘要回归',
     script: 'verify-page-digest.js',
-    items: '17 项',
+    items: '20 项',
     timeoutMs: 60000,
   },
   {

@@ -383,6 +383,8 @@ class TabCollector {
       timing: rec.timing || null,
       cached: rec.cached,
       failed: rec.failed,
+      // 「被拦下」和「真失败」在摘要里要分开说，所以 brief 必须带上拦截原因
+      blockedReason: rec.blockedReason || '',
       finished: rec.finished,
       at: rec.startedAt,
       fromWs: rec.fromWs,

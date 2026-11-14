@@ -232,9 +232,32 @@ function summarize(raw, options) {
 }
 
 /**
+ * 判断一条失败记录是不是"被拦下"而不是"真失败"。
+ *
+ * 为什么要分开：广告/追踪器被拦、CSP 挡掉、页面自己取消，这些在 CDP 里都长成
+ * loadingFailed，混进失败数会让"页面接口挂了"这个结论失真。
+ */
+function classifyBlocked(rec) {
+  const failed = String((rec && rec.failed) || '');
+  const reason = String((rec && rec.blockedReason) || '');
+  if (!failed && !reason) return '';
+  // 拦截原因可能落在 blockedReason（CDP 的 Network.loadingFailed），也可能被合并进 failed 文本，
+  // 所以两处一起匹配：漏一处就会出现「同一个拦截一会儿认得、一会儿认不得」。
+  const code = `${failed} ${reason}`;
+  if (/ERR_BLOCKED_BY_CLIENT/i.test(code)) return '被浏览器拦下';
+  if (/ERR_BLOCKED_BY_RESPONSE/i.test(code)) return '响应被拦下';
+  if (/ERR_BLOCKED_BY_CSP|ERR_BLOCKED_BY_ADMINISTRATOR|ERR_BLOCKED_BY_XSS_AUDITOR/i.test(code)) return '被安全策略拦下';
+  if (/ABORTED/i.test(code)) return '页面自己取消';
+  if (reason) return `被拦下（${reason}）`;
+  return '';
+}
+
+/**
  * 网络摘要：把抓包记录压成"多少次请求、几个失败、主要接口是什么"。
  *
  * 之所以必须带上失败数：页面常常显示"成功"，真正的失败藏在 XHR/fetch 里。
+ * 之所以还要单列"被拦下的请求"：拦截是 Nyx 干的活，用户有权知道它拦了什么，
+ * 也得知道"少了东西"可能是拦截导致的，而不是页面坏了。
  * @param {object[]} records `toolbox.list()` 里的 brief 数组
  */
 function summarizeNetwork(records, options) {
@@ -242,14 +265,25 @@ function summarizeNetwork(records, options) {
   const list = Array.isArray(records) ? records : [];
   const hostCount = new Map();
   const apiCount = new Map();
+  const blockedCount = new Map();
   let failed = 0;
+  let blocked = 0;
   let pending = 0;
   let totalBytes = 0;
 
   for (const rec of list) {
     const host = String((rec && rec.host) || '').trim();
     if (host) hostCount.set(host, (hostCount.get(host) || 0) + 1);
-    if (rec && rec.failed) failed += 1;
+    const blockedReason = classifyBlocked(rec);
+    if (blockedReason) {
+      blocked += 1;
+      const key = host || '（未知域名）';
+      const bucket = blockedCount.get(key) || { host: key, count: 0, reason: blockedReason };
+      bucket.count += 1;
+      blockedCount.set(key, bucket);
+    } else if (rec && rec.failed) {
+      failed += 1;
+    }
     if (rec && rec.finished === false) pending += 1;
     if (rec && typeof rec.size === 'number' && rec.size > 0) totalBytes += rec.size;
     const url = String((rec && rec.url) || '');
@@ -275,22 +309,29 @@ function summarizeNetwork(records, options) {
     .sort((a, b) => b[1] - a[1])
     .slice(0, limits.maxNetworkApis)
     .map(([key, count]) => ({ key, count }));
+  const blockedHosts = [...blockedCount.values()]
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limits.maxNetworkHosts);
 
   return {
     ok: true,
     total: list.length,
     failed,
+    blocked,
+    blockedHosts,
     pending,
     hosts,
     apis,
     bytes: totalBytes,
-    // 只有"有失败"或"还没结束"才值得在摘要里显眼说出来
+    // 只有"有失败"或"还没结束"或"有拦截"才值得在摘要里显眼说出来
     warning:
       failed > 0
         ? `有 ${failed} 个请求失败——页面显示成功不代表接口成功`
-        : pending > 0
-          ? `还有 ${pending} 个请求没结束，结论可能还不完整`
-          : '',
+        : blocked > 0
+          ? `有 ${blocked} 个请求被拦下（不是失败）：页面可能少了广告或追踪器，也可能少了你以为该在的东西`
+          : pending > 0
+            ? `还有 ${pending} 个请求没结束，结论可能还不完整`
+            : '',
   };
 }
 
@@ -314,13 +355,17 @@ function buildDigestText(payload) {
     lines.push('', `关键词：${page.keywords.map((item) => item.word).join('、')}`);
   }
   if (net && typeof net.total === 'number') {
-    lines.push('', `网络：${net.total} 个请求，失败 ${net.failed || 0} 个`);
+    lines.push('', `网络：${net.total} 个请求，失败 ${net.failed || 0} 个，被拦下 ${net.blocked || 0} 个`);
     if (Array.isArray(net.hosts) && net.hosts.length) {
       lines.push(`主要域名：${net.hosts.map((item) => `${item.host}(${item.count})`).join('、')}`);
     }
     if (Array.isArray(net.apis) && net.apis.length) {
       lines.push('主要接口：');
       for (const item of net.apis) lines.push(`- ${item.key} ×${item.count}`);
+    }
+    if (Array.isArray(net.blockedHosts) && net.blockedHosts.length) {
+      lines.push('被拦下的请求：');
+      for (const item of net.blockedHosts) lines.push(`- ${item.host} ×${item.count}（${item.reason}）`);
     }
     if (net.warning) lines.push(`注意：${net.warning}`);
   }
@@ -340,6 +385,7 @@ module.exports = {
   DIGEST_LIMITS,
   buildDigestText,
   buildExtractScript,
+  classifyBlocked,
   digestDisabledPayload,
   keywords,
   splitSentences,

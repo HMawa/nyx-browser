@@ -17,6 +17,7 @@ const {
   DIGEST_LIMITS,
   buildDigestText,
   buildExtractScript,
+  classifyBlocked,
   digestDisabledPayload,
   keywords,
   splitSentences,
@@ -227,6 +228,65 @@ async function main() {
     for (const fn of ['renderDigest', 'openDigestPanel', 'runDigest', 'copyDigest']) {
       assert.ok(renderer.includes(fn), `renderer 缺少 ${fn}`);
     }
+  });
+
+  await check('18. 被拦下的请求与真失败分开计数：拦下不等于出错（候选④）', () => {
+    const records = [
+      { host: 'a.example', url: 'https://a.example/api/ok', type: 'xhr', finished: true, size: 100 },
+      { host: 'a.example', url: 'https://a.example/api/bad', type: 'xhr', finished: true, failed: true, size: 0 },
+      { host: 'ads.tracker', url: 'https://ads.tracker/ad.js', type: 'script', finished: true, blockedReason: 'ERR_BLOCKED_BY_CLIENT', size: 0 },
+      { host: 'ads.tracker', url: 'https://ads.tracker/p.gif', type: 'image', finished: true, blockedReason: 'ERR_BLOCKED_BY_CLIENT', size: 0 },
+    ];
+    const network = summarizeNetwork(records, {});
+    assert.equal(network.total, 4);
+    assert.equal(network.failed, 1, '被拦下的那两条不能算进失败');
+    assert.equal(network.blocked, 2, '被拦下的要单独计数');
+    assert.equal(network.blockedHosts.length, 1, '按域名聚合');
+    assert.equal(network.blockedHosts[0].host, 'ads.tracker');
+    assert.equal(network.blockedHosts[0].count, 2);
+    assert.ok(network.blockedHosts[0].reason.includes('浏览器拦下'), network.blockedHosts[0].reason);
+    assert.ok(network.warning.includes('1 个请求失败'), '有真失败时警告要先说失败');
+    const blockedOnly = summarizeNetwork(
+      [
+        { host: 'a.example', url: 'https://a.example/ok', type: 'xhr', finished: true, size: 10 },
+        { host: 'ads.tracker', url: 'https://ads.tracker/ad.js', type: 'script', finished: true, blockedReason: 'ERR_BLOCKED_BY_CLIENT' },
+      ],
+      {},
+    );
+    assert.equal(blockedOnly.failed, 0);
+    assert.equal(blockedOnly.blocked, 1);
+    assert.ok(/拦下/.test(blockedOnly.warning), blockedOnly.warning);
+    assert.ok(!/个请求失败/.test(blockedOnly.warning), '只有拦截时不许把拦截说成失败');
+  });
+
+  await check('19. 分类器认得常见拦截原因，未知原因也如实转述', () => {
+    assert.ok(classifyBlocked({ blockedReason: 'ERR_BLOCKED_BY_CLIENT' }).includes('浏览器拦下'));
+    assert.ok(classifyBlocked({ blockedReason: 'ERR_BLOCKED_BY_RESPONSE' }).includes('响应被拦下'));
+    assert.ok(classifyBlocked({ blockedReason: 'ERR_BLOCKED_BY_CSP' }).includes('安全策略'));
+    assert.ok(classifyBlocked({ blockedReason: 'ABORTED' }).includes('页面自己取消'));
+    assert.ok(classifyBlocked({ blockedReason: 'WEIRD_REASON' }).includes('WEIRD_REASON'), '不认识的也要原样说出来');
+    assert.equal(classifyBlocked({}), '', '没有拦截原因就是空串，不许编');
+
+    const text = buildDigestText({
+      page: { title: 't', url: 'https://a.example/', bullets: [], keywords: [], headings: [] },
+      network: summarizeNetwork(
+        [
+          { host: 'a.example', url: 'https://a.example/api', type: 'xhr', finished: true, size: 10 },
+          { host: 'ads.tracker', url: 'https://ads.tracker/ad.js', type: 'script', finished: true, blockedReason: 'ERR_BLOCKED_BY_CLIENT' },
+        ],
+        {},
+      ),
+    });
+    assert.ok(/被拦下 1 个/.test(text), text);
+    assert.ok(text.includes('被拦下的请求'), '复制文本要给一节，说清拦了什么');
+  });
+
+  await check('20. 侧栏与抓包 brief 都要真的带出拦截信息（不然算出来的数没人看见）', () => {
+    const renderer = readFile('src/renderer/renderer.js');
+    assert.ok(renderer.includes('被拦下'), '侧栏要把拦截说出来');
+    assert.ok(renderer.includes('blockedHosts'), '侧栏要逐条列出被拦下的域名');
+    const toolbox = readFile('src/core/toolbox.js');
+    assert.ok(toolbox.includes('blockedReason'), '抓包 brief 必须带 blockedReason，否则摘要拿不到原因');
   });
 
   const failed = checks.filter((item) => !item.ok);

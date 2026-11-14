@@ -1121,12 +1121,22 @@ function renderDigest(payload) {
   }
 
   if (network) {
-    const lines = [`${network.total} 个请求，失败 ${network.failed} 个`];
+    const blocked = Number(network.blocked) || 0;
+    const lines = [
+      blocked > 0
+        ? `${network.total} 个请求，失败 ${network.failed} 个，被拦下 ${blocked} 个`
+        : `${network.total} 个请求，失败 ${network.failed} 个`,
+    ];
     if (Array.isArray(network.hosts) && network.hosts.length) {
       lines.push(`主要域名：${network.hosts.map((h) => `${h.host}（${h.count}）`).join('、')}`);
     }
     if (Array.isArray(network.apis) && network.apis.length) {
       lines.push(`主要接口：${network.apis.map((a) => `${a.key}（${a.count}）`).join('、')}`);
+    }
+    if (Array.isArray(network.blockedHosts) && network.blockedHosts.length) {
+      lines.push(
+        `被拦下：${network.blockedHosts.map((b) => `${b.host}（${b.count} 次，${b.reason}）`).join('、')}`,
+      );
     }
     const block = buildDigestBlock(
       network.missing ? '网络（这次没取到抓包记录）' : '网络',
