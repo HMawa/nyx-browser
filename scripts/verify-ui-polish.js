@@ -655,6 +655,31 @@ async function main() {
 
     const siteView = await shell.eval(`(async () => {
       const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      // 前置条件：这一段只验证"三个种子站点能不能正确聚合"，所以先把不为种子站点的历史清掉。
+      // 种子是 example.com / docs.other.test / third.test（见 seedHistory），
+      // 不清的话，前面几个探针（断网缓存 / 摘要 / 下载）留下的 127.0.0.1 记录会多聚合出一行，
+      // 断言就在"全量跑红、单跑绿"之间来回跳——那不是产品坏了，是前置条件没摆干净。
+      const SEED_HOSTS = ['example.com', 'docs.other.test', 'third.test'];
+      const before = await window.nyx.historyList({ limit: 200 });
+      const removed = [];
+      for (const item of (before && before.items) || []) {
+        const url = String(item && item.url ? item.url : '');
+        let host = '';
+        try {
+          host = new URL(url).host;
+        } catch {
+          host = '';
+        }
+        if (!SEED_HOSTS.includes(host)) {
+          await window.nyx.historyRemove({ id: item.id });
+          removed.push(url);
+        }
+      }
+      if (removed.length) {
+        await wait(400);
+        await window.nyx.openToolboxPane({ pane: 'history' });
+        await wait(600);
+      }
       const pane = document.getElementById('pane-history');
       if (!pane) return { missingPane: true };
       const chips = Array.from(pane.querySelectorAll('.tb-chip'));
@@ -3199,11 +3224,16 @@ async function main() {
         const view = await shell.eval(`(() => {
           const box = document.getElementById('pe-cached');
           const text = document.getElementById('pe-cached-text');
+          const blocks = document.getElementById('pe-cached-blocks');
           const label = document.getElementById('pe-cached-label');
           const note = document.getElementById('pe-cached-note');
+          // v2 快照按语义块渲染进 #pe-cached-blocks，#pe-cached-text 只在没有块时兜底，
+          // 所以正文要从两处合起来看（只看一处会误判成"没有缓存内容"）。
+          const flat = ((blocks && !blocks.hidden ? blocks.textContent : '') + ' ' + (text && !text.hidden ? text.textContent : '')).trim();
           return {
             hidden: box ? box.hidden : true,
-            text: text ? text.textContent : '',
+            text: flat,
+            usesBlocks: !!(blocks && !blocks.hidden),
             label: label ? label.textContent : '',
             note: note ? note.textContent : '',
           };
@@ -3214,6 +3244,7 @@ async function main() {
         '断网重开同一地址时，失败页显示「上次读到的内容」并注明是缓存（候选③）',
         !!cachedView
           && cachedView.text.includes('这段文字来自离线缓存')
+          && cachedView.usesBlocks === true
           && /缓存快照/.test(cachedView.note)
           && /重试/.test(cachedView.note)
           && /上次读到的内容/.test(cachedView.label),
@@ -3228,6 +3259,20 @@ async function main() {
         } catch {
           /* 忽略 */
         }
+      }
+      // 探针把 127.0.0.1 写进了历史，后面还有依赖"历史行数/站点数"的断言，清掉本次痕迹
+      try {
+        await shell.eval(`(async () => {
+          const list = await window.nyx.historyList({ limit: 200 });
+          for (const item of (list && list.items) || []) {
+            if (/^https?:\\/\\/127\\.0\\.0\\.1/.test(String(item.url || ''))) {
+              await window.nyx.historyRemove({ id: item.id });
+            }
+          }
+          return true;
+        })()`);
+      } catch {
+        /* 清理失败不影响主断言 */
       }
     }
 

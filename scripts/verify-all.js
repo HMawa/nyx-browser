@@ -159,7 +159,7 @@ const STEPS = [
   {
     label: '离线页面缓存',
     script: 'verify-page-cache.js',
-    items: '19 项',
+    items: '23 项',
     timeoutMs: 60000,
   },
   {

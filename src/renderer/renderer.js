@@ -49,6 +49,7 @@ const els = {
   peCachedLabel: document.getElementById('pe-cached-label'),
   peCachedNote: document.getElementById('pe-cached-note'),
   peCachedText: document.getElementById('pe-cached-text'),
+  peCachedBlocks: document.getElementById('pe-cached-blocks'),
   // 页面摘要侧栏（F）：纯抽取式，默认关
   btnDigest: document.getElementById('btn-digest'),
   digestPanel: document.getElementById('digest-panel'),
@@ -402,7 +403,7 @@ function loadCachedPage(url) {
       if (!res || res.available !== true) return;
       if (cachedPageFor !== key) return; // 已经切到别的失败页，丢弃这次结果
       els.peCachedNote.textContent = res.note || '';
-      els.peCachedText.textContent = res.text || '';
+      renderCachedBlocks(res);
       els.peCachedLabel.textContent = res.ageText
         ? `上次读到的内容（${res.ageText}抓取）`
         : '上次读到的内容';
@@ -414,11 +415,75 @@ function loadCachedPage(url) {
     });
 }
 
+/**
+ * 渲染离线快照。
+ *
+ * v2 快照带块类型，断网页就按标题/段落/列表/引用/代码排出来——
+ * 这就是「快照支持样式」的落地方式：搬结构不搬 CSS（存别人的 CSS 既不可靠也没必要）。
+ * 图片只显示 alt：我们不把图片二进制抓到本地磁盘，界面上必须说实话。
+ */
+function renderCachedBlocks(res) {
+  if (!els.peCachedBlocks || !els.peCachedText) return;
+  const blocks = Array.isArray(res && res.blocks) ? res.blocks : [];
+  const images = Array.isArray(res && res.images) ? res.images : [];
+  els.peCachedBlocks.replaceChildren();
+  if (!blocks.length) {
+    els.peCachedBlocks.hidden = true;
+    els.peCachedText.hidden = false;
+    els.peCachedText.textContent = (res && res.text) || '';
+    return;
+  }
+  els.peCachedText.hidden = true;
+  els.peCachedBlocks.hidden = false;
+  for (const block of blocks) {
+    const type = String((block && block.type) || 'para');
+    const text = String((block && block.text) || '');
+    if (!text) continue;
+    if (type === 'list') {
+      const item = document.createElement('p');
+      item.className = 'pe-cached-p pe-cached-list';
+      item.textContent = text;
+      els.peCachedBlocks.appendChild(item);
+      continue;
+    }
+    if (type === 'heading') {
+      const heading = document.createElement('p');
+      heading.className = 'pe-cached-h';
+      heading.textContent = text;
+      els.peCachedBlocks.appendChild(heading);
+      continue;
+    }
+    const para = document.createElement(type === 'code' ? 'pre' : 'p');
+    para.className = `pe-cached-p pe-cached-${type}`;
+    para.textContent = text;
+    els.peCachedBlocks.appendChild(para);
+  }
+  if (images.length) {
+    const note = document.createElement('p');
+    note.className = 'pe-cached-img-note';
+    note.textContent = `这一页有 ${images.length} 张带说明的图片；离线快照只保留图片说明，不保存图片本身。`;
+    els.peCachedBlocks.appendChild(note);
+    for (const image of images) {
+      const slot = document.createElement('p');
+      slot.className = 'pe-cached-img';
+      slot.textContent = `［图片］${(image && image.alt) || ''}`;
+      els.peCachedBlocks.appendChild(slot);
+    }
+  }
+}
+
 function hideCachedPage() {
   if (!els.peCached) return;
   els.peCached.hidden = true;
   if (els.peCachedNote) els.peCachedNote.textContent = '';
-  if (els.peCachedText) els.peCachedText.textContent = '';
+  if (els.peCachedText) {
+    els.peCachedText.textContent = '';
+    els.peCachedText.hidden = false;
+  }
+  if (els.peCachedBlocks) {
+    els.peCachedBlocks.replaceChildren();
+    els.peCachedBlocks.hidden = true;
+  }
 }
 
 /**

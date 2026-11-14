@@ -154,12 +154,15 @@ check('12. 没有缓存时给中文说明，而不是空对象或 null', () => {
   assert.ok(/没有缓存/.test(view.note));
 });
 
-check('13. 页面侧采集脚本：跳过脚本/样式，且是 String.raw 拼的', () => {
+check('13. 页面侧采集脚本：跳过脚本/样式（v2 用 TreeWalker），且是 String.raw 拼的', () => {
   const script = cache.buildCaptureScript();
-  assert.ok(script.includes('script,style,noscript,svg,iframe'), '要跳过脚本与样式节点');
+  assert.ok(script.includes('createTreeWalker'), 'v2 采集要用 TreeWalker 按块走');
+  for (const tag of ['SCRIPT', 'STYLE', 'NOSCRIPT', 'SVG', 'IFRAME']) {
+    assert.ok(script.includes(`'${tag}'`), `跳过集合里要有 ${tag}`);
+  }
   assert.ok(script.includes('querySelector'), '要能取正文根节点');
   assert.ok(script.includes('return { ok: true'), '要回传结果对象');
-  assert.ok(script.includes('\\n'), '正则里的 \\n 必须保持转义（普通模板串会变成真换行）');
+  assert.ok(script.includes('\\s+'), '正则里的 \\s 必须保持转义（普通模板串会把反斜杠吃掉）');
   assert.ok(!script.includes('\n\n\n'), '不应出现连空行');
   const src = read('src/core/page-cache.js');
   assert.ok(src.includes('String.raw`(() => {'), '采集脚本必须用 String.raw 拼');
@@ -248,6 +251,74 @@ check('19. 开关必须真被读到：UiStore.get() 不接受参数，调用时�
   assert.ok(main.includes("uiStore.get().offlineCacheEnabled === false"), '写缓存前必须真的问到开关值');
   assert.ok(main.includes('uiStore.get().offlineCacheEnabled !== false'), '状态包必须真的报到开关值');
   assert.ok(/saved\.ok === false/.test(main), 'set() 返回 ok:false 时必须如实失败，不能假装保存成功');
+});
+
+/* ---- v2：块结构 + 图片说明（候选②） ---- */
+
+check('20. v2 快照保留语义块结构，而不是一锅纯文本', () => {
+  const cache = require('../src/core/page-cache');
+  assert.equal(cache.CACHE_VERSION, 2, '缓存格式应已升到 v2');
+  const snap = cache.normalizeSnapshot({
+    url: 'https://example.com/a',
+    title: '块结构',
+    blocks: [
+      { type: 'heading', text: '一级标题' },
+      { type: 'para', text: '这是正文段落，长度足够。' },
+      { type: 'list', text: '列表项一' },
+      { type: 'code', text: 'const a = 1;' },
+      { type: 'unknown-type', text: '未知类型要归一到 para' },
+    ],
+  });
+  assert.ok(snap, '应当生成快照');
+  assert.deepEqual(
+    snap.blocks.map((block) => block.type),
+    ['heading', 'para', 'list', 'code', 'para'],
+    '块类型要保留，未知类型归一成 para',
+  );
+  assert.ok(snap.blocks.every((block) => typeof block.text === 'string' && block.text), '每块都要有文本');
+});
+
+check('21. 图片只存说明文字（alt），不存二进制，也不假装存了图', () => {
+  const cache = require('../src/core/page-cache');
+  const snap = cache.normalizeSnapshot({
+    url: 'https://example.com/b',
+    blocks: [{ type: 'para', text: '正文在这里，大约四十个头，保证超过缓存的最小长度要求，不然快照会被拒。' }],
+    images: [{ alt: '一张价格趋势图' }, { alt: '' }, { src: 'https://cdn.example.com/x.png' }],
+    skippedImages: 7,
+  });
+  assert.equal(snap.images.length, 1, '空 alt 与该丢的条目都不能留下');
+  assert.equal(snap.images[0].alt, '一张价格趋势图');
+  assert.ok(!JSON.stringify(snap).includes('base64'), '不许把图片二进制塞进快照');
+  assert.ok(snap.skippedImages >= 7, '跳过了多少张图要如实记账');
+});
+
+check('22. v1 旧快照（只有 text）仍然能用，自动降级成段落块', () => {
+  const cache = require('../src/core/page-cache');
+  const legacy = cache.normalizeSnapshot({
+    url: 'https://example.com/c',
+    title: '旧格式',
+    text: '第一段正文内容写得足够长，长到超过缓存要求的最小长度。\n第二段正文内容同样要足够长，否则整条快照会被当成没正文。',
+  });
+  assert.ok(legacy, 'v1 快照不能因为格式升级就读不出来');
+  assert.ok(legacy.blocks.length >= 2, '旧文本要按行拆成段落块');
+  assert.ok(legacy.blocks.every((block) => block.type === 'para'), '旧文本只能当段落');
+  assert.ok(legacy.text.includes('第一段正文'), 'text 字段要保留，兼容老界面');
+});
+
+check('23. 接线：失败页有块容器，渲染函数按类型出节点', () => {
+  const html = read('src/renderer/index.html');
+  assert.ok(html.includes('id="pe-cached-blocks"'), '失败页要有块容器');
+  const js = read('src/renderer/renderer.js');
+  assert.ok(js.includes('renderCachedBlocks'), '要按块渲染');
+  assert.ok(js.includes('pe-cached-h'), '标题要单独一个类');
+  assert.ok(js.includes('pe-cached-list'), '列表要单独一个类');
+  assert.ok(js.includes('pe-cached-${type}'), '其余块类型按 pe-cached-<type> 生成类名');
+  assert.ok(js.includes('［图片］'), '图片要给一条说明，不能当正文');
+  const css = read('src/renderer/style.css');
+  assert.ok(css.includes('.pe-cached-blocks'), '块容器要有样式');
+  for (const cls of ['.pe-cached-quote', '.pe-cached-code', '.pe-cached-caption']) {
+    assert.ok(css.includes(cls), `样式里要有 ${cls}`);
+  }
 });
 
 /* ------------------------------------------------------------------ */

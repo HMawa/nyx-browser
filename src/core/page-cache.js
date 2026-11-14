@@ -16,31 +16,81 @@
  * 因为普通模板串会把 /\n+/ 里的 \n 变成真换行，页面脚本会直接语法错误。
  */
 
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 const CACHE_LIMIT = 50;
 const CACHE_TEXT_MAX = 4000;
 const CACHE_TITLE_MAX = 200;
+const CACHE_BLOCK_MAX = 120;
+const CACHE_IMAGE_MAX = 12;
 
-/** 缓存正文的页面侧脚本：只取可读文字，跳过 script/style/noscript/svg。 */
+/**
+ * 缓存正文的页面侧脚本：取「结构化的正文」而不是一坨纯文字。
+ *
+ * v2 为什么要块：v1 只有若干行字符串，断网时整页看起来像一块砖，
+ * 分不清哪里是小标题、哪里是列表。现在每块带类型（标题/段落/列表/引用/代码），
+ * 断网页就能按原结构排出来——这也是「离线快照支持样式」的可行做法：
+ * 不搬 CSS，只保留能表达层级的语义。
+ *
+ * 图片只存 alt 文字，不存二进制：存图等于把别人的图拉到本机磁盘上，
+ * 隐私与体积都不该由一次浏览决定（这条写在说明里，不允许悄悄改）。
+ */
 function buildCaptureScript() {
   return String.raw`(() => {
-    const pick = (el) => {
-      if (!el) return '';
-      const clone = el.cloneNode(true);
-      clone.querySelectorAll('script,style,noscript,svg,iframe').forEach((node) => node.remove());
-      return (clone.innerText || '').replace(/\r/g, '\n');
-    };
+    const clean = (text) => String(text || '').replace(/\s+/g, ' ').trim();
     const root =
       document.querySelector('article') ||
       document.querySelector('main') ||
       document.querySelector('[role="main"]') ||
       document.body;
-    const title = (document.title || '').replace(/\s+/g, ' ').trim();
-    const lines = pick(root)
-      .split(/\n+/)
-      .map((line) => line.replace(/\s+/g, ' ').trim())
-      .filter((line) => line.length >= 2);
-    return { ok: true, url: location.href, title, lines };
+    if (!root) return { ok: false, reason: 'no-root' };
+    const skip = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'SVG', 'IFRAME', 'TEXTAREA', 'SELECT']);
+    const typeOf = (tag) => {
+      if (tag === 'H1' || tag === 'H2' || tag === 'H3' || tag === 'H4') return 'heading';
+      if (tag === 'LI') return 'list';
+      if (tag === 'BLOCKQUOTE') return 'quote';
+      if (tag === 'PRE' || tag === 'CODE') return 'code';
+      if (tag === 'FIGCAPTION') return 'caption';
+      return 'para';
+    };
+    const blocks = [];
+    const seen = new Set();
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
+      acceptNode(node) {
+        if (skip.has(node.tagName)) return NodeFilter.FILTER_REJECT;
+        const tag = node.tagName;
+        const want = tag === 'H1' || tag === 'H2' || tag === 'H3' || tag === 'H4' ||
+          tag === 'P' || tag === 'LI' || tag === 'BLOCKQUOTE' || tag === 'PRE' || tag === 'FIGCAPTION';
+        return want ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+      },
+    });
+    let node = walker.nextNode();
+    while (node) {
+      const text = clean(node.innerText || node.textContent);
+      if (text.length >= 4 && !seen.has(text)) {
+        seen.add(text);
+        blocks.push({ type: typeOf(node.tagName), text });
+        if (blocks.length >= 120) break;
+      }
+      node = walker.nextNode();
+    }
+    const images = [];
+    let skippedImages = 0;
+    const nodes = root.querySelectorAll('img');
+    for (const img of nodes) {
+      const alt = clean(img.alt || img.title || '');
+      if (!alt) { skippedImages += 1; continue; }
+      if (images.length >= 12) break;
+      images.push({ alt: alt.slice(0, 80) });
+    }
+    const lines = [];
+    const seenLine = new Set();
+    for (const block of blocks) {
+      if (seenLine.has(block.text)) continue;
+      seenLine.add(block.text);
+      lines.push(block.text);
+    }
+    const title = clean(document.title);
+    return { ok: true, url: location.href, title, blocks, images, skippedImages, lines };
   })()`;
 }
 
@@ -53,6 +103,13 @@ function cacheKeyOf(url) {
   return hashAt >= 0 ? text.slice(0, hashAt) : text;
 }
 
+const BLOCK_TYPES = ['heading', 'para', 'list', 'quote', 'code', 'caption'];
+
+function normalizeBlockType(raw) {
+  const text = String(raw || '').toLowerCase();
+  return BLOCK_TYPES.indexOf(text) >= 0 ? text : 'para';
+}
+
 /** 把页面侧脚本的原始输出整理成一条快照（不符合条件就返回 null，不存半条）。 */
 function normalizeSnapshot(raw) {
   const input = raw && typeof raw === 'object' ? raw : {};
@@ -61,33 +118,69 @@ function normalizeSnapshot(raw) {
   const title = String(input.title || '').replace(/\s+/g, ' ').trim().slice(0, CACHE_TITLE_MAX);
   // 已归一过的快照只有 text（读盘回来的就是这种）——必须能吃下自己，
   // 否则 putSnapshot 把一条合法快照再归一一次就会判成非法，缓存永远写不进去。
+  const rawBlocks = Array.isArray(input.blocks) ? input.blocks : null;
   const source = Array.isArray(input.lines)
     ? input.lines
     : typeof input.text === 'string'
       ? String(input.text).split('\n')
       : [];
-  const lines = source;
-  const parts = [];
+
+  const blocks = [];
   let used = 0;
-  for (const line of lines) {
-    if (typeof line !== 'string') continue;
-    const text = line.trim();
-    if (text.length < 2) continue;
-    if (used + text.length > CACHE_TEXT_MAX) {
-      if (used === 0) parts.push(text.slice(0, CACHE_TEXT_MAX));
-      break;
+  const pushBlock = (type, text) => {
+    const clean = String(text || '').replace(/\s+/g, ' ').trim();
+    if (clean.length < 2) return;
+    if (used + clean.length > CACHE_TEXT_MAX) {
+      if (used === 0) blocks.push({ type, text: clean.slice(0, CACHE_TEXT_MAX) });
+      return;
     }
-    parts.push(text);
-    used += text.length;
+    blocks.push({ type, text: clean });
+    used += clean.length;
+  };
+
+  if (rawBlocks) {
+    for (const item of rawBlocks) {
+      if (blocks.length >= CACHE_BLOCK_MAX) break;
+      if (typeof item === 'string') pushBlock('para', item);
+      else if (item && typeof item === 'object') pushBlock(normalizeBlockType(item.type), item.text);
+    }
+  } else {
+    // v1 快照（只有 lines / text）：当成段落，结构退化为「一段一行」，但内容不丢。
+    for (const line of source) {
+      if (blocks.length >= CACHE_BLOCK_MAX) break;
+      pushBlock('para', line);
+    }
   }
-  const text = parts.join('\n');
+
+  const text = blocks.map((block) => block.text).join('\n');
   // 没有正文就不写：一条只有标题的缓存，在断网时比"没有缓存"更容易误导人。
   if (text.length < 20) return null;
+
+  const images = [];
+  const rawImages = Array.isArray(input.images) ? input.images : [];
+  for (const item of rawImages) {
+    if (images.length >= CACHE_IMAGE_MAX) break;
+    if (typeof item === 'string') {
+      const alt = item.replace(/\s+/g, ' ').trim().slice(0, 80);
+      if (alt) images.push({ alt });
+      continue;
+    }
+    if (item && typeof item === 'object') {
+      const alt = String(item.alt || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+      if (alt) images.push({ alt });
+    }
+  }
+
   return {
     url: key,
     title: title || key,
     text,
+    blocks,
+    images,
     chars: text.length,
+    // 跳过了多少张没有说明文字的图也要记账：界面上说「只保留图片说明」时，
+    // 用户有权知道到底漏掉了多少张。
+    skippedImages: Number(input.skippedImages) > 0 ? Math.floor(Number(input.skippedImages)) : 0,
     at: Number(input.at) > 0 ? Number(input.at) : Date.now(),
   };
 }
@@ -141,6 +234,8 @@ function describeCachedPage(snapshot, options) {
       available: false,
       title: '',
       text: '',
+      blocks: [],
+      images: [],
       at: 0,
       time: '',
       ageText: '',
@@ -161,6 +256,8 @@ function describeCachedPage(snapshot, options) {
     available: true,
     title: snapshot.title || snapshot.url || '',
     text: snapshot.text,
+    blocks: Array.isArray(snapshot.blocks) ? snapshot.blocks : [],
+    images: Array.isArray(snapshot.images) ? snapshot.images : [],
     chars: Number(snapshot.chars) || String(snapshot.text).length,
     url: snapshot.url || '',
     at,
@@ -171,6 +268,9 @@ function describeCachedPage(snapshot, options) {
 }
 
 module.exports = {
+  BLOCK_TYPES,
+  CACHE_BLOCK_MAX,
+  CACHE_IMAGE_MAX,
   CACHE_LIMIT,
   CACHE_TEXT_MAX,
   CACHE_VERSION,

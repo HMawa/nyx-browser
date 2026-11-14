@@ -2565,6 +2565,73 @@ body.private-mode .shell {
   word-break: break-word;
 }
 
+/* 离线快照的块结构：搬语义不搬 CSS，所以这里只给很少的几条样式 */
+.pe-cached-blocks {
+  max-height: 240px;
+  overflow: auto;
+  color: var(--text-main);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.pe-cached-h {
+  margin: 12px 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.pe-cached-h:first-child {
+  margin-top: 0;
+}
+
+.pe-cached-p {
+  margin: 0 0 6px;
+  word-break: break-word;
+}
+
+.pe-cached-list::before {
+  content: '· ';
+  color: var(--text-faint);
+}
+
+.pe-cached-quote {
+  padding-left: 10px;
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-dim);
+}
+
+.pe-cached-code {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--bg-code) 80%, transparent);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pe-cached-caption {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.pe-cached-img-note {
+  margin: 10px 0 4px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.pe-cached-img {
+  margin: 0 0 4px;
+  padding: 4px 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
 .pe-foot {
   margin: 16px 0 0;
   color: var(--text-faint);
