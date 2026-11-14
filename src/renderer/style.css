@@ -124,6 +124,16 @@ body {
   font-size: 12px;
 }
 
+/* 已休眠的标签（清单 G）：淡显 + 斜体点提示，靠 title 说明"点一下会重新加载"。
+   不用图标：标签栏已经很挤，多一个角标反而更难扫。 */
+.tab.is-asleep .tab-title {
+  opacity: 0.5;
+}
+
+.tab.is-asleep {
+  background: color-mix(in srgb, var(--bg-tab) 70%, transparent);
+}
+
 .tab-spinner {
   width: 8px;
   height: 8px;

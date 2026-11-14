@@ -72,14 +72,17 @@ function renderTabs() {
 
   for (const tab of tabs) {
     const item = document.createElement('div');
-    item.className = `tab${tab.active ? ' active' : ''}`;
-    item.title = tab.url || tab.title;
+    // 休眠标签淡显 + 标题后缀（清单 G）：点一下会按原地址重新加载，不是死链
+    item.className = `tab${tab.active ? ' active' : ''}${tab.asleep ? ' is-asleep' : ''}`;
+    item.title = tab.asleep
+      ? `${tab.url || tab.title}\n已休眠（已释放内存，点一下按原地址重新加载）`
+      : tab.url || tab.title;
     // 标签是"可切换的选项"，不是普通盒子：给读屏和键盘一条正规路径。
     // 焦点用游标式（roving tabindex）：只有当前标签能被 Tab 命中，
     // 组内用左右方向键移动，避免每加一个标签就多一次 Tab 停留。
     item.setAttribute('role', 'tab');
     item.setAttribute('aria-selected', tab.active ? 'true' : 'false');
-    item.setAttribute('aria-label', tab.title || '新标签页');
+    item.setAttribute('aria-label', `${tab.title || '新标签页'}${tab.asleep ? '（已休眠）' : ''}`);
     item.dataset.tabId = String(tab.id);
     item.tabIndex = tab.active ? 0 : -1;
 

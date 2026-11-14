@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把十五个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把十七个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
@@ -18,7 +18,9 @@
  * 12. scripts/verify-agent-sites.js（站点三层授权，19 项；纯 Node，不启动 Electron）
  * 13. scripts/verify-agent-mode.js（agent 接入模式与两步确认，16 项；纯 Node，不启动 Electron）
  * 14. scripts/verify-page-digest.js（页面摘要，17 项；纯 Node，不启动 Electron）
- * 15. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
+ * 15. scripts/verify-tab-lifecycle.js（标签生命周期判定，15 项；纯 Node，不启动 Electron）
+ * 16. scripts/verify-tab-sleep.js（标签休眠与唤醒端到端，10 项）
+ * 17. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -133,6 +135,18 @@ const STEPS = [
     script: 'verify-page-digest.js',
     items: '17 项',
     timeoutMs: 60000,
+  },
+  {
+    label: '标签生命周期回归',
+    script: 'verify-tab-lifecycle.js',
+    items: '15 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '标签休眠回归',
+    script: 'verify-tab-sleep.js',
+    items: '10 项',
+    timeoutMs: 240000,
   },
   {
     label: '打包产物冒烟',

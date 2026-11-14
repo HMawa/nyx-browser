@@ -84,6 +84,8 @@ const {
   summarizeNetwork,
 } = require('./core/page-digest');
 const { getRiskLog } = require('./core/risk-guard');
+// 标签生命周期（清单 G）：休眠阈值与 agent 保持唤醒时长
+const { AGENT_KEEP_AWAKE_MS, readSleepAfterFromEnv } = require('./core/tab-lifecycle');
 const { startHttpApi } = require('./api/http-api');
 const { createModeEventLog } = require('./core/mode-events');
 const { ACTIONS: LINK_GUARD_ACTIONS, isProxyFailureCode, decideProxyFailureAction } = require('./core/link-guard');
@@ -285,6 +287,22 @@ for (const name of gpuSwitches(BOOT_GPU_POLICY)) {
 console.log(`[Nyx] 显卡策略：${describeGpuPolicy(BOOT_GPU_POLICY).label}（开关 ${gpuSwitches(BOOT_GPU_POLICY).join(',') || '无'}）`);
 
 /**
+ * 后台标签休眠阈值（清单 G）。
+ *
+ * 默认 30 分钟；`NYX_TAB_SLEEP_MS` 只是自动化验证用的旋钮（要等到 30 分钟才能验，
+ * 显然不现实），正常启动不会有这个变量。0 表示关闭休眠。
+ */
+function readTabSleepAfterMs() {
+  const value = readSleepAfterFromEnv(process.env);
+  if (value === 0) {
+    console.log('[Nyx] 标签休眠：已关闭（后台标签一直留在内存里）');
+  } else if (value !== 30 * 60 * 1000) {
+    console.log(`[Nyx] 标签休眠阈值被环境变量改成 ${value} 毫秒（仅用于验证）`);
+  }
+  return value;
+}
+
+/**
  * agent 接入模式（清单 A）。
  *
  * 为什么要在 ready 之前读：CDP 端口（外部接入）只能在启动时打开，Chromium 没有运行时开关，
@@ -376,6 +394,8 @@ const runtime = {
   bootAgentMode: BOOT_AGENT_MODE,
   /** 外部接入的 CDP 端口（内置模式下仅作展示，不监听） */
   agentDebugPort: BOOT_AGENT_MODE_CONFIG.debugPort,
+  /** agent 会话空闲计时器（清单 G）：没有新动作时用来恢复"标签可以休眠" */
+  agentSessionTimer: null,
   /** 下载中心窗口（独立 BrowserWindow） */
   downloadsWindow: null,
   /**
@@ -1668,7 +1688,9 @@ function initToolbox() {
 
   runtime.toolbox = new Toolbox({
     getAllWebContents: () =>
-      runtime.tabManager ? runtime.tabManager.tabs.map((tab) => tab.view.webContents) : [],
+      runtime.tabManager
+        ? runtime.tabManager.tabs.filter((tab) => tab.view).map((tab) => tab.view.webContents)
+        : [],
     getActiveWebContents: () =>
       runtime.tabManager ? runtime.tabManager.getActiveWebContents() : null,
     push,
@@ -2375,7 +2397,7 @@ function createMainWindow() {
     // 新标签纳入抓包范围，并继承工具箱的 UA / 视口 / 限速设定
     onTabCreated: (tab) => {
       if (runtime.toolbox) runtime.toolbox.syncAll();
-      if (runtime.pageTools) {
+      if (runtime.pageTools && tab.view) {
         runtime.pageTools.applySticky(tab.view.webContents).catch((err) => {
           console.warn('[Nyx] 工具箱粘性设置应用失败：', err.message);
         });
@@ -2383,7 +2405,13 @@ function createMainWindow() {
       // 历史记录：导航提交（主框架）即记账，页面标题就绪后再修正标题
       hookHistoryRecording(tab);
     },
+    // 后台标签闲置到点就休眠，释放渲染进程（清单 G）。0 = 关闭休眠。
+    // 环境变量只是自动化验证用的旋钮，正常启动就是默认的 30 分钟。
+    sleepAfterMs: readTabSleepAfterMs(),
   });
+
+  // 休眠巡检：5 秒一次，判定与执行都在 TabManager 里，这里只负责开起来
+  runtime.tabManager.startLifecycle();
 
   // 启动标签按「启动与主页」配置打开：空白页 / 新标签页 / 指定网页（可多条）
   const targets = startupTargets();
@@ -2417,6 +2445,7 @@ function showMainWindow() {
  *   - 只记录主框架 http(s) 页面，内部页与特殊协议一律跳过。
  */
 function hookHistoryRecording(tab) {
+  if (!tab || !tab.view) return;
   const wc = tab.view.webContents;
   if (!wc || wc.isDestroyed()) return;
 
@@ -7375,6 +7404,9 @@ async function confirmAgentAction(request) {
 function recordAgentAudit(entry) {
   const record = entry || {};
   if (runtime.agentAudit) runtime.agentAudit.record(record);
+  // 清单 G 的关键例外：agent 刚操作过的标签不许休眠，有 agent 会话在跑时谁也不许睡。
+  // 放在审计入口统一打点，任何动作（含下载这类 observe）都会顺带续命。
+  touchAgentSession(record);
   const code = record.code ? record.code : record.rule ? record.rule : '';
   const summary = `${record.type || '未知动作'} · ${record.decision || '?'}${code ? ` · ${code}` : ''}`;
   const payload = {
@@ -7390,6 +7422,34 @@ function recordAgentAudit(entry) {
   };
   if (record.ok === false) diagnostics.warn('AGENT_ACTION', summary, payload);
   else diagnostics.info('AGENT_ACTION', summary, payload);
+}
+
+/**
+ * agent 活动的"续命"打点（清单 G）。
+ *
+ * 两个效果：
+ *   1. 让刚被操作的那张标签在一段时间内不进休眠；
+ *   2. 只要还在持续收到 agent 动作，就把"有 agent 会话"保持为真——这段时间内
+ *      所有标签都不休眠，否则 agent 读到一半页面被释放，后续动作全砸。
+ * 会话标志用一个空闲计时器复位：没有新动作满 AGENT_SESSION_IDLE_MS 就恢复休眠能力。
+ */
+const AGENT_SESSION_IDLE_MS = 60 * 1000;
+
+function touchAgentSession(record) {
+  const manager = runtime.tabManager;
+  if (!manager) return;
+  const stage = record && record.stage;
+  // authorize/confirm 还没真正碰页面，只有真的执行或观察到动作才续命
+  if (stage === 'execute' || stage === 'result' || stage === 'observe') {
+    manager.markAgentDriven(undefined, AGENT_KEEP_AWAKE_MS);
+    manager.setAgentSessionActive(true);
+    if (runtime.agentSessionTimer) clearTimeout(runtime.agentSessionTimer);
+    runtime.agentSessionTimer = setTimeout(() => {
+      runtime.agentSessionTimer = null;
+      if (runtime.tabManager) runtime.tabManager.setAgentSessionActive(false);
+    }, AGENT_SESSION_IDLE_MS);
+    if (typeof runtime.agentSessionTimer.unref === 'function') runtime.agentSessionTimer.unref();
+  }
 }
 
 /** 急停状态快照：界面角标、设置页、诊断都读这一份 */

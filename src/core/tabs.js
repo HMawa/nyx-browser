@@ -15,6 +15,16 @@ const { WebContentsView } = require('electron');
 // 加载失败的取值说明与诊断页共用同一张表：错误页写"给人看的中文原因"，
 // 诊断日志写 errorCode，两处口径必须一致，否则用户看到的和日志对不上。
 const { describeLoadError } = require('./diagnostics');
+// 标签生命周期（清单 G）：休眠判定与文案。判定在纯函数里，执行（释放 / 重建视图）在这边，
+// 两边用同一份判定，避免"判定说该睡、执行说没睡"的分裂。
+const {
+  AGENT_KEEP_AWAKE_MS,
+  DEFAULT_SLEEP_AFTER_MS,
+  decideTabLifecycle,
+  describeLifecycle,
+  normalizeSleepAfter,
+  summarizeLifecycle,
+} = require('./tab-lifecycle');
 
 /** WebRTC IP 处理策略：禁用非代理 UDP，防止真实 IP 通过 STUN 泄漏 */
 const WEBRTC_POLICY = 'disable_non_proxied_udp';
@@ -162,6 +172,164 @@ class TabManager {
     this.tabs = [];
     this.activeId = null;
     this.seq = 1;
+
+    /**
+     * 后台标签闲置多久后休眠（清单 G）。0 = 关闭休眠。
+     * 默认 30 分钟；自动化验证用 NYX_TAB_SLEEP_MS 调小。
+     */
+    this.sleepAfterMs = normalizeSleepAfter(
+      options.sleepAfterMs === undefined ? DEFAULT_SLEEP_AFTER_MS : options.sleepAfterMs,
+      DEFAULT_SLEEP_AFTER_MS,
+    );
+
+    /** 是否有 agent 会话在跑：有的话所有标签都不许休眠（清单 G 的关键例外） */
+    this.agentSessionActive = false;
+
+    /** 休眠巡检定时器（5 秒一次，够细也不费电） */
+    this.lifecycleTimer = null;
+  }
+
+  /**
+   * 标记某个标签刚被 agent 操作过：在一段时间内不许休眠。
+   * @param {number} [tabId] 缺省用当前标签
+   * @param {number} [ttlMs]
+   */
+  markAgentDriven(tabId, ttlMs = AGENT_KEEP_AWAKE_MS) {
+    const tab = tabId ? this.tabs.find((item) => item.id === tabId) : this.active;
+    if (!tab) return { ok: false, error: '当前没有活动标签' };
+    tab.agentDrivenUntil = Date.now() + Math.max(0, Number(ttlMs) || 0);
+    // 已经睡了的，agent 要找它就得先醒过来，而不是让它对着一个空壳报错
+    if (tab.asleep) this.wakeTab(tab);
+    return { ok: true, id: tab.id, agentDrivenUntil: tab.agentDrivenUntil };
+  }
+
+  /** 设置 agent 会话状态：true 时任何标签都不休眠 */
+  setAgentSessionActive(flag) {
+    const next = Boolean(flag);
+    if (next === this.agentSessionActive) return;
+    this.agentSessionActive = next;
+    this.emit();
+  }
+
+  /** 启动休眠巡检 */
+  startLifecycle() {
+    if (this.lifecycleTimer) return;
+    this.lifecycleTimer = setInterval(() => this.applyLifecycle(), 5000);
+    // 只是内部巡检，不该拖住进程退出
+    if (typeof this.lifecycleTimer.unref === 'function') this.lifecycleTimer.unref();
+  }
+
+  /** 停止休眠巡检（关闭全部标签 / 退出时调用） */
+  stopLifecycle() {
+    if (!this.lifecycleTimer) return;
+    clearInterval(this.lifecycleTimer);
+    this.lifecycleTimer = null;
+  }
+
+  /** 逐个标签判定并执行休眠 / 唤醒 */
+  applyLifecycle() {
+    const now = Date.now();
+    let changed = false;
+    for (const tab of this.tabs) {
+      const decision = decideTabLifecycle({
+        isActive: tab.id === this.activeId,
+        asleep: Boolean(tab.asleep),
+        idleMs: now - (tab.lastActiveAt || now),
+        sleepAfterMs: this.sleepAfterMs,
+        agentDrivenUntil: tab.agentDrivenUntil || 0,
+        agentSessionActive: this.agentSessionActive,
+        noSleep: Boolean(tab.noSleep),
+        now,
+      });
+      if (decision.state === 'asleep' && !tab.asleep) {
+        this.sleepTab(tab);
+        changed = true;
+      } else if (decision.keepAwake && tab.asleep) {
+        this.wakeTab(tab);
+        changed = true;
+      }
+    }
+    if (changed) this.emit();
+  }
+
+  /**
+   * 让标签休眠：释放 WebContentsView 与它的渲染进程，只留一条记录。
+   *
+   * 诚实边界：休眠等于把页面卸载了，页面里的未提交输入、滚动位置会丢；
+   * 重新点开是按原地址重新加载。这也是为什么 agent 驱动的标签永不休眠。
+   */
+  sleepTab(tab) {
+    if (!tab || tab.asleep || !tab.view) return { ok: false, error: '这个标签不能休眠' };
+    const wc = tab.view.webContents;
+    tab.sleepUrl = tab.url && tab.url !== 'about:blank' ? tab.url : tab.sleepUrl || tab.url;
+    try {
+      this.mainWindow.contentView.removeChildView(tab.view);
+    } catch {
+      /* 忽略：窗口可能已销毁 */
+    }
+    try {
+      wc.close();
+    } catch {
+      /* 忽略 */
+    }
+    tab.view = null;
+    tab.asleep = true;
+    tab.loading = false;
+    tab.canGoBack = false;
+    tab.canGoForward = false;
+    tab.loadError = null;
+    return { ok: true, id: tab.id };
+  }
+
+  /**
+   * 唤醒休眠标签：按原地址重建视图并加载。
+   * @returns {{ok:boolean, id?:number, error?:string}}
+   */
+  wakeTab(tab) {
+    if (!tab) return { ok: false, error: '标签不存在' };
+    if (!tab.asleep) return { ok: true, id: tab.id };
+    if (!tab.prefs) return { ok: false, error: '这个标签缺少重建参数，无法唤醒' };
+
+    let view;
+    try {
+      view = new WebContentsView({ webPreferences: tab.prefs });
+    } catch (err) {
+      // 重建失败必须说出来，不能留一个点了没反应的标签
+      console.error('[Nyx] 唤醒标签失败：', err && err.message);
+      tab.asleep = false;
+      tab.title = '唤醒失败';
+      this.emit();
+      return { ok: false, error: `唤醒标签失败：${(err && err.message) || '未知错误'}` };
+    }
+
+    tab.view = view;
+    tab.asleep = false;
+    tab.loading = true;
+    this.mainWindow.contentView.addChildView(view);
+    this.bindEvents(tab);
+
+    const wc = view.webContents;
+    wc.setWebRTCIPHandlingPolicy(this.getWebrtcPolicy(this.getMode()));
+    wc.setWindowOpenHandler(({ url }) => {
+      this.create(url);
+      return { action: 'deny' };
+    });
+
+    const target = tab.sleepUrl || tab.url || this.defaultUrl;
+    tab.url = target;
+    tab.requestedUrl = target;
+    // 重建后工具箱的粘性设置（UA / 视口 / 限速）要重新施加一遍
+    try {
+      this.onTabCreated(tab);
+    } catch (err) {
+      console.warn('[Nyx] 标签重建回调异常：', err.message);
+    }
+    wc.loadURL(target).catch((err) => {
+      console.warn('[Nyx] 唤醒后加载失败：', err && err.message);
+    });
+    this.layout();
+    this.emit();
+    return { ok: true, id: tab.id };
   }
 
   /** 当前激活标签 */
@@ -172,7 +340,7 @@ class TabManager {
   /** 当前激活标签的 webContents（AI 接口的操作目标） */
   getActiveWebContents() {
     const tab = this.active;
-    if (!tab) return null;
+    if (!tab || tab.asleep || !tab.view) return null;
     const wc = tab.view.webContents;
     return wc && !wc.isDestroyed() ? wc : null;
   }
@@ -227,6 +395,13 @@ class TabManager {
       canGoForward: false,
       // 加载失败信息（null = 正常）。有值时视图会被隐藏，页面区交给外壳的错误页。
       loadError: null,
+      // 休眠相关（清单 G）：prefs 是重建视图的唯一依据，绝不能丢
+      prefs: webPreferences,
+      asleep: false,
+      sleepUrl: '',
+      agentDrivenUntil: 0,
+      lastActiveAt: Date.now(),
+      noSleep: false,
     };
 
     this.tabs.push(tab);
@@ -316,6 +491,14 @@ class TabManager {
       canGoForward: false,
       loadError: null,
       kind,
+      // 应用页是本地页面：内存占用极小，休眠只会在切换时多一次白屏，
+      // 所以设置页不参与休眠（清单 G 的"不打断正常操作"取舍）。
+      prefs: appPreferences,
+      asleep: false,
+      sleepUrl: '',
+      agentDrivenUntil: 0,
+      lastActiveAt: Date.now(),
+      noSleep: kind === 'settings',
     };
 
     this.tabs.push(tab);
@@ -339,8 +522,8 @@ class TabManager {
   /** 取某个应用页标签的 webContents（没开着就返回 null） */
   appPageWebContents(kind = 'settings') {
     const tab = this.tabs.find((item) => item.kind === kind);
-    if (!tab || !tab.view || tab.view.webContents.isDestroyed()) return null;
-    return tab.view.webContents;
+    if (!tab || tab.asleep || !tab.view) return null;
+    return tab.view.webContents.isDestroyed() ? null : tab.view.webContents;
   }
 
   /** 绑定标签生命周期事件 */
@@ -411,6 +594,13 @@ class TabManager {
   }
 
   syncNavState(tab) {
+    if (!tab || !tab.view) {
+      if (tab) {
+        tab.canGoBack = false;
+        tab.canGoForward = false;
+      }
+      return;
+    }
     try {
       tab.canGoBack = tab.view.webContents.navigationHistory.canGoBack();
       tab.canGoForward = tab.view.webContents.navigationHistory.canGoForward();
@@ -427,15 +617,18 @@ class TabManager {
 
     const [tab] = this.tabs.splice(index, 1);
 
-    try {
-      this.mainWindow.contentView.removeChildView(tab.view);
-    } catch {
-      /* 忽略：窗口可能已销毁 */
-    }
-    try {
-      tab.view.webContents.close();
-    } catch {
-      /* 忽略 */
+    if (tab.view) {
+      try {
+        this.mainWindow.contentView.removeChildView(tab.view);
+      } catch {
+        /* 忽略：窗口可能已销毁 */
+      }
+      try {
+        tab.view.webContents.close();
+      } catch {
+        /* 忽略 */
+      }
+      tab.view = null;
     }
 
     if (this.activeId === id) {
@@ -455,8 +648,10 @@ class TabManager {
 
   /** 关闭全部标签（不清空 session） */
   closeAll() {
+    this.stopLifecycle();
     while (this.tabs.length > 0) {
       const tab = this.tabs.pop();
+      if (!tab.view) continue;
       try {
         this.mainWindow.contentView.removeChildView(tab.view);
       } catch {
@@ -467,6 +662,7 @@ class TabManager {
       } catch {
         /* 忽略 */
       }
+      tab.view = null;
     }
     this.activeId = null;
     this.emit();
@@ -533,6 +729,12 @@ class TabManager {
   retryLoadError(id) {
     const tab = id ? this.tabs.find((item) => item.id === id) : this.active;
     if (!tab) return { ok: false, error: '当前没有活动标签' };
+    // 休眠标签先唤醒再重试；唤醒本身就会按原地址加载
+    if (tab.asleep || !tab.view) {
+      const woken = this.wakeTab(tab);
+      if (!woken.ok) return woken;
+      return { ok: true, url: tab.url };
+    }
     const wc = tab.view.webContents;
     if (!wc || wc.isDestroyed()) return { ok: false, error: '标签已销毁' };
 
@@ -549,9 +751,16 @@ class TabManager {
 
   /** 激活标签 */
   activate(id) {
-    if (!this.tabs.some((tab) => tab.id === id)) {
+    const next = this.tabs.find((tab) => tab.id === id);
+    if (!next) {
       return { ok: false, error: `标签不存在：${id}` };
     }
+    // 切走的标签从现在开始计时闲置（休眠判定用）
+    const previous = this.active;
+    if (previous && previous.id !== id) previous.lastActiveAt = Date.now();
+    // 点到一个已休眠的标签：先按原地址重建视图，否则界面上就是个空壳
+    if (next.asleep) this.wakeTab(next);
+    next.lastActiveAt = Date.now();
     this.activeId = id;
     this.layout();
     this.emit();
@@ -566,7 +775,9 @@ class TabManager {
     for (const tab of this.tabs) {
       // 有 loadError 的标签不显示视图：它的内容区由外壳的错误页接管，
       // 不隐藏的话用户会看到一个白屏（Chromium 默认错误页被 Nyx 关掉了提示）。
-      const visible = tab.id === this.activeId && !tab.loadError;
+      // 已休眠的标签没有视图（渲染进程已释放），跳过即可。
+      const visible = tab.id === this.activeId && !tab.loadError && !tab.asleep && Boolean(tab.view);
+      if (!tab.view) continue;
       try {
         tab.view.setVisible(visible);
       } catch {
@@ -611,6 +822,12 @@ class TabManager {
     // 换地址就当作重新来过：先清失败态，否则错误页会盖住新页面。
     tab.requestedUrl = target;
     this.clearLoadError(tab);
+    if (tab.asleep || !tab.view) {
+      // 休眠标签被要求导航：记下目标地址再唤醒，避免"先加载旧地址再跳"的两次请求
+      tab.sleepUrl = target;
+      const woken = this.wakeTab(tab);
+      return woken.ok ? { ok: true, url: target } : { ok: false, error: woken.error, url: target };
+    }
     try {
       await tab.view.webContents.loadURL(target);
       return { ok: true, url: target };
@@ -641,6 +858,10 @@ class TabManager {
     if (!tab) return { ok: false, error: '当前没有活动标签' };
     // 处在错误页时刷新 = 重试原地址（此时 webContents 里还是失败前的页面，reload 无意义）
     if (tab.loadError) return this.retryLoadError(tab.id);
+    if (tab.asleep || !tab.view) {
+      const woken = this.wakeTab(tab);
+      return woken.ok ? { ok: true, url: tab.url } : woken;
+    }
     const wc = tab.view.webContents;
     if (!wc || wc.isDestroyed()) return { ok: false, error: '标签已销毁' };
     wc.reload();
@@ -649,6 +870,10 @@ class TabManager {
 
   /** 给渲染层的状态快照 */
   snapshot() {
+    const decisions = this.tabs.map((tab) => ({
+      state: tab.asleep ? 'asleep' : tab.id === this.activeId ? 'active' : 'background',
+      keepAwake: Boolean(tab.agentDrivenUntil && tab.agentDrivenUntil > Date.now()) || this.agentSessionActive,
+    }));
     return {
       mode: this.getMode(),
       activeId: this.activeId,
@@ -656,6 +881,12 @@ class TabManager {
       // 出站链路（proxy / direct）随快照一起下发：界面与本地接口共用同一口径，
       // 避免"界面看着走代理、实际在直连"这类只能靠日志发现的漂移。
       network: this.getNetwork() || null,
+      // 生命周期（清单 G）：界面据此显示"已休眠"，设置页据此解释为什么标签不睡
+      lifecycle: {
+        sleepAfterMs: this.sleepAfterMs,
+        agentSessionActive: this.agentSessionActive,
+        ...summarizeLifecycle(decisions),
+      },
       tabs: this.tabs.map((tab) => ({
         id: tab.id,
         title: tab.title || '新标签页',
@@ -666,6 +897,9 @@ class TabManager {
         canGoForward: tab.canGoForward,
         // 失败信息随快照下发：外壳据此渲染错误页（视图已被隐藏）
         loadError: tab.loadError || null,
+        // 休眠标记：界面用淡显 + 「已休眠」提示，点一下会按原地址重新加载
+        asleep: Boolean(tab.asleep),
+        lifecycle: describeLifecycle(tab.asleep ? 'asleep' : tab.id === this.activeId ? 'active' : 'background'),
       })),
     };
   }
