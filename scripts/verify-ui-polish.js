@@ -2345,6 +2345,56 @@ async function main() {
       JSON.stringify(privateGuard),
     );
 
+    /* ---------- C（通道）：真实运行时的 agent 动作确实走统一通道 ---------- */
+    // 静态守卫在 verify-agent-dispatch.js 里；这里用真实进程的本地接口验一次，
+    // 证明"接口拿到的是通道"不是纸面约定。
+    const agentApi = await (async () => {
+      try {
+        const token = fs.readFileSync(path.join(userData, 'api-token.txt'), 'utf8').trim();
+        const port = fs.readFileSync(path.join(userData, 'api-port.txt'), 'utf8').trim();
+        const base = `http://127.0.0.1:${port}`;
+        const headers = { 'X-Nyx-Token': token, 'Content-Type': 'application/json' };
+        const capsRes = await fetch(`${base}/capabilities`, { headers });
+        const caps = await capsRes.json();
+        const badRes = await fetch(`${base}/action`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ type: 'rm-rf', params: {} }),
+        });
+        const bad = await badRes.json();
+        const stateRes = await fetch(`${base}/action`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ type: 'state', params: {} }),
+        });
+        const state = await stateRes.json();
+        return {
+          port,
+          actionCount: Array.isArray(caps.actions) ? caps.actions.length : 0,
+          typeNeedsConfirm: (caps.actions || []).find((it) => it.type === 'type')?.confirmRequired === true,
+          downloadRule: Boolean(caps.confirmRules && caps.confirmRules.download && caps.confirmRules.download.required),
+          channel: caps.channel || '',
+          badStatus: badRes.status,
+          badCode: bad.code || '',
+          badDecision: bad.decision || '',
+          stateOk: state.ok === true,
+          stateStatus: stateRes.status,
+        };
+      } catch (err) {
+        return { error: err.message };
+      }
+    })();
+    check(
+      '本地接口的能力清单标出「哪些动作必须人工确认」（C）',
+      agentApi.actionCount === 8 && agentApi.typeNeedsConfirm === true && agentApi.downloadRule === true && agentApi.channel === 'agent-dispatch',
+      JSON.stringify(agentApi),
+    );
+    check(
+      '接口里的动作真走统一通道：未知动作带错误码被拒，正常动作照常成功（C）',
+      agentApi.badStatus >= 400 && agentApi.badCode === 'UNKNOWN_ACTION' && agentApi.stateOk === true,
+      JSON.stringify(agentApi),
+    );
+
     /* ---------- 运行时无脚本异常 ---------- */
     const shellErrors = shell.exceptions();
     /* ---------- B3（设置页侧）：卡片 / 未勾确认被拦 / 勾选后可改可回 ---------- */

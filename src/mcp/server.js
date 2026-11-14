@@ -64,7 +64,9 @@ async function callApi(runtime, action) {
   });
   const payload = await response.json().catch(() => ({ ok: false, error: '响应不是合法 JSON' }));
   if (!response.ok || payload.ok === false) {
-    throw new Error(payload.error || `接口返回 ${response.status}`);
+    // 把动作被拒 / 被急停的原因原样带回给客户端，别只说"失败"
+    const code = payload.code ? `（${payload.code}）` : '';
+    throw new Error(`${payload.error || `接口返回 ${response.status}`}${code}`);
   }
   return payload;
 }
@@ -160,7 +162,8 @@ async function main() {
     'nyx_type',
     {
       title: '输入文字',
-      description: '向输入框或可编辑区域写入文字，可选回车提交',
+      description:
+        '向输入框或可编辑区域写入文字，可选回车提交。注意：每次输入都会在 Nyx 桌面端弹出人工确认，用户拒绝时文字不会写进页面。',
       inputSchema: {
         selector: z.string().describe('CSS 选择器'),
         text: z.string().describe('要输入的文字'),

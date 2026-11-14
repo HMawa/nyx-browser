@@ -15,7 +15,22 @@
  *   riskLog       读取实时风控日志
  *
  * 所有动作统一返回 { ok, action, data?, error?, elapsedMs }。
+ *
+ * 注意：本模块只负责「执行」。权限判定、人工确认、留痕与急停都在
+ * src/core/agent-dispatch.js 的统一通道里完成——动作执行器不对外直接暴露给
+ * 本地接口或 MCP，否则通道就被绕过了。
  */
+
+const ACTION_TYPES = [
+  'navigate',
+  'screenshot',
+  'click',
+  'type',
+  'executeJS',
+  'extractText',
+  'state',
+  'riskLog',
+];
 
 /** 页面内点击脚本：对目标元素派发完整鼠标事件序列 */
 function buildClickScript(selector, index) {
@@ -101,10 +116,22 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog }) 
     return manager.getActiveWebContents();
   }
 
-  async function run(action) {
+  async function run(action, options) {
     const started = Date.now();
     const type = action && action.type;
     const params = (action && action.params) || {};
+    const opts = options && typeof options === 'object' ? options : {};
+    const signal = opts.signal;
+
+    // 急停后不允许再派发任何一步：在执行器入口和每个页面动作前各查一次
+    const aborted = () => Boolean(signal && signal.aborted);
+    const interrupted = () => ({
+      ok: false,
+      action: type,
+      code: 'ABORTED',
+      error: '动作已被紧急停止中断',
+      elapsedMs: Date.now() - started,
+    });
 
     const wrap = (payload) => ({
       ok: payload.ok !== false,
@@ -116,6 +143,7 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog }) 
 
     try {
       if (!type) return { ok: false, action: null, error: '缺少动作类型（type）', elapsedMs: 0 };
+      if (aborted()) return interrupted();
 
       // ---- 不需要页面上下文的动作 ----
       if (type === 'state') {
@@ -136,10 +164,12 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog }) 
 
       const wc = activeWebContents();
       if (!wc) return { ok: false, action: type, error: '当前没有可操作的活动标签', elapsedMs: Date.now() - started };
+      if (aborted()) return interrupted();
 
       switch (type) {
         case 'navigate': {
           if (!params.url) return { ok: false, action: type, error: '缺少参数 url', elapsedMs: Date.now() - started };
+          if (aborted()) return interrupted();
           const result = await getTabManager().navigate(params.url);
           return wrap(result.ok ? { ok: true, url: result.url } : { ok: false, error: result.error });
         }
@@ -158,6 +188,7 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog }) 
 
         case 'click': {
           if (!params.selector) return { ok: false, action: type, error: '缺少参数 selector', elapsedMs: Date.now() - started };
+          if (aborted()) return interrupted();
           const result = await wc.executeJavaScript(buildClickScript(params.selector, params.index || 0), true);
           return wrap(result);
         }
@@ -165,6 +196,7 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog }) 
         case 'type': {
           if (!params.selector) return { ok: false, action: type, error: '缺少参数 selector', elapsedMs: Date.now() - started };
           if (typeof params.text !== 'string') return { ok: false, action: type, error: '缺少参数 text', elapsedMs: Date.now() - started };
+          if (aborted()) return interrupted();
           const script = buildTypeScript(params.selector, params.text, params.clear !== false, !!params.submit);
           const result = await wc.executeJavaScript(script, true);
           return wrap(result);
@@ -172,6 +204,7 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog }) 
 
         case 'executeJS': {
           if (!params.code) return { ok: false, action: type, error: '缺少参数 code', elapsedMs: Date.now() - started };
+          if (aborted()) return interrupted();
           const result = await wc.executeJavaScript(String(params.code), true);
           return wrap({ ok: true, result: result === undefined ? null : result });
         }
@@ -195,11 +228,17 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog }) 
           return { ok: false, action: type, error: `不支持的动作类型：${type}`, elapsedMs: Date.now() - started };
       }
     } catch (err) {
-      return { ok: false, action: type, error: err && err.message ? err.message : String(err), elapsedMs: Date.now() - started };
+      return {
+        ok: false,
+        action: type,
+        code: err && err.code ? err.code : '',
+        error: err && err.message ? err.message : String(err),
+        elapsedMs: Date.now() - started,
+      };
     }
   }
 
   return { run };
 }
 
-module.exports = { createActionRunner };
+module.exports = { ACTION_TYPES, createActionRunner };

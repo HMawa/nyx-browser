@@ -55,6 +55,8 @@ const { Vault } = require('./core/vault');
 const { ProxyService } = require('./core/proxy-service');
 const { TabManager, normalizeInput } = require('./core/tabs');
 const { createActionRunner } = require('./core/actions');
+// 统一动作通道（清单 C）：所有 agent 动作唯一入口，权限/确认/留痕/急停都从这里过
+const { createDispatcher } = require('./core/agent-dispatch');
 const { getRiskLog } = require('./core/risk-guard');
 const { startHttpApi } = require('./api/http-api');
 const { createModeEventLog } = require('./core/mode-events');
@@ -278,6 +280,13 @@ const runtime = {
   diagnostics: null,
   /** 下载记账与下载中心（清单 A1）：进度 / 落点 / 失败原因都在这里 */
   downloads: null,
+  /**
+   * 统一动作通道（清单 C）：本地接口与 MCP 的唯一入口。
+   * 留痕（D）、急停（D）、三层授权（E）、双模（A）都挂在这个对象上。
+   */
+  agentDispatcher: null,
+  /** agent 接入模式（清单 A）：builtin 进程内 / external 外部 CDP；默认内置 */
+  agentMode: 'builtin',
   /** 下载中心窗口（独立 BrowserWindow） */
   downloadsWindow: null,
   /**
@@ -1799,6 +1808,17 @@ function installDownloadHandler() {
       runtime.diagnostics.info('DOWNLOAD_START', { filename, savePath, url: redactUrlForLog(url), id: rec && rec.id });
     }
 
+    // 下载不是 agent 发起的（页面/链接触发），但它同样要出现在审计面上
+    if (runtime.agentDispatcher) {
+      runtime.agentDispatcher.observe({
+        type: 'download',
+        target: filename,
+        params: { filename, url, bytes: 0, state: 'progressing' },
+        reason: '页面触发的下载（已确认落点后开始）',
+        ok: true,
+      });
+    }
+
     item.once('done', (_event, state) => {
       const size = formatBytes(item.getReceivedBytes ? item.getReceivedBytes() : 0);
       // 清单 A3：把这一次的时长与平均速度写进诊断日志，用户说"慢"时能直接报数字
@@ -1811,6 +1831,20 @@ function installDownloadHandler() {
           bytes,
           ms,
           mbps: ms > 0 && bytes > 0 ? Number((bytes / 1024 / 1024 / (ms / 1000)).toFixed(2)) : 0,
+        });
+      }
+      // 下载结束也留一条：审计面要能看出「这个文件最后到底成了没有」
+      if (runtime.agentDispatcher) {
+        const doneOk = state === DOWNLOAD_STATES.completed;
+        runtime.agentDispatcher.observe({
+          type: 'download',
+          target: filename,
+          params: { filename, url, bytes: rec ? rec.receivedBytes : 0, state },
+          reason: doneOk ? '下载完成' : rec && rec.error ? rec.error : `下载结束（${state}）`,
+          ok: doneOk,
+          error: doneOk ? '' : rec && rec.error ? rec.error : `下载结束（${state}）`,
+          code: doneOk ? '' : 'DOWNLOAD_FAILED',
+          elapsedMs: rec ? rec.durationMs : 0,
         });
       }
       if (state === DOWNLOAD_STATES.completed) {
@@ -7027,6 +7061,107 @@ function ensureApiToken() {
   return token;
 }
 
+/* ------------------------------------------------------------------ */
+/* 统一动作通道（清单 C）                                              */
+/* ------------------------------------------------------------------ */
+
+/** 当前站点：授权按站点归类、留痕也按站点筛，所以每次动作都取一次活动标签的 host */
+function currentAgentSite() {
+  try {
+    const manager = runtime.tabManager;
+    if (!manager) return '';
+    const snap = manager.snapshot();
+    const active = (snap.tabs || []).find((tab) => tab.active);
+    if (!active || !active.url) return '';
+    const url = new URL(active.url);
+    return url.host || '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 权限判定（清单 E 会在这里换成真正的三层授权）。
+ * 现在如实报告「没有策略」而不是假装做了判定——否则审计里会出现一批
+ * 「好像被授权过」的假记录。
+ */
+function authorizeAgentAction(action, ctx) {
+  const type = action && action.type ? action.type : '';
+  diagnostics.info('AGENT_AUTHORIZE', `${type} 放行（站点授权尚未启用）`, {
+    site: (ctx && ctx.site) || '',
+    reason: 'no-policy',
+  });
+  return {
+    decision: 'allow',
+    reason: '站点授权尚未启用（清单 E 待做），当前一律放行',
+    rule: 'no-policy',
+  };
+}
+
+/**
+ * 人工确认（清单 C 的最小实现：系统弹窗）。
+ * 清单 E 会把这里换成自绘窗口 + 站点三层授权，但「必须人工点一次」这条不变。
+ */
+async function confirmAgentAction(request) {
+  const win = runtime.mainWindow && !runtime.mainWindow.isDestroyed() ? runtime.mainWindow : null;
+  const masked = request && request.params ? request.params.text : null;
+  const detail = [
+    request.why,
+    `站点：${request.site || '（未知）'}`,
+    `目标：${request.target || '（未指定）'}`,
+    masked && masked.masked
+      ? `要输入的内容：${masked.length} 个字符（不显示内容，留痕里也只记长度）`
+      : '',
+    '拒绝后这次动作不会执行，页面上不会发生任何变化。',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  try {
+    const answer = await dialog.showMessageBox(win, {
+      type: 'warning',
+      title: 'Nyx · agent 请求操作',
+      message: request.type === 'type' ? 'agent 想在页面里输入文字' : 'agent 想执行一个需要你确认的动作',
+      detail,
+      buttons: ['拒绝', '允许这一次'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    const approved = answer.response === 1;
+    diagnostics.info('AGENT_CONFIRM_ANSWERED', approved ? '用户允许了这次动作' : '用户拒绝了这次动作', {
+      type: request.type,
+      site: request.site,
+      target: request.target,
+    });
+    return { approved, reason: approved ? '' : '用户在确认框里选择了拒绝' };
+  } catch (err) {
+    return { approved: false, reason: `确认框没能弹出来：${err.message}` };
+  }
+}
+
+/**
+ * 审计写入（清单 D 会换成环形缓冲 + jsonl + 审计面）。
+ * 现在先进诊断日志：至少每次动作都有痕迹、可导出，不会静默。
+ */
+function recordAgentAudit(entry) {
+  const code = entry && entry.code ? entry.code : entry && entry.rule ? entry.rule : '';
+  const summary = `${entry.type || '未知动作'} · ${entry.decision || '?'}${code ? ` · ${code}` : ''}`;
+  const payload = {
+    id: entry.id,
+    stage: entry.stage,
+    site: entry.site || '',
+    target: entry.target || '',
+    ok: entry.ok !== false,
+    error: entry.error || '',
+    elapsedMs: entry.elapsedMs || 0,
+    confirmedBy: entry.confirmedBy || '',
+    sensitive: entry.sensitive === true,
+  };
+  if (entry.ok === false) diagnostics.warn('AGENT_ACTION', summary, payload);
+  else diagnostics.info('AGENT_ACTION', summary, payload);
+}
+
 async function startLocalApi() {
   runtime.apiToken = ensureApiToken();
 
@@ -7036,6 +7171,16 @@ async function startLocalApi() {
     // 标签管理器未就绪时的状态兜底里也要有出站链路，否则 /state 会出现"时有时无"的字段
     getNetwork: () => networkSnapshot(),
     getRiskLog,
+  });
+
+  // 所有 agent 动作唯一入口：权限判定 → 人工确认 → 留痕 → 执行 → 回写结果
+  runtime.agentDispatcher = createDispatcher({
+    runner,
+    mode: () => runtime.agentMode,
+    site: currentAgentSite,
+    authorize: authorizeAgentAction,
+    confirm: confirmAgentAction,
+    audit: recordAgentAudit,
   });
 
   // 模式控制能力：交给本地接口驱动模式切换与事件查询（供自动化测试使用）
@@ -7053,7 +7198,8 @@ async function startLocalApi() {
 
   runtime.apiServer = await startHttpApi({
     token: runtime.apiToken,
-    runner,
+    // 只传通道，不传执行器：执行器从这里拿不到，绕不过权限与留痕
+    dispatch: (action) => runtime.agentDispatcher.dispatch(action),
     mode: modeControl,
     privacy: privacyControl,
     host: '127.0.0.1',

@@ -11,7 +11,7 @@
  * 端点：
  *   GET  /health                健康检查（免鉴权）
  *   GET  /state                 浏览器状态
- *   GET  /capabilities          能力清单
+ *   GET  /capabilities          能力清单（含哪些动作必须人工确认）
  *   POST /action                执行动作，body 为 { type, params }
  *   POST /mode/switch           切换模式，body 为 { mode: 'normal' | 'private' }
  *   GET  /mode/events           近期模式变更事件列表（内存环形缓冲，最近 50 条）
@@ -19,13 +19,36 @@
  * /mode/switch 与 /mode/events 同样受 Token 鉴权保护，且只绑定 127.0.0.1，
  * 内部直接复用主进程的 switchMode() 全流程（代理探测 / 失败回滚 / Toast 通知），
  * 不包含任何旁路实现。
+ *
+ * 动作一律交给统一通道 dispatch()（src/core/agent-dispatch.js）执行——
+ * 本文件不得直接调用执行器，否则权限判定 / 人工确认 / 留痕 / 急停都会漏。
  */
 
 const http = require('node:http');
 const crypto = require('node:crypto');
+const { CONFIRM_RULES, describeAction } = require('../core/agent-dispatch');
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB
+
+/** 动作被拒 / 被急停时的 HTTP 状态码（让调用方不必解析中文也能判断性质） */
+const CODE_STATUS = {
+  MISSING_TYPE: 400,
+  UNKNOWN_ACTION: 400,
+  ACTION_FAILED: 400,
+  DENIED_BY_POLICY: 403,
+  CONFIRM_REJECTED: 403,
+  CONFIRM_TIMEOUT: 408,
+  CONFIRM_UNAVAILABLE: 503,
+  SESSION_STOPPED: 409,
+  ABORTED: 409,
+};
+
+function statusFor(result) {
+  if (result && result.ok === true) return 200;
+  const code = result && result.code ? result.code : '';
+  return CODE_STATUS[code] || 400;
+}
 
 /** 常量时间比较，避免 Token 被时序侧信道猜测 */
 function safeEqual(a, b) {
@@ -67,7 +90,7 @@ function readBody(req) {
  * 启动本地接口。
  * @param {object} options
  * @param {string} options.token 访问 Token
- * @param {{ run: (action: object) => Promise<object> }} options.runner 动作执行器
+ * @param {(action: object) => Promise<object>} options.dispatch 统一动作通道（唯一入口）
  * @param {object} [options.mode] 模式控制能力（由主进程注入，复用 switchMode 全流程）
  * @param {(mode: string) => Promise<{ok:boolean, code?:string, error?:string, state:object}>} options.mode.switch
  *        模式切换函数，返回值与主进程 switchMode() 一致
@@ -81,13 +104,17 @@ function readBody(req) {
  */
 function startHttpApi({
   token,
-  runner,
+  dispatch,
   mode,
   privacy,
   host = '127.0.0.1',
   preferredPort = 17321,
   onPort,
 }) {
+  if (typeof dispatch !== 'function') {
+    throw new Error('startHttpApi 需要统一动作通道 dispatch()：动作不能绕过权限判定与留痕');
+  }
+
   const handler = async (req, res) => {
     // 来源校验：只接受回环连接
     const remote = req.socket.remoteAddress || '';
@@ -114,22 +141,29 @@ function startHttpApi({
     }
 
     if (url.pathname === '/state' && req.method === 'GET') {
-      return sendJson(res, 200, await runner.run({ type: 'state' }));
+      return sendJson(res, 200, await dispatch({ type: 'state' }));
     }
 
     if (url.pathname === '/capabilities' && req.method === 'GET') {
+      const schemas = {
+        navigate: { url: 'string' },
+        screenshot: {},
+        click: { selector: 'string', index: 'number?' },
+        type: { selector: 'string', text: 'string', clear: 'boolean?', submit: 'boolean?' },
+        executeJS: { code: 'string' },
+        extractText: { selector: 'string?', maxLength: 'number?' },
+        state: {},
+        riskLog: { limit: 'number?', onlyBlocked: 'boolean?' },
+      };
       return sendJson(res, 200, {
         ok: true,
-        actions: [
-          { type: 'navigate', params: { url: 'string' } },
-          { type: 'screenshot', params: {} },
-          { type: 'click', params: { selector: 'string', index: 'number?' } },
-          { type: 'type', params: { selector: 'string', text: 'string', clear: 'boolean?', submit: 'boolean?' } },
-          { type: 'executeJS', params: { code: 'string' } },
-          { type: 'extractText', params: { selector: 'string?', maxLength: 'number?' } },
-          { type: 'state', params: {} },
-          { type: 'riskLog', params: { limit: 'number?', onlyBlocked: 'boolean?' } },
-        ],
+        // 每个动作都标出是否强制人工确认（type / download 永远要确认，白名单不豁免）
+        actions: Object.keys(schemas).map((type) => ({
+          ...describeAction(type),
+          params: schemas[type],
+        })),
+        confirmRules: CONFIRM_RULES,
+        channel: 'agent-dispatch',
       });
     }
 
@@ -140,8 +174,8 @@ function startHttpApi({
       } catch {
         return sendJson(res, 400, { ok: false, error: '请求体不是合法 JSON' });
       }
-      const result = await runner.run(payload);
-      return sendJson(res, result.ok ? 200 : 400, result);
+      const result = await dispatch(payload);
+      return sendJson(res, statusFor(result), result);
     }
 
     // ---- 模式切换（供自动化测试驱动，复用主进程 switchMode 全流程）----
