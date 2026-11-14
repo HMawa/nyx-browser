@@ -20,10 +20,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { describeCertValidity } = require('./lib/cert-validity');
 
 const ROOT = path.join(__dirname, '..');
 const SIGN_DIR = path.join(ROOT, 'build', 'signing');
 const PFX_PATH = path.join(SIGN_DIR, 'nyx-self-signed.pfx');
+const CER_PATH = path.join(SIGN_DIR, 'nyx-self-signed.cer');
 const PASSWORD_PATH = path.join(SIGN_DIR, 'password.txt');
 const CLI_PATH = path.join(ROOT, 'node_modules', 'electron-builder', 'out', 'cli', 'cli.js');
 const BUILD_DIR = path.join(ROOT, 'dist-sign');
@@ -55,6 +57,53 @@ function readPassword() {
   return password;
 }
 
+/**
+ * 读证书到期时间（ISO）。用 .cer 而不是 .pfx：公钥证书不需要密码，
+ * 少一次把密码递进 PowerShell。
+ */
+function readCertNotAfter() {
+  if (!fs.existsSync(CER_PATH)) {
+    fail(
+      '找不到自签名证书的公开部分 build/signing/nyx-self-signed.cer，读不到到期时间。\n' +
+        '  读不到就不算有效：重新生成一张 node scripts/make-signing-cert.js --force',
+    );
+  }
+  const result = spawnSync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      "$ErrorActionPreference = 'Throw'; (Get-PfxCertificate -FilePath $env:NYX_SIGN_CER).NotAfter.ToString('o')",
+    ],
+    { cwd: ROOT, encoding: 'utf8', env: Object.assign({}, process.env, { NYX_SIGN_CER: CER_PATH }) },
+  );
+  if (result.status !== 0) {
+    fail(
+      '读证书到期时间失败：' +
+        String(result.stderr || result.stdout || '').trim() +
+        '\n  读不到就不算有效，不允许当成"应该还没过期"继续打包。',
+    );
+  }
+  return String(result.stdout || '').trim();
+}
+
+/**
+ * 打包前必过：过期或读不到有效期一律不签。
+ * 这条检查比「打完再验签」更早——过期证书打出来的包，验签那一步只会报
+ * 「签名无效」，让人以为是自己操作错了，其实是证书本身早就不算数了。
+ */
+function assertCertUsable() {
+  const validity = describeCertValidity(readCertNotAfter());
+  if (!validity.ok) fail(validity.message);
+  if (validity.level === 'warn') {
+    say(`注意：${validity.message}`);
+  } else {
+    say(validity.message);
+  }
+  return validity;
+}
+
 function main() {
   const passthrough = process.argv.slice(2);
   const skipVerify = passthrough.includes('--skip-verify');
@@ -72,6 +121,7 @@ function main() {
   }
 
   const password = readPassword();
+  assertCertUsable();
   const hasOutputArg = extra.some((arg) => arg.startsWith('--config.directories.output'));
   const args = [CLI_PATH, '--win', 'nsis'].concat(
     hasOutputArg ? [] : ['--config.directories.output=dist-sign'],

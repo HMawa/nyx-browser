@@ -81,6 +81,26 @@ certutil -delstore -user TrustedPublisher "<指纹>"
 
 ## 5. 打带签名的包
 
+**打包前会先查证书有没有过期**（`scripts/build-signed.js` 的 `assertCertUsable()`）：
+
+- 已过期 → 直接停下，不打包。过期证书签出来的包，Windows 一律当无效签名，比不签更糟（用户会以为是自己下载坏了）。
+- 还剩 ≤ 30 天 → 打印提醒后继续打包（到期前记得重生成）。
+- 读不出到期时间 → 同样停下。**读不到不等于没过期**，不许当成有效放过。
+
+随时可以查剩余有效期：
+
+```powershell
+node scripts/make-signing-cert.js --status
+#   有效期：自签名证书还有 1825 天有效（到 2031-11-14）。
+```
+
+到期后重新生成一张（旧签名随之失效，已发出去的包仍然能装，但签名链断了）：
+
+```powershell
+node scripts/make-signing-cert.js --force
+node scripts/make-signing-cert.js --trust
+```
+
 ```powershell
 # 输出到 dist-sign（默认，不碰已发布的 dist）
 npm run dist:signed

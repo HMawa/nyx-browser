@@ -19,6 +19,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { describeCertValidity } = require('./lib/cert-validity');
 
 const ROOT = path.join(__dirname, '..');
 const checks = [];
@@ -34,6 +35,21 @@ function read(relPath) {
 
 function exists(relPath) {
   return fs.existsSync(path.join(ROOT, relPath));
+}
+
+/**
+ * 剔掉注释行。
+ * 静态守卫用字符串/正则找「不许出现的写法」时，注释里解释这个坑的句子
+ * 会被一起数进去——本仓库已经因为这件事误判过两次（剪贴板、证书）。
+ */
+function stripComments(text) {
+  return String(text)
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim();
+      return !(trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*'));
+    })
+    .join('\n');
 }
 
 function argValue(prefix) {
@@ -192,6 +208,59 @@ check(
     !/CSC_LINK/.test(pkg.scripts.dist) &&
     !/certificateFile/.test(pkg.scripts.dist || ''),
   'dist 不读证书',
+);
+
+// ---------- 有效期判定（纯逻辑，打包前检查与这里共用同一套规则） ----------
+
+const base = Date.UTC(2026, 10, 14, 0, 0, 0);
+const futureOk = describeCertValidity(Date.UTC(2027, 10, 14), { now: base });
+check(
+  '证书还没过期时判为可用，并给出剩余天数',
+  futureOk.ok === true && futureOk.level === 'ok' && futureOk.daysLeft === 365 && /还有 365 天/.test(futureOk.message),
+  `level=${futureOk.level}｜daysLeft=${futureOk.daysLeft}`,
+);
+
+const expired = describeCertValidity(Date.UTC(2026, 10, 11), { now: base });
+check(
+  '证书已过期一律判为不可用（过期签出来的包 Windows 当无效）',
+  expired.ok === false && expired.level === 'expired' && expired.daysLeft === -3 && /过期 3 天/.test(expired.message),
+  `level=${expired.level}｜daysLeft=${expired.daysLeft}`,
+);
+
+const soon = describeCertValidity(Date.UTC(2026, 10, 24), { now: base });
+check(
+  '还剩 10 天时给提醒但仍允许签（30 天阈值来自同一个函数）',
+  soon.ok === true && soon.level === 'warn' && soon.daysLeft === 10 && /还有 10 天到期/.test(soon.message),
+  `level=${soon.level}｜daysLeft=${soon.daysLeft}`,
+);
+
+const unknownValues = [null, '', 'not-a-date', 0].map((value) =>
+  describeCertValidity(value, { now: base }),
+);
+check(
+  '读不出到期时间一律不算有效（读不到不许当成没过期）',
+  unknownValues.every((item) => item.ok === false && item.level === 'unknown' && /读不出/.test(item.message)),
+  `试了 ${unknownValues.length} 种空值/脏值`,
+);
+
+const buildScriptForValidity = read('scripts/build-signed.js');
+check(
+  '打包前就拦过期证书：build-signed 先判有效期，不可用直接退出',
+  buildScriptForValidity.includes("require('./lib/cert-validity')") &&
+    buildScriptForValidity.includes('assertCertUsable()') &&
+    buildScriptForValidity.includes('describeCertValidity(') &&
+    /if \(!validity\.ok\) fail\(validity\.message\)/.test(buildScriptForValidity) &&
+    buildScriptForValidity.includes("level === 'warn'"),
+  'assertCertUsable → describeCertValidity → 不可用即 fail',
+);
+
+check(
+  '--status 不许再用 Windows PowerShell 5.1 不认的 Get-PfxCertificate -Password',
+  // 先剔掉注释行再判：这一条自己被"注释里解释了这个坑"误伤过一次
+  !/Get-PfxCertificate[^\n]*-Password/.test(stripComments(certScript)) &&
+    certScript.includes('X509Certificate2') &&
+    certScript.includes('有效期：'),
+  '改用 X509Certificate2 读 pfx；--status 打印剩余有效期',
 );
 
 // ---------- 真实验签 ----------

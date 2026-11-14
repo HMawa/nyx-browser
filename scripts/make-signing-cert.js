@@ -25,6 +25,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { describeCertValidity } = require('./lib/cert-validity');
 
 const ROOT = path.join(__dirname, '..');
 const SIGN_DIR = path.join(ROOT, 'build', 'signing');
@@ -81,15 +82,30 @@ function describeExisting() {
   parts.push(`  证书文件：${path.relative(ROOT, CER_PATH)}`);
   parts.push(`  私钥文件：${path.relative(ROOT, PFX_PATH)}`);
   parts.push(`  密码文件：${path.relative(ROOT, PASSWORD_PATH)}`);
+  let notAfter = '';
+  // 注意：Windows PowerShell 5.1 的 Get-PfxCertificate **没有 -Password 参数**，
+  // 早先那版就这么写了，结果 --status 一直打印 Thumbprint= 与 Subject= 空值且不报错。
+  // 这里改用 .NET 的 X509Certificate2 构造函数读带密码的 pfx，读不到会抛错。
   const thumb = runPowerShell(
-    `$c = Get-PfxCertificate -FilePath $env:NYX_SIGN_PFX -Password (ConvertTo-SecureString -String $env:NYX_SIGN_PASSWORD -Force -AsPlainText); ` +
+    "$ErrorActionPreference = 'Stop'\n" +
+      '$c = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($env:NYX_SIGN_PFX, $env:NYX_SIGN_PASSWORD)\n' +
       'Write-Output ("Thumbprint=" + $c.Thumbprint); Write-Output ("NotAfter=" + $c.NotAfter.ToString("yyyy-MM-dd")); ' +
+      'Write-Output ("NotAfterIso=" + $c.NotAfter.ToString("o")); ' +
       'Write-Output ("Subject=" + $c.Subject)',
     { NYX_SIGN_PFX: PFX_PATH, NYX_SIGN_PASSWORD: readPassword() },
   );
   for (const line of thumb.split(/\r?\n/)) {
-    if (line.trim()) parts.push(`  ${line.trim()}`);
+    if (!line.trim()) continue;
+    if (line.trim().startsWith('NotAfterIso=')) {
+      notAfter = line.trim().slice('NotAfterIso='.length);
+      continue;
+    }
+    parts.push(`  ${line.trim()}`);
   }
+  // 到期这件事只在打包前查还不够——`--status` 是人主动来看证书的地方，
+  // 过期与将到期必须在这里就说得明明白白。
+  const validity = describeCertValidity(notAfter);
+  parts.push(`  有效期：${validity.message}`);
   return parts.join('\n');
 }
 
