@@ -88,9 +88,11 @@ const {
   readAgentModeFromPrefs,
 } = require('./core/agent-mode');
 const {
+  buildDigestCsv,
   buildDigestMarkdown,
   buildDigestText,
   buildExtractScript,
+  digestCsvFileName,
   digestDisabledPayload,
   digestFileName,
   summarize: summarizePage,
@@ -9043,13 +9045,21 @@ function registerDigestIpc() {
     const input = payload && typeof payload === 'object' ? payload : {};
     const result = input.result && typeof input.result === 'object' ? input.result : null;
     if (!result) return { ok: false, error: '还没有生成摘要，先点「生成摘要」再导出。' };
+    // CSV 只导网络统计：摘要句子与关键词不是表格，塞进单元格只会变成逗号地狱
+    const format = input.format === 'csv' ? 'csv' : 'md';
     const win = runtime.mainWindow && !runtime.mainWindow.isDestroyed() ? runtime.mainWindow : null;
     let target = '';
     try {
       const picked = dialog.showSaveDialogSync(win, {
-        title: '导出页面摘要',
-        defaultPath: path.join(app.getPath('documents'), digestFileName(new Date())),
-        filters: [{ name: 'Markdown', extensions: ['md'] }],
+        title: format === 'csv' ? '导出网络统计（CSV）' : '导出页面摘要',
+        defaultPath: path.join(
+          app.getPath('documents'),
+          format === 'csv' ? digestCsvFileName(new Date()) : digestFileName(new Date()),
+        ),
+        filters:
+          format === 'csv'
+            ? [{ name: 'CSV', extensions: ['csv'] }]
+            : [{ name: 'Markdown', extensions: ['md'] }],
         buttonLabel: '导出',
       });
       target = typeof picked === 'string' ? picked : '';
@@ -9061,13 +9071,14 @@ function registerDigestIpc() {
     }
     if (!target) return { ok: false, canceled: true, error: '已取消导出。' };
     try {
-      const markdown = buildDigestMarkdown(result, { now: new Date() });
-      fs.writeFileSync(target, markdown, 'utf8');
-      diagnostics.info('DIGEST_EXPORTED', '导出了页面摘要（Markdown）', {
+      const body =
+        format === 'csv' ? buildDigestCsv(result) : buildDigestMarkdown(result, { now: new Date() });
+      fs.writeFileSync(target, body, 'utf8');
+      diagnostics.info('DIGEST_EXPORTED', format === 'csv' ? '导出了页面摘要的网络统计（CSV）' : '导出了页面摘要（Markdown）', {
         path: target,
-        bytes: Buffer.byteLength(markdown, 'utf8'),
+        bytes: Buffer.byteLength(body, 'utf8'),
       });
-      return { ok: true, path: target, bytes: Buffer.byteLength(markdown, 'utf8') };
+      return { ok: true, path: target, bytes: Buffer.byteLength(body, 'utf8'), format };
     } catch (err) {
       diagnostics.error('DIGEST_EXPORT_FAILED', '摘要没能写到磁盘', {
         path: target,

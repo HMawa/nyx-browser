@@ -453,6 +453,56 @@ function buildDigestMarkdown(payload, options) {
   return `${lines.join('\n').trim()}\n`;
 }
 
+/**
+ * 导出成 CSV：**只导网络那部分**。
+ *
+ * 为什么不做「整份摘要都进 CSV」：摘要里真正像表格的只有网络统计；
+ * 句子和关键词塞进单元格只会变成一堆逗号地狱，用 Markdown 或直接复制更合适。
+ * 这条限制写进按钮提示与文档，别让人以为"导出了 CSV 就等于导出全部"。
+ *
+ * 形状（第一行固定表头，Excel 打开即可排序筛选）：
+ *   类型,名称,次数,备注
+ *   域名,a.test,2,
+ *   接口,a.test/api/x,2,
+ *   被拦下,ads.test,1,被浏览器拦下
+ *
+ * 转义规则按 RFC 4180：含逗号/引号/换行时整体加双引号，内部引号双写。
+ */
+function csvCell(value) {
+  const text = value === undefined || value === null ? '' : String(value);
+  if (/[",\r\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+function buildDigestCsv(payload) {
+  const data = payload && typeof payload === 'object' ? payload : {};
+  const net = data.network || {};
+  const rows = [['类型', '名称', '次数', '备注']];
+  if (Array.isArray(net.hosts)) {
+    for (const item of net.hosts) rows.push(['域名', item.host, item.count, '']);
+  }
+  if (Array.isArray(net.apis)) {
+    for (const item of net.apis) rows.push(['接口', item.key, item.count, '']);
+  }
+  if (Array.isArray(net.blockedHosts)) {
+    for (const item of net.blockedHosts) rows.push(['被拦下', item.host, item.count, item.reason || '']);
+  }
+  if (rows.length === 1) {
+    // 一行数据都没有时也给一行说明，免得打开是个空文件还以为导出失败
+    rows.push(['说明', '这次没有可导出的网络记录', 0, net.missing ? '没有取到抓包记录' : '页面没有产生请求']);
+  }
+  // CRLF：Excel 与记事本都认，LF 在旧版 Excel 里会整行挤在一起
+  return `${rows.map((row) => row.map(csvCell).join(',')).join('\r\n')}\r\n`;
+}
+
+/** CSV 的文件名与 Markdown 分开：两个按钮导出的是两份不同的东西，别互相覆盖 */
+function digestCsvFileName(now) {
+  const stamp = formatStamp(now instanceof Date ? now : new Date())
+    .replace(/[:\s]/g, '-')
+    .replace(/-(\d{3})$/, '');
+  return `页面摘要网络-${stamp}.csv`;
+}
+
 /** 导出文件名里不用冒号与空格，免得在 Windows 上直接失败 */
 function digestFileName(now) {
   const stamp = formatStamp(now instanceof Date ? now : new Date())
@@ -480,10 +530,12 @@ function digestDisabledPayload() {
 
 module.exports = {
   DIGEST_LIMITS,
+  buildDigestCsv,
   buildDigestMarkdown,
   buildDigestText,
   buildExtractScript,
   classifyBlocked,
+  digestCsvFileName,
   digestDisabledPayload,
   digestFileName,
   keywords,

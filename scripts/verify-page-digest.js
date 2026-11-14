@@ -369,18 +369,74 @@ async function main() {
     const body = main.slice(idx, idx + 2600);
     assert.ok(/dialog\.showSaveDialogSync\(/.test(body), '必须让用户自己选存放位置');
     assert.ok(/buildDigestMarkdown\(/.test(body), '导出内容要走同一个 Markdown 生成器');
-    assert.ok(/fs\.writeFileSync\(target, markdown, 'utf8'\)/.test(body), '要按 UTF-8 落盘');
+    assert.ok(/fs\.writeFileSync\(target, body, 'utf8'\)/.test(body), '要按 UTF-8 落盘');
     assert.ok(/没有生成摘要，先点/.test(body), '没生成过摘要时要给出原因，不许造空文件');
     assert.ok(/canceled: true/.test(body), '用户取消要和失败区分开');
     assert.ok(main.includes('digestFileName'), '默认文件名要用 digestFileName');
     const preload = readFile('src/preload.js');
-    assert.ok(/digestExport: \(result\) => ipcRenderer\.invoke\('nyx:digest:export'/.test(preload), 'preload 要暴露 digestExport');
+    assert.ok(/digestExport: \(result, format\) =>/.test(preload), 'preload 要暴露 digestExport（带格式）');
     const html = readFile('src/renderer/index.html');
     assert.ok(html.includes('id="digest-export"'), '侧栏要有「导出 .md」按钮');
     const renderer = readFile('src/renderer/renderer.js');
     assert.ok(renderer.includes('async function exportDigest('), '缺少 exportDigest');
     assert.ok(renderer.includes('lastDigestPayload'), '导出必须用整份 payload，不能拿屏幕文本重拼');
     assert.ok(/els\.digestExport\.addEventListener\('click'/.test(renderer), '按钮要真的绑上');
+  });
+
+  await check('25. 网络统计能导成 CSV：表头固定、含逗号要转义、行尾用 CRLF（候选③）', () => {
+    const digest = require('../src/core/page-digest');
+    const now = new Date(2026, 10, 14, 21, 30);
+    const payload = {
+      page: { title: '测试页', url: 'https://x.test/a?b=1' },
+      network: {
+        total: 4,
+        failed: 1,
+        blocked: 1,
+        hosts: [
+          { host: 'a.test', count: 2 },
+          { host: 'x.test, cdn', count: 1 },
+        ],
+        apis: [{ key: 'a.test/api', count: 2 }],
+        blockedHosts: [{ host: 'ads.test', count: 1, reason: '被浏览器拦下' }],
+      },
+    };
+    const csv = digest.buildDigestCsv(payload);
+    const lines = csv.split('\r\n');
+    assert.strictEqual(lines[0], '类型,名称,次数,备注', '表头必须固定，Excel 才能自动识别列');
+    assert.ok(csv.includes('域名,a.test,2,'), '域名行要按 类型,名称,次数,备注 排');
+    assert.ok(csv.includes('接口,a.test/api,2,'), '接口行要标出来源');
+    assert.ok(csv.includes('被拦下,ads.test,1,被浏览器拦下'), '被拦下要带上原因，不许吞掉');
+    // RFC 4180：含逗号的字段整体加引号
+    assert.ok(csv.includes('"x.test, cdn"'), '含逗号的名称要加双引号，否则整行会错列');
+    assert.ok(csv.includes('\r\n'), '行尾要用 CRLF（旧版 Excel 不认 LF）');
+    assert.ok(!/[^\r]\n/.test(csv.replace(/^\uFEFF/, '')), '不许出现裸 LF 行尾');
+    // 一句摘要句子都不该出现在 CSV 里
+    assert.ok(!csv.includes('摘要') && !csv.includes('关键词'), 'CSV 只导网络统计，不塞句子与关键词');
+    // 没有任何网络记录时也要有一行说明，别导出空文件
+    const empty = digest.buildDigestCsv({ network: { total: 0 } });
+    assert.ok(empty.includes('这次没有可导出的网络记录'), '空结果要写明为什么是空的');
+    const name = digest.digestCsvFileName(now);
+    assert.ok(/^页面摘要网络-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}\.csv$/.test(name), `CSV 文件名形状不对：${name}`);
+    assert.ok(name !== digest.digestFileName(now), 'CSV 与 Markdown 的文件名必须分开，别互相覆盖');
+  });
+
+  await check('26. CSV 导出接线：格式参数一路透传，两个按钮各导各的（候选③）', () => {
+    const main = readFile('src/main.js');
+    const idx = main.indexOf("ipcMain.handle('nyx:digest:export'");
+    assert.ok(idx > 0, '缺少 nyx:digest:export');
+    const body = main.slice(idx, idx + 3200);
+    assert.ok(/input\.format === 'csv' \? 'csv' : 'md'/.test(body), 'IPC 要认 format 参数，并明确默认 md');
+    assert.ok(/buildDigestCsv\(/.test(body), 'CSV 走 buildDigestCsv');
+    assert.ok(/digestCsvFileName\(/.test(body), 'CSV 默认文件名要用 digestCsvFileName');
+    assert.ok(/extensions: \['csv'\]/.test(body), '保存框的过滤器要跟着格式走');
+    const preload = readFile('src/preload.js');
+    assert.ok(/format: format === 'csv' \? 'csv' : 'md'/.test(preload), 'preload 要把格式透传下去');
+    const html = readFile('src/renderer/index.html');
+    assert.ok(html.includes('id="digest-export-csv"'), '侧栏要有「导出 CSV」按钮');
+    assert.ok(/只导出网络统计/.test(html), '按钮提示要写清 CSV 只含网络统计');
+    const renderer = readFile('src/renderer/renderer.js');
+    assert.ok(/exportDigest\('csv'\)/.test(renderer), 'CSV 按钮要传 csv');
+    assert.ok(/exportDigest\('md'\)/.test(renderer), 'Markdown 按钮要传 md');
   });
 
   const failed = checks.filter((item) => !item.ok);
