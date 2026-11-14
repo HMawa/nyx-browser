@@ -215,7 +215,69 @@ check('16. 状态包：带 summary、冲突与当前站点判读，设置页只�
 });
 
 /* ------------------------------------------------------------------ */
-/* 5. 接线静态守卫                                                     */
+/* 5. URL 前缀规则                                                     */
+/* ------------------------------------------------------------------ */
+
+check('20. URL 前缀规则：target 保留路径，查询串与末尾斜杠都去掉', () => {
+  assert.equal(sites.normalizePath('/Admin/Users/?tab=1#x'), '/admin/users');
+  assert.equal(sites.normalizePath('/'), '');
+  const rule = sites.normalizeRule({ target: 'https://Example.com/Admin/Users/?tab=1', mode: 'prefix' });
+  assert.equal(rule.mode, 'prefix');
+  assert.equal(rule.target, 'example.com/admin/users');
+  assert.equal(sites.normalizeRule({ target: 'example.com', mode: 'prefix' }).target, 'example.com');
+});
+
+check('21. URL 前缀规则只覆盖该路径及以下，不顺手放行同站其它路径', () => {
+  const rule = sites.normalizeRule({ target: 'example.com/admin', mode: 'prefix' });
+  assert.equal(sites.ruleMatches(rule, 'example.com', 'example.com/admin'), true);
+  assert.equal(sites.ruleMatches(rule, 'example.com', 'example.com/admin/users'), true);
+  assert.equal(sites.ruleMatches(rule, 'example.com', 'example.com/administrator'), false);
+  assert.equal(sites.ruleMatches(rule, 'example.com', 'example.com/blog'), false);
+
+  const allow = sites.addRule([], { target: 'example.com/admin', mode: 'prefix' }).list;
+  const policy = { globalEnabled: true, allow, block: [] };
+  const inAdmin = sites.evaluateSite({ site: 'https://example.com/admin/users', policy });
+  const inBlog = sites.evaluateSite({ site: 'https://example.com/blog', policy });
+  assert.equal(inAdmin.decision, 'allow');
+  assert.equal(inAdmin.rule.mode, 'prefix');
+  assert.equal(inBlog.decision, 'ask');
+});
+
+check('22. 前缀规则也参与"屏蔽优先"：整站白名单 + 单路径屏蔽 → 只有该路径被拒', () => {
+  const allow = sites.addRule([], 'example.com').list;
+  const block = sites.addRule([], { target: 'example.com/admin', mode: 'prefix' }).list;
+  const policy = { globalEnabled: true, allow, block };
+  // layer 是给人看的中文层名，这里断言的是"哪一层拦住的"，不是内部枚举
+  assert.equal(sites.evaluateSite({ site: 'https://example.com/admin/x', policy }).layer, '屏蔽名单');
+  assert.equal(sites.evaluateSite({ site: 'https://example.com/blog', policy }).layer, '白名单');
+  // 两条不同模式的同名目标不算冲突：example.com 与 example.com/admin 是两回事
+  assert.deepEqual(sites.listConflicts(policy), []);
+});
+
+check('23. 前缀规则能与域名规则共存，删除时按模式只删一条', () => {
+  let list = sites.addRule([], 'example.com').list;
+  list = sites.addRule(list, { target: 'example.com/admin', mode: 'prefix' }).list;
+  assert.equal(list.length, 2);
+  const removedPrefix = sites.removeRule(list, 'example.com/admin', 'prefix');
+  assert.equal(removedPrefix.ok, true);
+  assert.equal(removedPrefix.list.length, 1);
+  assert.equal(removedPrefix.list[0].mode, 'host');
+  const removedHost = sites.removeRule(removedPrefix.list, 'example.com', 'host');
+  assert.equal(removedHost.ok, true);
+  assert.equal(removedHost.list.length, 0);
+  // 再次删除要明确说不在这张名单里，不能假装成功
+  assert.equal(sites.removeRule(removedHost.list, 'example.com', 'host').ok, false);
+});
+
+check('24. 前缀非法输入有专门的中文原因，不会被静默吞掉', () => {
+  const bad = sites.addRule([], { target: 'http://', mode: 'prefix' });
+  assert.equal(bad.ok, false);
+  assert.ok(bad.error.includes('URL'), `应提到 URL：${bad.error}`);
+  assert.equal(bad.list.length, 0);
+});
+
+/* ------------------------------------------------------------------ */
+/* 6. 接线静态守卫                                                     */
 /* ------------------------------------------------------------------ */
 
 check('17. 主进程接线：判定走纯函数、拒绝留痕、名单落盘、IPC 已挂', () => {

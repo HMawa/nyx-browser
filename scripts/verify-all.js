@@ -1,11 +1,11 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把十八个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把十九个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
- *  2. scripts/verify-ui-polish.js（界面体验，109 项）
+ *  2. scripts/verify-ui-polish.js（界面体验，112 项）
  *  3. scripts/verify-link-guard.js（出站链路守卫，14 项；纯 Node，不启动 Electron）
  *  4. scripts/verify-downloads.js（下载链路，16 项；纯 Node，不启动 Electron）
  *  5. scripts/verify-gpu-policy.js（图形性能策略，14 项；纯 Node，不启动 Electron）
@@ -15,13 +15,14 @@
  *  9. scripts/verify-agent-dispatch.js（agent 统一动作通道，20 项；纯 Node，不启动 Electron）
  * 10. scripts/verify-page-reader.js（页面读取与稳定元素 id，19 项；纯 Node，不启动 Electron）
  * 11. scripts/verify-agent-audit.js（agent 审计面与急停，17 项；纯 Node，不启动 Electron）
- * 12. scripts/verify-agent-sites.js（站点三层授权，19 项；纯 Node，不启动 Electron）
+ * 12. scripts/verify-agent-sites.js（站点三层授权，24 项；纯 Node，不启动 Electron）
  * 13. scripts/verify-agent-mode.js（agent 接入模式与两步确认，16 项；纯 Node，不启动 Electron）
  * 14. scripts/verify-page-digest.js（页面摘要，17 项；纯 Node，不启动 Electron）
  * 15. scripts/verify-tab-lifecycle.js（标签生命周期判定，18 项；纯 Node，不启动 Electron）
  * 16. scripts/verify-tab-sleep.js（标签休眠与唤醒端到端，10 项）
  * 17. scripts/verify-network-state.js（断网判定与断网横幅，10 项；纯 Node，不启动 Electron）
- * 18. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
+ * 18. scripts/verify-page-cache.js（离线页面缓存，14 项；纯 Node，不启动 Electron）
+ * 19. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -62,7 +63,7 @@ const STEPS = [
   {
     label: '界面体验回归',
     script: 'verify-ui-polish.js',
-    items: '109 项',
+    items: '112 项',
     timeoutMs: 360000,
   },
   {
@@ -122,7 +123,7 @@ const STEPS = [
   {
     label: 'agent 站点授权回归',
     script: 'verify-agent-sites.js',
-    items: '19 项',
+    items: '24 项',
     timeoutMs: 60000,
   },
   {
@@ -153,6 +154,12 @@ const STEPS = [
     label: '断网判定回归',
     script: 'verify-network-state.js',
     items: '10 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '离线页面缓存',
+    script: 'verify-page-cache.js',
+    items: '14 项',
     timeoutMs: 60000,
   },
   {

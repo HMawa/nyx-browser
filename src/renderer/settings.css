@@ -676,6 +676,23 @@
   margin: 8px 0 6px;
 }
 
+.agent-site-add select {
+  flex: none;
+  height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-input);
+  color: var(--text-main);
+  font-size: 12px;
+}
+
+.agent-site-add select:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+  box-shadow: var(--ring);
+}
+
 .agent-site-add input[type='text'] {
   flex: 1;
   min-width: 0;
@@ -720,6 +737,16 @@
   font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
   font-size: 11px;
   word-break: break-all;
+}
+
+.agent-site-list .site-mode {
+  flex: none;
+  padding: 1px 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+  font-size: 10px;
+  letter-spacing: 0.04em;
 }
 
 .agent-site-list .site-conflict {

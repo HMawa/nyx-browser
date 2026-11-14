@@ -82,31 +82,92 @@ function normalizeHost(raw) {
   return text;
 }
 
+/**
+ * 把输入整成「域名 + 路径」，供 URL 前缀规则使用。
+ *
+ * 域名规则只关心 host（子域继承），前缀规则要连路径一起比——比如
+ * `example.com/admin` 只放行后台，不连带放行 `example.com/blog`。
+ * 拿不到合法域名时 `host` 为空串，调用方据此判非法。
+ */
+function normalizeSite(raw) {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  if (!text) return { host: '', path: '' };
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
+    // 允许直接写 example.com/admin：补一个占位协议再解析
+    try {
+      const url = new URL(`https://${text}`);
+      const host = normalizeHost(url.host);
+      return { host, path: host ? normalizePath(url.pathname) : '' };
+    } catch {
+      return { host: normalizeHost(text), path: '' };
+    }
+  }
+  try {
+    const url = new URL(text);
+    const host = normalizeHost(url.host);
+    return { host, path: host ? normalizePath(url.pathname) : '' };
+  } catch {
+    return { host: '', path: '' };
+  }
+}
+
+/** 路径规范化：小写、去末尾斜杠、去查询串（规则里存查询串只会让人误以为能按参数放行） */
+function normalizePath(raw) {
+  const text = String(raw || '').toLowerCase();
+  const noQuery = text.split('?')[0].split('#')[0];
+  const trimmed = noQuery.replace(/\/+$/, '');
+  return trimmed === '' ? '' : trimmed;
+}
+
+/** 匹配用的站点串：`host` 或 `host/path`（前缀规则用） */
+function siteTextOf(host, path) {
+  if (!host) return '';
+  return path ? `${host}${path}` : host;
+}
+
 /** 把一条规则（字符串或对象）整成 `{target, mode, note, addedAt}`；无效返回 null */
 function normalizeRule(raw, now) {
   const stamp = typeof now === 'number' ? now : Date.now();
   const source = typeof raw === 'string' ? { target: raw } : raw && typeof raw === 'object' ? raw : null;
   if (!source) return null;
-  const target = normalizeHost(source.target || source.host || source.site || '');
-  if (!target) return null;
   const mode = source.mode === RULE_MODES.prefix ? RULE_MODES.prefix : RULE_MODES.host;
+  const rawTarget = source.target || source.host || source.site || '';
+  if (mode === RULE_MODES.prefix) {
+    const site = normalizeSite(rawTarget);
+    if (!site.host) return null;
+    const target = siteTextOf(site.host, site.path);
+    const note = typeof source.note === 'string' ? source.note.slice(0, 120) : '';
+    const addedAt = typeof source.addedAt === 'number' && source.addedAt > 0 ? source.addedAt : stamp;
+    return { target, mode, note, addedAt };
+  }
+  const target = normalizeHost(rawTarget);
+  if (!target) return null;
   const note = typeof source.note === 'string' ? source.note.slice(0, 120) : '';
   const addedAt = typeof source.addedAt === 'number' && source.addedAt > 0 ? source.addedAt : stamp;
   return { target, mode, note, addedAt };
 }
 
-/** 规则是否匹配该域名：域名级规则按"子域继承"，a.b.com 命中 b.com */
-function ruleMatches(rule, host) {
+/**
+ * 规则是否匹配。
+ * - 域名规则：子域继承（`a.b.com` 命中 `b.com`）
+ * - 前缀规则：按 `host/path` 从左往右比，所以 `example.com/admin` 不会顺手放行 `example.com/blog`
+ */
+function ruleMatches(rule, host, siteText) {
   if (!rule || !host) return false;
-  if (rule.mode === RULE_MODES.prefix) return host.startsWith(rule.target);
+  if (rule.mode === RULE_MODES.prefix) {
+    const text = siteText || host;
+    // 必须按「路径段」匹配：裸 startsWith(target) 会让 example.com/admin 顺手放行
+    // example.com/administrator —— 差一个字符，权限却是一整条路径。
+    return text === rule.target || text.startsWith(`${rule.target}/`);
+  }
   return host === rule.target || host.endsWith(`.${rule.target}`);
 }
 
 /** 在一张名单里找命中的那条规则（先登记的先算，方便界面显示"是哪条挡住的"） */
-function findMatch(list, host) {
+function findMatch(list, host, siteText) {
   if (!Array.isArray(list) || !host) return null;
   for (const rule of list) {
-    if (ruleMatches(rule, host)) return rule;
+    if (ruleMatches(rule, host, siteText)) return rule;
   }
   return null;
 }
@@ -119,8 +180,10 @@ function sanitizeList(rawList, now) {
   for (const raw of rawList) {
     const rule = normalizeRule(raw, now);
     if (!rule) continue;
-    if (seen.has(rule.target)) continue;
-    seen.add(rule.target);
+    // 去重键带上模式：example.com 与 example.com/admin 是两条不同的规则
+    const key = `${rule.mode}:${rule.target}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
     out.push(rule);
     if (out.length >= MAX_RULES) break;
   }
@@ -137,11 +200,16 @@ function sanitizePolicy(raw) {
   };
 }
 
-/** 冲突条目：同时在两张名单里的域名（界面上要提示"屏蔽优先"，别让用户以为白名单生效了） */
+/**
+ * 冲突条目：同一目标同时出现在两张名单里（界面上要提示"屏蔽优先"，别让用户以为白名单生效了）。
+ * 域名规则与前缀规则分开算：`example.com` 与 `example.com/admin` 不算冲突。
+ */
 function listConflicts(policy) {
-  const allowTargets = new Set((policy && policy.allow ? policy.allow : []).map((rule) => rule.target));
+  const allowKeys = new Set(
+    (policy && policy.allow ? policy.allow : []).map((rule) => `${rule.mode}:${rule.target}`),
+  );
   return (policy && policy.block ? policy.block : [])
-    .filter((rule) => allowTargets.has(rule.target))
+    .filter((rule) => allowKeys.has(`${rule.mode}:${rule.target}`))
     .map((rule) => rule.target);
 }
 
@@ -154,9 +222,11 @@ function listConflicts(policy) {
 function evaluateSite(rawInput) {
   const input = rawInput && typeof rawInput === 'object' ? rawInput : {};
   const policy = sanitizePolicy(input.policy);
-  const host = normalizeHost(input.site || '');
+  const site = normalizeSite(input.site || '');
+  const host = site.host;
+  const siteText = siteTextOf(site.host, site.path);
   const trusted = Array.isArray(input.sessionTrusted)
-    ? input.sessionTrusted.map((item) => normalizeHost(item)).filter(Boolean)
+    ? input.sessionTrusted.map((item) => normalizeSite(item).host).filter(Boolean)
     : [];
 
   if (!host) {
@@ -182,7 +252,7 @@ function evaluateSite(rawInput) {
     };
   }
 
-  const blocked = findMatch(policy.block, host);
+  const blocked = findMatch(policy.block, host, siteText);
   if (blocked) {
     return {
       decision: DECISIONS.deny,
@@ -190,11 +260,11 @@ function evaluateSite(rawInput) {
       host,
       rule: blocked,
       reason: 'blocked-by-list',
-      message: `${host} 在屏蔽名单里（${blocked.target}），agent 不能在这个站点上操作。要放行请先在设置里把这条从屏蔽名单删掉。`,
+      message: `${host} 在屏蔽名单里（${blocked.target}${blocked.mode === RULE_MODES.prefix ? '，URL 前缀规则' : ''}），agent 不能在这个站点上操作。要放行请先在设置里把这条从屏蔽名单删掉。`,
     };
   }
 
-  const allowed = findMatch(policy.allow, host);
+  const allowed = findMatch(policy.allow, host, siteText);
   if (allowed) {
     return {
       decision: DECISIONS.allow,
@@ -202,7 +272,7 @@ function evaluateSite(rawInput) {
       host,
       rule: allowed,
       reason: 'allowed-by-list',
-      message: `${host} 在白名单里（${allowed.target}），站点已放行；输入文字、下载这类动作仍会单独问你。`,
+      message: `${host} 在白名单里（${allowed.target}${allowed.mode === RULE_MODES.prefix ? '，URL 前缀规则' : ''}），站点已放行；输入文字、下载这类动作仍会单独问你。`,
     };
   }
 
@@ -233,13 +303,16 @@ function addRule(rawList, raw, now) {
   const rule = normalizeRule(raw, now);
   if (!rule) {
     const shown = typeof raw === 'string' ? raw : raw && (raw.target || raw.host);
+    const wantsPrefix = raw && typeof raw === 'object' && raw.mode === RULE_MODES.prefix;
     return {
       ok: false,
       list,
-      error: `「${String(shown || '').trim() || '（空）'}」看起来不是一个域名。填站点根域名，例如 example.com。`,
+      error: wantsPrefix
+        ? `「${String(shown || '').trim() || '（空）'}」看起来不是一个 URL。前缀规则要写完整到路径，例如 example.com/admin。`
+        : `「${String(shown || '').trim() || '（空）'}」看起来不是一个域名。填站点根域名，例如 example.com。`,
     };
   }
-  if (list.some((item) => item.target === rule.target)) {
+  if (list.some((item) => item.target === rule.target && item.mode === rule.mode)) {
     return { ok: true, list, rule, already: true, error: '' };
   }
   if (list.length >= MAX_RULES) {
@@ -248,16 +321,23 @@ function addRule(rawList, raw, now) {
   return { ok: true, list: list.concat(rule), rule, already: false, error: '' };
 }
 
-/** 删一条规则（按域名，大小写与端口都不敏感） */
-function removeRule(rawList, target) {
+/** 删一条规则（按 target；给 mode 时只删该模式的，不给就把同名的一起删） */
+function removeRule(rawList, target, mode) {
   const list = sanitizeList(rawList);
-  const host = normalizeHost(target);
-  if (!host) return { ok: false, list, error: '要删除的域名不合法。' };
-  const next = list.filter((rule) => rule.target !== host);
+  const wantMode = mode === RULE_MODES.prefix || mode === RULE_MODES.host ? mode : '';
+  const hostOnly = normalizeHost(target);
+  const prefixSite = normalizeSite(target);
+  const prefixTarget = prefixSite.host ? siteTextOf(prefixSite.host, prefixSite.path) : '';
+  if (!hostOnly && !prefixTarget) return { ok: false, list, error: '要删除的域名或 URL 不合法。' };
+  const next = list.filter((rule) => {
+    if (wantMode && rule.mode !== wantMode) return true;
+    if (rule.mode === RULE_MODES.prefix) return rule.target !== prefixTarget;
+    return rule.target !== hostOnly;
+  });
   return {
     ok: next.length !== list.length,
     list: next,
-    error: next.length === list.length ? `${host} 不在这张名单里。` : '',
+    error: next.length === list.length ? `${hostOnly || prefixTarget} 不在这张名单里。` : '',
   };
 }
 
@@ -281,7 +361,7 @@ function agentSitesPayload(input) {
   const source = input && typeof input === 'object' ? input : {};
   const policy = sanitizePolicy(source.policy);
   const sessionTrusted = Array.isArray(source.sessionTrusted)
-    ? source.sessionTrusted.map((item) => normalizeHost(item)).filter(Boolean)
+    ? source.sessionTrusted.map((item) => normalizeSite(item).host).filter(Boolean)
     : [];
   const current = evaluateSite({
     site: source.site || '',
@@ -301,8 +381,13 @@ function agentSitesPayload(input) {
       reason: current.reason,
       message: current.message,
       rule: current.rule ? current.rule.target : '',
+      ruleMode: current.rule ? current.rule.mode : '',
     },
     limits: { maxRules: MAX_RULES },
+    modes: [
+      { value: RULE_MODES.host, label: '域名（含子域）' },
+      { value: RULE_MODES.prefix, label: 'URL 前缀（精确到路径）' },
+    ],
   };
 }
 
@@ -320,9 +405,12 @@ module.exports = {
   findMatch,
   listConflicts,
   normalizeHost,
+  normalizePath,
   normalizeRule,
+  normalizeSite,
   removeRule,
   ruleMatches,
   sanitizeList,
   sanitizePolicy,
+  siteTextOf,
 };

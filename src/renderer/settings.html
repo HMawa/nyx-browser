@@ -887,9 +887,13 @@
                     <h4>白名单</h4>
                     <span class="badge" id="agent-allow-count">0</span>
                   </div>
-                  <p class="hint">登记一次永久有效；子域继承（登记 example.com 也覆盖 a.example.com）。</p>
+                  <p class="hint">登记一次永久有效；域名规则子域继承（登记 example.com 也覆盖 a.example.com），前缀规则只覆盖该路径及以下（example.com/admin 不会放行 example.com/blog）。</p>
                   <div class="agent-site-add">
-                    <input type="text" id="agent-allow-input" placeholder="example.com" aria-label="要加入白名单的域名">
+                    <select id="agent-allow-mode" aria-label="白名单规则的匹配方式">
+                      <option value="host">域名（含子域）</option>
+                      <option value="prefix">URL 前缀</option>
+                    </select>
+                    <input type="text" id="agent-allow-input" placeholder="example.com 或 example.com/admin" aria-label="要加入白名单的域名或 URL 前缀">
                     <button type="button" class="btn" id="btn-agent-allow-add">加入白名单</button>
                   </div>
                   <ul class="agent-site-list" id="agent-allow-list"></ul>
@@ -903,7 +907,11 @@
                   </div>
                   <p class="hint">这里的站点一律拒绝 agent 操作，即使同时也在白名单里（屏蔽优先）。</p>
                   <div class="agent-site-add">
-                    <input type="text" id="agent-block-input" placeholder="example.com" aria-label="要加入屏蔽名单的域名">
+                    <select id="agent-block-mode" aria-label="屏蔽规则的匹配方式">
+                      <option value="host">域名（含子域）</option>
+                      <option value="prefix">URL 前缀</option>
+                    </select>
+                    <input type="text" id="agent-block-input" placeholder="example.com 或 example.com/admin" aria-label="要加入屏蔽名单的域名或 URL 前缀">
                     <button type="button" class="btn" id="btn-agent-block-add">加入屏蔽名单</button>
                   </div>
                   <ul class="agent-site-list" id="agent-block-list"></ul>

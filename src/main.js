@@ -7780,22 +7780,22 @@ function registerAgentSitesIpc() {
       next.globalEnabled = input.globalEnabled !== false;
     }
     if (typeof input.addAllow === 'string' && input.addAllow.trim()) {
-      const result = addSiteRule(next.allow, input.addAllow);
+      const result = addSiteRule(next.allow, { target: input.addAllow, mode: input.mode });
       if (!result.ok) return { ...payloadOf(input), ok: false, error: result.error };
       next.allow = result.list;
     }
     if (typeof input.addBlock === 'string' && input.addBlock.trim()) {
-      const result = addSiteRule(next.block, input.addBlock);
+      const result = addSiteRule(next.block, { target: input.addBlock, mode: input.mode });
       if (!result.ok) return { ...payloadOf(input), ok: false, error: result.error };
       next.block = result.list;
     }
     if (typeof input.removeAllow === 'string' && input.removeAllow.trim()) {
-      const result = removeSiteRule(next.allow, input.removeAllow);
+      const result = removeSiteRule(next.allow, input.removeAllow, input.mode);
       if (!result.ok) return { ...payloadOf(input), ok: false, error: result.error };
       next.allow = result.list;
     }
     if (typeof input.removeBlock === 'string' && input.removeBlock.trim()) {
-      const result = removeSiteRule(next.block, input.removeBlock);
+      const result = removeSiteRule(next.block, input.removeBlock, input.mode);
       if (!result.ok) return { ...payloadOf(input), ok: false, error: result.error };
       next.block = result.list;
     }

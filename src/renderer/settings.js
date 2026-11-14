@@ -3223,6 +3223,13 @@ async function loadFootprint() {
       host.className = 'site-host';
       host.textContent = rule.target;
       li.appendChild(host);
+      if (rule.mode === 'prefix') {
+        // 前缀规则和域名规则长得像但管得窄，必须在行上标出来，否则用户会以为整站都放行了
+        const tag = document.createElement('span');
+        tag.className = 'site-mode';
+        tag.textContent = '前缀';
+        li.appendChild(tag);
+      }
       if (conflicts.includes(rule.target)) {
         const conflict = document.createElement('span');
         conflict.className = 'site-conflict';
@@ -3234,6 +3241,7 @@ async function loadFootprint() {
       remove.className = 'site-remove';
       remove.textContent = '删除';
       remove.dataset.target = rule.target;
+      remove.dataset.mode = rule.mode || 'host';
       remove.setAttribute('aria-label', `从这张名单里删除 ${rule.target}`);
       li.appendChild(remove);
       list.appendChild(li);
@@ -3298,7 +3306,7 @@ async function loadFootprint() {
   }
 
   async function setAgentSites(patch, okText) {
-    if (!window.nyx.agentSitesSet) return;
+    if (!window.nyx.agentSitesSet) return { ok: false, error: '当前内核不支持改站点名单。' };
     const status = byId('agent-sites-status');
     try {
       const payload = await window.nyx.agentSitesSet(patch || {});
@@ -3308,18 +3316,20 @@ async function loadFootprint() {
           status.textContent = `没改成：${payload.error || '未知原因'}`;
           status.className = 'hint is-warn';
         }
-        return;
+        return payload;
       }
       renderAgentSites(payload);
       if (status) {
         status.textContent = okText || '已保存';
         status.className = 'hint is-ok';
       }
+      return payload;
     } catch (err) {
       if (status) {
         status.textContent = `没保存成功：${err && err.message ? err.message : err}`;
         status.className = 'hint is-warn';
       }
+      return { ok: false, error: err && err.message ? err.message : String(err) };
     }
   }
 
@@ -3340,18 +3350,21 @@ async function loadFootprint() {
 
     const addAllow = byId('btn-agent-allow-add');
     const allowInput = byId('agent-allow-input');
+    const allowMode = byId('agent-allow-mode');
     if (addAllow && allowInput) {
       addAllow.addEventListener('click', () => {
         const value = allowInput.value.trim();
+        const mode = allowMode && allowMode.value === 'prefix' ? 'prefix' : 'host';
         if (!value) {
           const status = byId('agent-sites-status');
           if (status) {
-            status.textContent = '先填一个域名，例如 example.com';
+            status.textContent = mode === 'prefix' ? '先填一个 URL 前缀，例如 example.com/admin' : '先填一个域名，例如 example.com';
             status.className = 'hint is-warn';
           }
           return;
         }
-        setAgentSites({ addAllow: value }, `已把 ${value} 加进白名单`).then(() => {
+        setAgentSites({ addAllow: value, mode }, `已把 ${value} 加进白名单`).then((res) => {
+          if (res && res.ok === false) return;
           allowInput.value = '';
         });
       });
@@ -3359,18 +3372,21 @@ async function loadFootprint() {
 
     const addBlock = byId('btn-agent-block-add');
     const blockInput = byId('agent-block-input');
+    const blockMode = byId('agent-block-mode');
     if (addBlock && blockInput) {
       addBlock.addEventListener('click', () => {
         const value = blockInput.value.trim();
+        const mode = blockMode && blockMode.value === 'prefix' ? 'prefix' : 'host';
         if (!value) {
           const status = byId('agent-sites-status');
           if (status) {
-            status.textContent = '先填一个域名，例如 example.com';
+            status.textContent = mode === 'prefix' ? '先填一个 URL 前缀，例如 example.com/admin' : '先填一个域名，例如 example.com';
             status.className = 'hint is-warn';
           }
           return;
         }
-        setAgentSites({ addBlock: value }, `已把 ${value} 加进屏蔽名单`).then(() => {
+        setAgentSites({ addBlock: value, mode }, `已把 ${value} 加进屏蔽名单`).then((res) => {
+          if (res && res.ok === false) return;
           blockInput.value = '';
         });
       });
@@ -3383,7 +3399,8 @@ async function loadFootprint() {
         const button = event.target && event.target.closest ? event.target.closest('.site-remove') : null;
         if (!button) return;
         const target = button.dataset.target || '';
-        const patch = id === 'agent-allow-list' ? { removeAllow: target } : { removeBlock: target };
+        const mode = button.dataset.mode || 'host';
+        const patch = id === 'agent-allow-list' ? { removeAllow: target, mode } : { removeBlock: target, mode };
         setAgentSites(patch, `已从名单里删掉 ${target}`);
       });
     }
