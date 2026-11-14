@@ -24,7 +24,7 @@
  * 18. scripts/verify-page-cache.js（离线页面缓存、快照块结构、隐私加密与隐私站点名单、站点名单与其导入导出、坏条目清理，45 项；纯 Node，不启动 Electron）
  * 19. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
  * 20. scripts/verify-runtime-compat.js（运行时兼容：剪贴板异步化与版本三处一致，9 项；纯 Node，不启动 Electron）
- * 21. scripts/verify-release-gate.js（发版门禁、安装器 e2e 接线与验签挑包，20 项；纯 Node，不跑安装包）
+ * 21. scripts/verify-release-gate.js（发版门禁、安装器 e2e 接线、验签挑包与差分闸门，22 项；纯 Node，不跑安装包）
  * 22. scripts/verify-signing.js（安装包签名、密码存凭据管理器、证书有效期与打包接线，27 项；不看签名包时只跑静态守卫）
  * 23. scripts/verify-agent-settings.js（agent 改设置：白名单 / 锁死 / 确认 / 限流 / 多步撤销，18 项；纯 Node）
  *
@@ -175,7 +175,7 @@ const STEPS = [
   {
     label: '发版门禁接线',
     script: 'verify-release-gate.js',
-    items: '20 项',
+    items: '22 项',
     timeoutMs: 60000,
   },
   {

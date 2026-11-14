@@ -193,6 +193,27 @@ check(
   '抽出去的函数没接上等于没修'
 );
 
+// 差分兜底：实测在 Electron 45 上仍是 0 命中，所以「命中率太低就整包」这道闸门不能被撤掉
+const UPDATER = path.join(ROOT, 'src', 'core', 'updater.js');
+const updaterCode = codeOnly(read(UPDATER));
+const MEASURE = path.join(ROOT, 'scripts', 'measure-delta.js');
+check(
+  '差分下载保留命中率闸门：命中率低就退回整包，不逐块 Range 拉全包',
+  (() => {
+    const matched = /const DIFF_MIN_HIT_RATE = ([\d.]+);/.exec(updaterCode);
+    if (!matched) return false;
+    const rate = Number(matched[1]);
+    // 1.17.3 → 1.17.4 实测 0.00% 命中；闸门一旦被降到 0，就会变成 243 次 Range 拉整包
+    return Number.isFinite(rate) && rate >= 0.2;
+  })(),
+  'DIFF_MIN_HIT_RATE 不许被降到 0.2 以下（NSIS 是固实压缩流，真实命中率就是 0）'
+);
+check(
+  '留着块级差分的测量工具，结论可复现',
+  /--base/.test(read(MEASURE)) && /--target/.test(read(MEASURE)) && /DIFF_MIN_HIT_RATE|hitRate/.test(read(MEASURE)),
+  'scripts/measure-delta.js 要在，下次换内核时能重新量一遍'
+);
+
 const failed = checks.filter((item) => !item.ok);
 console.log(`\n[Nyx] 发版门禁接线检查（${checks.length} 项）`);
 for (const item of checks) {
