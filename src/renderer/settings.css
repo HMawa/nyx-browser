@@ -754,6 +754,13 @@
   color: var(--danger-soft);
 }
 
+/* 缓存站点名单的导入导出（候选⑤）：两个矮按钮并排，别把离线卡片撑高 */
+.agent-site-tools {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 2px;
+}
+
 /* 让 agent 改设置（用户第 6 项）：两列并排，窄屏自动落成上下两段 */
 .agent-setting-cols {
   display: grid;

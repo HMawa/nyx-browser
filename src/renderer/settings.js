@@ -1379,6 +1379,65 @@
     };
     bindList('offline-site-allow', 'allow', '「只缓存」名单');
     bindList('offline-site-block', 'block', '「永不缓存」名单');
+
+    // 名单搬走 / 搬回来（候选⑤）
+    const setIo = (text, bad) => {
+      const line = byId('offline-site-io');
+      if (!line) return;
+      line.textContent = text || '';
+      line.className = bad ? 'hint is-warn' : 'hint';
+    };
+
+    const exportBtn = byId('btn-offline-sites-export');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', async () => {
+        if (!window.nyx || typeof window.nyx.offlineCacheSitesExport !== 'function') {
+          setIo('当前内核不支持导出站点名单。', true);
+          return;
+        }
+        exportBtn.disabled = true;
+        try {
+          const res = await window.nyx.offlineCacheSitesExport();
+          if (!res || res.ok === false) {
+            setIo((res && res.canceled ? '' : '没能导出名单：') + ((res && res.error) || '未知原因'), !(res && res.canceled));
+            return;
+          }
+          setIo(`已导出：${res.path}（只缓存 ${res.allow} 个 / 永不缓存 ${res.block} 个）`, false);
+        } catch (err) {
+          setIo(`没能导出名单：${err && err.message ? err.message : '未知原因'}`, true);
+        } finally {
+          exportBtn.disabled = false;
+        }
+      });
+    }
+
+    const importBtn = byId('btn-offline-sites-import');
+    if (importBtn) {
+      importBtn.addEventListener('click', async () => {
+        if (!window.nyx || typeof window.nyx.offlineCacheSitesImport !== 'function') {
+          setIo('当前内核不支持导入站点名单。', true);
+          return;
+        }
+        importBtn.disabled = true;
+        try {
+          const res = await window.nyx.offlineCacheSitesImport({ mode: 'merge' });
+          if (!res || res.ok === false) {
+            setIo((res && res.canceled ? '' : '没能导入名单：') + ((res && res.error) || '未知原因'), !(res && res.canceled));
+            return;
+          }
+          renderCacheSites(res);
+          const info = res.imported || {};
+          setIo(
+            `${info.summary || '导入完成。'}${info.rejectedCount ? `（跳过的条目：${(info.rejected || []).join('、')}）` : ''}`,
+            false,
+          );
+        } catch (err) {
+          setIo(`没能导入名单：${err && err.message ? err.message : '未知原因'}`, true);
+        } finally {
+          importBtn.disabled = false;
+        }
+      });
+    }
   }
 
   function setOfflineStatus(text, bad) {

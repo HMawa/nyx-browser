@@ -99,6 +99,8 @@ const {
 const {
   CACHE_SITE_MODES,
   decideCacheSite,
+  exportCacheSites,
+  importCacheSites,
   normalizeSiteList,
   normalizeSitePolicy,
   normalizeSiteText,
@@ -1162,6 +1164,33 @@ function cacheSitePolicy() {
     allow: prefs.cacheSiteAllow,
     block: prefs.cacheSiteBlock,
   });
+}
+
+/**
+ * 写回站点名单：三个键逐个落盘，哪一步失败就立刻报出来（不静默丢一半）。
+ * 手动改名单和导入名单都走这里，免得两边落盘逻辑各写一套。
+ */
+function saveCacheSitePolicy(policy) {
+  const next = normalizeSitePolicy(policy);
+  const writes = [
+    ['cacheSiteMode', next.mode],
+    ['cacheSiteAllow', next.allow],
+    ['cacheSiteBlock', next.block],
+  ];
+  for (const [key, value] of writes) {
+    try {
+      const saved = runtime.uiStore ? runtime.uiStore.set(key, value) : { ok: false, error: '偏好存储还没就绪' };
+      if (saved && saved.ok === false) {
+        if (runtime.diagnostics) runtime.diagnostics.error('PAGE_CACHE_SITE_SAVE_FAILED', '站点名单没能保存', { key, error: saved.error });
+        return { ok: false, error: `没能保存 ${key}：${saved.error}` };
+      }
+    } catch (err) {
+      const reason = err && err.message ? err.message : err;
+      if (runtime.diagnostics) runtime.diagnostics.error('PAGE_CACHE_SITE_SAVE_FAILED', '站点名单没能保存', { key, error: String(reason) });
+      return { ok: false, error: `没能保存 ${key}：${reason}` };
+    }
+  }
+  return { ok: true, ...next };
 }
 
 /** 隐私模式的加密快照：读 / 写 / 查，全部绕开明文文件 */
@@ -6914,6 +6943,90 @@ function registerOfflineCacheIpc() {
       });
     }
     return { ok: true, ...next };
+  });
+
+  /**
+   * 名单搬走再搬回来（候选⑤）。
+   *
+   * 同步对话框：一旦返回 Promise 又会重演下载那个坑（窗口销毁、resolve 丢失）。
+   * 导出写的是纯 JSON 文本，导入按 kind 校验类型——别把 agent 站点名单当缓存名单导入。
+   */
+  ipcMain.handle('nyx:offline:sites-export', () => {
+    try {
+      const policy = cacheSitePolicy();
+      const target = dialog.showSaveDialogSync(runtime.win || undefined, {
+        title: '导出离线缓存的站点名单',
+        defaultPath: path.join(app.getPath('documents'), `nyx-cache-sites-${new Date().toISOString().slice(0, 10)}.json`),
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      if (!target) return { ok: false, canceled: true, error: '已取消导出。' };
+      const payload = exportCacheSites(policy, Date.now());
+      fs.writeFileSync(target, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+      if (runtime.diagnostics) {
+        runtime.diagnostics.info('PAGE_CACHE_SITES_EXPORTED', '导出离线缓存站点名单', {
+          allow: payload.allow.length,
+          block: payload.block.length,
+        });
+      }
+      return { ok: true, path: target, allow: payload.allow.length, block: payload.block.length };
+    } catch (err) {
+      const reason = err && err.message ? err.message : String(err);
+      if (runtime.diagnostics) runtime.diagnostics.error('PAGE_CACHE_SITES_EXPORT_FAILED', '导出离线缓存站点名单失败', { error: reason });
+      return { ok: false, error: `没能导出名单：${reason}` };
+    }
+  });
+
+  ipcMain.handle('nyx:offline:sites-import', (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    try {
+      const picked = dialog.showOpenDialogSync(runtime.win || undefined, {
+        title: '导入离线缓存的站点名单',
+        properties: ['openFile'],
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      if (!picked || !picked.length) return { ok: false, canceled: true, error: '已取消导入。' };
+      const source = picked[0];
+      let text;
+      try {
+        text = fs.readFileSync(source, 'utf8');
+      } catch (err) {
+        const reason = err && err.message ? err.message : String(err);
+        return { ok: false, error: `这个文件读不出来：${reason}` };
+      }
+      const result = importCacheSites(text, cacheSitePolicy(), { mode: input.mode === 'replace' ? 'replace' : 'merge' });
+      if (!result.ok) {
+        if (runtime.diagnostics) {
+          runtime.diagnostics.warn('PAGE_CACHE_SITES_IMPORT_REJECTED', '导入的缓存站点名单被拒绝', { error: result.error });
+        }
+        return { ok: false, error: result.error };
+      }
+      const saved = saveCacheSitePolicy(result.policy);
+      if (!saved.ok) return { ok: false, error: saved.error, ...cacheSitePolicy() };
+      if (runtime.diagnostics) {
+        runtime.diagnostics.info('PAGE_CACHE_SITES_IMPORTED', '导入离线缓存站点名单', {
+          added: result.added,
+          duplicates: result.duplicates,
+          rejected: result.rejectedCount,
+        });
+      }
+      return {
+        ok: true,
+        imported: {
+          path: source,
+          mode: result.mode,
+          added: result.added,
+          duplicates: result.duplicates,
+          rejected: result.rejected,
+          rejectedCount: result.rejectedCount,
+          summary: result.summary,
+        },
+        ...result.policy,
+      };
+    } catch (err) {
+      const reason = err && err.message ? err.message : String(err);
+      if (runtime.diagnostics) runtime.diagnostics.error('PAGE_CACHE_SITES_IMPORT_FAILED', '导入离线缓存站点名单失败', { error: reason });
+      return { ok: false, error: `没能导入名单：${reason}` };
+    }
   });
 }
 

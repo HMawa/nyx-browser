@@ -431,6 +431,109 @@ function decideCacheSite(rawUrl, rawPolicy) {
   return { cache: true, layer: 'all', host, reason: '当前允许缓存所有站点。' };
 }
 
+/**
+ * 缓存站点名单的导出/导入（候选⑤）。
+ *
+ * 为什么单独一套格式：它和 agent 站点名单是两个东西——那边管的是「agent 能不能动这个站」，
+ * 这边管的是「断网时要不要留这个站的正文」。共用一个 kind 会让人把两份名单搞混，
+ * 进了错的文件比没有文件更糟。
+ */
+const CACHE_SITE_EXPORT_KIND = 'nyx-cache-sites';
+const CACHE_SITE_EXPORT_VERSION = 1;
+
+function exportCacheSites(policy, now) {
+  const safe = normalizeSitePolicy(policy);
+  const stamp = Number.isFinite(now) ? now : Date.now();
+  return {
+    app: 'nyx',
+    kind: CACHE_SITE_EXPORT_KIND,
+    version: CACHE_SITE_EXPORT_VERSION,
+    exportedAt: new Date(stamp).toISOString(),
+    mode: safe.mode,
+    allow: safe.allow.slice(),
+    block: safe.block.slice(),
+  };
+}
+
+function importCacheSites(rawText, current, options) {
+  const opts = options && typeof options === 'object' ? options : {};
+  const base = normalizeSitePolicy(current);
+  const mode = opts.mode === 'replace' ? 'replace' : 'merge';
+  const text = typeof rawText === 'string' ? rawText.replace(/^\uFEFF/, '') : '';
+
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { ok: false, error: '这个文件不是 JSON，可能不是 Nyx 导出的名单。', policy: base };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, error: '文件内容不是一份名单（应该是一个对象）。', policy: base };
+  }
+  if (parsed.kind !== CACHE_SITE_EXPORT_KIND) {
+    const what = typeof parsed.kind === 'string' && parsed.kind ? `「${parsed.kind}」` : '（没写）';
+    return { ok: false, error: `这份文件的类型是${what}，不是离线缓存的站点名单。`, policy: base };
+  }
+  if (parsed.allow === undefined && parsed.block === undefined) {
+    return { ok: false, error: '文件里既没有 allow 也没有 block 名单。', policy: base };
+  }
+
+  const rejected = [];
+  const next = mode === 'replace'
+    ? { ...base, allow: [], block: [] }
+    : { ...base, allow: base.allow.slice(), block: base.block.slice() };
+  let added = 0;
+  let duplicates = 0;
+
+  const absorb = (rawList, bucket) => {
+    if (!Array.isArray(rawList)) return;
+    for (const item of rawList) {
+      const host = normalizeSiteText(item);
+      if (!host) {
+        if (rejected.length < 10) rejected.push(typeof item === 'string' ? item : String(item));
+        continue;
+      }
+      if (next[bucket].includes(host)) {
+        duplicates += 1;
+        continue;
+      }
+      next[bucket].push(host);
+      added += 1;
+    }
+  };
+
+  absorb(parsed.allow, 'allow');
+  absorb(parsed.block, 'block');
+
+  // 模式只在文件明确写了、且是合法值时才采纳（replace 时尤其重要：空名单 + 白名单模式 = 什么都不缓存）
+  let modeAdopted = false;
+  if (typeof parsed.mode === 'string' && CACHE_SITE_MODES.includes(parsed.mode)) {
+    if (parsed.mode !== next.mode) modeAdopted = true;
+    next.mode = parsed.mode;
+  }
+
+  const normalized = normalizeSitePolicy(next);
+  const rejectedCount = rejected.length;
+  const parts = [`导入完成：新增 ${added} 条`];
+  if (duplicates) parts.push(`已存在 ${duplicates} 条`);
+  if (rejectedCount) parts.push(`跳过 ${rejectedCount} 条看不懂的`);
+
+  return {
+    ok: true,
+    mode,
+    policy: normalized,
+    allow: normalized.allow,
+    block: normalized.block,
+    siteMode: normalized.mode,
+    modeAdopted,
+    added,
+    duplicates,
+    rejected,
+    rejectedCount,
+    summary: `${parts.join('，')}。`,
+  };
+}
+
 module.exports = {
   BLOCK_TYPES,
   CACHE_BLOCK_MAX,
@@ -440,6 +543,8 @@ module.exports = {
   CACHE_IMAGE_MAX,
   CACHE_IMAGE_TOTAL_MAX,
   CACHE_LIMIT,
+  CACHE_SITE_EXPORT_KIND,
+  CACHE_SITE_EXPORT_VERSION,
   CACHE_SITE_MODES,
   CACHE_TEXT_MAX,
   CACHE_VERSION,
@@ -448,8 +553,10 @@ module.exports = {
   cacheKeyOf,
   decideCacheSite,
   describeCachedPage,
+  exportCacheSites,
   getSnapshot,
   imageTargets,
+  importCacheSites,
   normalizeSiteList,
   normalizeSitePolicy,
   normalizeSiteText,

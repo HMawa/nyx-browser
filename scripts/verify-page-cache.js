@@ -548,7 +548,102 @@ check('33. 接线：判定发生在抓取之前，名单能从设置页改、能
 
 /* ------------------------------------------------------------------ */
 
-check('35. 数得清「解不开的」有几条：能解、解不开、抛异常三种都要算对', () => {
+check('34. 导出的是「缓存站点名单」这份格式，不是 agent 站点名单', () => {
+  const exported = cache.exportCacheSites(
+    { mode: 'allowlist', allow: ['b.test', 'https://WWW.A.test', 'A.test'], block: ['bank.test'] },
+    Date.UTC(2026, 10, 14),
+  );
+  assert.equal(exported.app, 'nyx', '要写 app');
+  assert.equal(exported.kind, 'nyx-cache-sites', 'kind 必须和 agent 站点名单区分开');
+  assert.equal(exported.version, 1, '格式版本要写出来');
+  assert.equal(exported.exportedAt, '2026-11-14T00:00:00.000Z', '导出时间用 ISO');
+  assert.equal(exported.mode, 'allowlist', '模式要带上');
+  assert.deepEqual(exported.allow, ['b.test', 'a.test'], '导出前先归一（去重、去 www）');
+  assert.deepEqual(exported.block, ['bank.test'], '黑名单也要带上');
+});
+
+check('35. 导入：默认并入、重复的算「已存在」，模式跟着文件走', () => {
+  const text = JSON.stringify({
+    app: 'nyx',
+    kind: 'nyx-cache-sites',
+    version: 1,
+    mode: 'allowlist',
+    allow: ['c.test', 'https://WWW.A.test', 'c.test'],
+    block: ['bank.test'],
+  });
+  const merged = cache.importCacheSites(text, { mode: 'all', allow: ['a.test'], block: [] });
+  assert.equal(merged.ok, true, `应当导入成功：${merged.error || ''}`);
+  assert.equal(merged.mode, 'merge', '默认是并入');
+  assert.deepEqual(merged.allow, ['a.test', 'c.test'], '已有的保留，新的并进来');
+  assert.equal(merged.duplicates >= 0, true, '重复计数不能是负的');
+  assert.equal(merged.siteMode, 'allowlist', '模式要跟着文件走');
+  assert.equal(merged.modeAdopted, true, '模式变了要能看出来');
+  assert.ok(/导入完成/.test(merged.summary), '要有中文小结');
+
+  const replaced = cache.importCacheSites(text, { mode: 'all', allow: ['keep.test'], block: ['old.test'] }, { mode: 'replace' });
+  assert.deepEqual(replaced.allow.slice().sort(), ['a.test', 'c.test'], 'replace 要整份替换');
+  assert.deepEqual(replaced.block, ['bank.test'], '黑名单也跟着替换');
+});
+
+check('36. 导入拒绝的四种情形都要说清原因，且不动现有名单', () => {
+  const current = { mode: 'all', allow: ['keep.test'], block: [] };
+  const bad = cache.importCacheSites('这不是 JSON', current);
+  assert.equal(bad.ok, false, '坏 JSON 要拒绝');
+  assert.ok(/不是 JSON/.test(bad.error), '要说清是 JSON 的问题');
+  assert.deepEqual(bad.policy.allow, ['keep.test'], '拒绝时现有名单不能被改');
+
+  const notObject = cache.importCacheSites('[1,2,3]', current);
+  assert.equal(notObject.ok, false, '数组不是一份名单');
+  assert.ok(/一个对象/.test(notObject.error), '要说清要的是对象');
+
+  const wrongKind = cache.importCacheSites(JSON.stringify({ kind: 'agent-sites', allow: ['x.test'] }), current);
+  assert.equal(wrongKind.ok, false, '别把 agent 站点名单当缓存名单导进来');
+  assert.ok(/agent-sites/.test(wrongKind.error), '要把实际类型说出来');
+
+  const empty = cache.importCacheSites(JSON.stringify({ kind: 'nyx-cache-sites' }), current);
+  assert.equal(empty.ok, false, '两张名单都没有时不能当成功');
+  assert.ok(/allow/.test(empty.error) && /block/.test(empty.error), '要说清缺的是哪两个字段');
+
+  const junk = cache.importCacheSites(
+    JSON.stringify({ kind: 'nyx-cache-sites', allow: ['ok.test', '', 'not a host'], block: [] }),
+    current,
+  );
+  assert.equal(junk.ok, true, '有脏条目也要照常导入能认的');
+  assert.equal(junk.rejectedCount, 2, '看不懂的条目要计数');
+  assert.equal(junk.rejected.length, 2, '要把跳过的条目回给界面');
+});
+
+check('37. 接线：导出/导入走同步对话框，导入后界面按返回值重画名单', () => {
+  const main = read('src/main.js');
+  assert.ok(main.includes("ipcMain.handle('nyx:offline:sites-export'"), '要有导出 IPC');
+  assert.ok(main.includes("ipcMain.handle('nyx:offline:sites-import'"), '要有导入 IPC');
+  assert.ok(/dialog\.showSaveDialogSync\(/.test(main), '导出必须用同步对话框（异步会重演下载那个坑）');
+  assert.ok(/dialog\.showOpenDialogSync\(/.test(main), '导入也一样');
+  assert.ok(main.includes('exportCacheSites('), '导出要走纯函数');
+  assert.ok(main.includes('importCacheSites('), '导入要走纯函数');
+  assert.ok(main.includes('saveCacheSitePolicy('), '导入完要落盘');
+  assert.ok(main.includes('PAGE_CACHE_SITES_EXPORTED'), '导出要记诊断');
+  assert.ok(main.includes('PAGE_CACHE_SITES_IMPORTED'), '导入要记诊断');
+  assert.ok(main.includes('PAGE_CACHE_SITES_IMPORT_REJECTED'), '被拒绝也要记诊断');
+  assert.ok(main.includes('PAGE_CACHE_SITES_EXPORT_FAILED'), '导出失败要记诊断');
+
+  const preload = read('src/preload.js');
+  assert.ok(preload.includes('offlineCacheSitesExport'), 'preload 要暴露导出');
+  assert.ok(preload.includes('offlineCacheSitesImport'), 'preload 要暴露导入');
+
+  const html = read('src/renderer/settings.html');
+  assert.ok(html.includes('id="btn-offline-sites-export"'), '设置页要有导出按钮');
+  assert.ok(html.includes('id="btn-offline-sites-import"'), '设置页要有导入按钮');
+  assert.ok(html.includes('id="offline-site-io"'), '要有单独一行说导入导出结果');
+
+  const js = read('src/renderer/settings.js');
+  assert.ok(js.includes('offlineCacheSitesExport'), '界面要真的调导出');
+  assert.ok(js.includes('offlineCacheSitesImport'), '界面要真的调导入');
+  assert.ok(/没能导出名单/.test(js) && /没能导入名单/.test(js), '失败要有中文前缀，别静默');
+  assert.ok(/renderCacheSites\(res\)/.test(js), '导入成功要按返回值重画名单');
+});
+
+check('38. 数得清「解不开的」有几条：能解、解不开、抛异常三种都要算对', () => {
   const now = Date.parse('2026-11-14T12:00:00Z');
   const store = {
     v: 1,
@@ -580,7 +675,7 @@ check('35. 数得清「解不开的」有几条：能解、解不开、抛异常
   assert.ok(/都能在这台机器/.test(allGood.note), '正常时也要有一句明确结论');
 });
 
-check('36. 只清解不开的那些，能解的留着（不给「换过账户」的人一刀切）', () => {
+check('39. 只清解不开的那些，能解的留着（不给「换过账户」的人一刀切）', () => {
   const now = Date.parse('2026-11-14T12:00:00Z');
   const store = {
     v: 1,
@@ -609,7 +704,7 @@ check('36. 只清解不开的那些，能解的留着（不给「换过账户」
   assert.equal(nothing.dropped, 0, '没有坏条目时不许动数据');
 });
 
-check('37. 解不开时既说清原因，也给出「一键清掉」的出口', () => {
+check('40. 解不开时既说清原因，也给出「一键清掉」的出口', () => {
   const main = read('src/main.js');
   assert.ok(/解不开了（换了系统账户或密钥变了）/.test(main), '要如实说是解不开，不是「没有缓存」');
   assert.ok(/一键清掉/.test(main), '要告诉用户去哪儿处理');
