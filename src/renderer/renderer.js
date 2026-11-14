@@ -57,6 +57,7 @@ const els = {
   digestClose: document.getElementById('digest-close'),
   digestRun: document.getElementById('digest-run'),
   digestCopy: document.getElementById('digest-copy'),
+  digestExport: document.getElementById('digest-export'),
   digestStatus: document.getElementById('digest-status'),
   digestBody: document.getElementById('digest-body'),
 };
@@ -1131,6 +1132,7 @@ if (window.nyx.netState) refreshNetState();
 
 /** 上一次生成的纯文本（复制用），为空时说明还没生成过 */
 let lastDigestText = '';
+let lastDigestPayload = null;
 
 function setDigestStatus(text, kind) {
   if (!els.digestStatus) return;
@@ -1226,6 +1228,8 @@ function renderDigest(payload) {
   if (!els.digestBody) return;
   els.digestBody.textContent = '';
   lastDigestText = payload && typeof payload.text === 'string' ? payload.text : '';
+  // 导出的 Markdown 要用整份 payload 重新排版（和复制共用同一次抽取结果）
+  lastDigestPayload = payload && typeof payload === 'object' ? payload : null;
 
   const page = (payload && payload.page) || null;
   const network = (payload && payload.network) || null;
@@ -1352,6 +1356,38 @@ async function copyDigest() {
   }
 }
 
+/**
+ * 导出成 Markdown 文件（用户要求的第 3 项）。
+ *
+ * 复制是给人看的纯文本，导出是要存下来的文件：两者必须来自同一次抽取，
+ * 所以送出去的是整个 payload，而不是把屏幕上已有的文本再拼一遍。
+ */
+async function exportDigest() {
+  if (!lastDigestPayload) {
+    setDigestStatus('还没有摘要可以导出，先生成一次。', 'warn');
+    return;
+  }
+  if (!window.nyx.digestExport) {
+    setDigestStatus('当前内核不支持导出。', 'warn');
+    return;
+  }
+  if (els.digestExport) els.digestExport.disabled = true;
+  try {
+    const res = await window.nyx.digestExport(lastDigestPayload);
+    if (res && res.ok) {
+      setDigestStatus(`已导出：${res.path}（${res.bytes} 字节）`, 'ok');
+    } else if (res && res.canceled) {
+      setDigestStatus('已取消导出。', '');
+    } else {
+      setDigestStatus(res && res.error ? res.error : '导出失败', 'warn');
+    }
+  } catch (err) {
+    setDigestStatus(`导出失败：${String(err && err.message ? err.message : err)}`, 'warn');
+  } finally {
+    if (els.digestExport) els.digestExport.disabled = false;
+  }
+}
+
 if (els.btnDigest) {
   els.btnDigest.addEventListener('click', () => {
     if (!els.digestPanel) return;
@@ -1362,6 +1398,7 @@ if (els.btnDigest) {
 if (els.digestClose) els.digestClose.addEventListener('click', closeDigestPanel);
 if (els.digestRun) els.digestRun.addEventListener('click', () => { runDigest(); });
 if (els.digestCopy) els.digestCopy.addEventListener('click', () => { copyDigest(); });
+if (els.digestExport) els.digestExport.addEventListener('click', () => { exportDigest(); });
 if (els.digestEnabled) {
   els.digestEnabled.addEventListener('change', async () => {
     const enabled = els.digestEnabled.checked;
@@ -1375,6 +1412,7 @@ if (els.digestEnabled) {
       if (!enabled) {
         if (els.digestBody) els.digestBody.textContent = '';
         lastDigestText = '';
+        lastDigestPayload = null;
         setDigestStatus('已关闭：不再读取页面。需要时再打开开关重新生成。', '');
       } else {
         setDigestStatus('已开启：点「生成摘要」读取当前页。', 'ok');

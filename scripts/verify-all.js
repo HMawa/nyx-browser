@@ -17,7 +17,7 @@
  * 11. scripts/verify-agent-audit.js（agent 审计面与急停，17 项；纯 Node，不启动 Electron）
  * 12. scripts/verify-agent-sites.js（站点三层授权与名单导入导出，34 项；纯 Node，不启动 Electron）
  * 13. scripts/verify-agent-mode.js（agent 接入模式与两步确认，16 项；纯 Node，不启动 Electron）
- * 14. scripts/verify-page-digest.js（页面摘要与拦截统计，22 项；纯 Node，不启动 Electron）
+ * 14. scripts/verify-page-digest.js（页面摘要、拦截统计与 Markdown 导出，24 项；纯 Node，不启动 Electron）
  * 15. scripts/verify-tab-lifecycle.js（标签生命周期判定，18 项；纯 Node，不启动 Electron）
  * 16. scripts/verify-tab-sleep.js（标签休眠与唤醒端到端，10 项）
  * 17. scripts/verify-network-state.js（断网判定与断网横幅，10 项；纯 Node，不启动 Electron）
@@ -137,7 +137,7 @@ const STEPS = [
   {
     label: '页面摘要回归',
     script: 'verify-page-digest.js',
-    items: '22 项',
+    items: '24 项',
     timeoutMs: 60000,
   },
   {

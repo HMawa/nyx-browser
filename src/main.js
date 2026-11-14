@@ -79,9 +79,11 @@ const {
   readAgentModeFromPrefs,
 } = require('./core/agent-mode');
 const {
+  buildDigestMarkdown,
   buildDigestText,
   buildExtractScript,
   digestDisabledPayload,
+  digestFileName,
   summarize: summarizePage,
   summarizeNetwork,
 } = require('./core/page-digest');
@@ -8351,6 +8353,53 @@ function registerDigestIpc() {
       return { ok: true, readback };
     } catch (err) {
       return { ok: false, error: `复制失败：${err && err.message ? err.message : err}` };
+    }
+  });
+
+  /**
+   * 导出 Markdown（用户要求的第 3 项）。
+   *
+   * 三条规矩：
+   * 1. 内容只从渲染端送来的 payload 里取——不在主进程重新抓一遍页面，
+   *    否则文件和屏幕上的摘要会是两次不同的抽取。
+   * 2. 落盘前必须让用户选位置，不往默认目录里偷偷写文件。
+   * 3. 摘要没生成过就别造一个空文件，直接说清楚。
+   */
+  ipcMain.handle('nyx:digest:export', async (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    const result = input.result && typeof input.result === 'object' ? input.result : null;
+    if (!result) return { ok: false, error: '还没有生成摘要，先点「生成摘要」再导出。' };
+    const win = runtime.mainWindow && !runtime.mainWindow.isDestroyed() ? runtime.mainWindow : null;
+    let target = '';
+    try {
+      const picked = dialog.showSaveDialogSync(win, {
+        title: '导出页面摘要',
+        defaultPath: path.join(app.getPath('documents'), digestFileName(new Date())),
+        filters: [{ name: 'Markdown', extensions: ['md'] }],
+        buttonLabel: '导出',
+      });
+      target = typeof picked === 'string' ? picked : '';
+    } catch (err) {
+      diagnostics.error('DIGEST_EXPORT_DIALOG_FAILED', '导出摘要时打不开保存对话框', {
+        error: err && err.message,
+      });
+      return { ok: false, error: `打不开保存对话框：${err && err.message ? err.message : err}` };
+    }
+    if (!target) return { ok: false, canceled: true, error: '已取消导出。' };
+    try {
+      const markdown = buildDigestMarkdown(result, { now: new Date() });
+      fs.writeFileSync(target, markdown, 'utf8');
+      diagnostics.info('DIGEST_EXPORTED', '导出了页面摘要（Markdown）', {
+        path: target,
+        bytes: Buffer.byteLength(markdown, 'utf8'),
+      });
+      return { ok: true, path: target, bytes: Buffer.byteLength(markdown, 'utf8') };
+    } catch (err) {
+      diagnostics.error('DIGEST_EXPORT_FAILED', '摘要没能写到磁盘', {
+        path: target,
+        error: err && err.message,
+      });
+      return { ok: false, error: `没能写入文件：${err && err.message ? err.message : err}` };
     }
   });
 }

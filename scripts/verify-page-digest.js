@@ -319,6 +319,70 @@ async function main() {
     assert.ok(toolbox.includes('__nyxToolboxDebug'), '要留调试面给回归脚本');
   });
 
+  await check('23. 导出成 Markdown：标题层级、表格、被拦下的请求与免责声明都在（用户第 3 项）', () => {
+    const digest = require('../src/core/page-digest');
+    const now = new Date('2026-11-14T21:30:00');
+    const md = digest.buildDigestMarkdown(
+      {
+        page: {
+          title: '测试页',
+          url: 'https://x.test/a?b=1',
+          headings: ['第一节'],
+          bullets: ['这句话来自原文。', '第二句也来自原文。'],
+          keywords: [{ word: '测试', count: 2 }],
+          chars: 12,
+          candidates: 4,
+        },
+        network: {
+          total: 3,
+          failed: 1,
+          blocked: 1,
+          hosts: [{ host: 'a.test', count: 2 }],
+          apis: [{ key: 'a.test/api', count: 2 }],
+          blockedHosts: [{ host: 'ads.test', count: 1, reason: '被浏览器拦下' }],
+          warning: '有 1 个请求失败——页面显示成功不代表接口成功',
+        },
+      },
+      { now },
+    );
+    assert.ok(md.startsWith('# 测试页'), '一级标题必须是页面标题');
+    assert.ok(md.includes('<https://x.test/a?b=1>'), '来源要写成 Markdown 链接');
+    assert.ok(md.includes('2026-11-14 21:30'), '要写导出时间');
+    assert.ok(md.includes('## 摘要（抽取自页面原文）'), '摘要要有二级标题');
+    assert.ok(/^- 这句话来自原文。$/m.test(md), '每句摘要要是一个列表项');
+    assert.ok(md.includes('| 域名 | 请求数 |'), '域名要用表格');
+    assert.ok(md.includes('| a.test | 2 |'), '表格里要有真实数字');
+    assert.ok(md.includes('`ads.test` ×1（被浏览器拦下）'), '被拦下的请求不许在导出里消失');
+    assert.ok(md.includes('> 有 1 个请求失败'), '网络警告要用引用块');
+    assert.ok(/不调用任何生成式模型/.test(md), '免责第一段：只抽取不生成');
+    assert.ok(/不再受 Nyx 的隐私模式与本机缓存保护/.test(md), '免责第二段：存成文件后的边界');
+    // 文件名不能用冒号和空格（Windows 上会直接失败）
+    const name = digest.digestFileName(now);
+    assert.ok(/^页面摘要-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}\.md$/.test(name), `文件名形状不对：${name}`);
+    assert.ok(!/[:\\/*?"<>|]/.test(name), '文件名不许含 Windows 非法字符');
+  });
+
+  await check('24. 导出接线：IPC 让用户选位置、preload 暴露方法、侧栏有按钮（用户第 3 项）', () => {
+    const main = readFile('src/main.js');
+    const idx = main.indexOf("ipcMain.handle('nyx:digest:export'");
+    assert.ok(idx > 0, '缺少 nyx:digest:export');
+    const body = main.slice(idx, idx + 2600);
+    assert.ok(/dialog\.showSaveDialogSync\(/.test(body), '必须让用户自己选存放位置');
+    assert.ok(/buildDigestMarkdown\(/.test(body), '导出内容要走同一个 Markdown 生成器');
+    assert.ok(/fs\.writeFileSync\(target, markdown, 'utf8'\)/.test(body), '要按 UTF-8 落盘');
+    assert.ok(/没有生成摘要，先点/.test(body), '没生成过摘要时要给出原因，不许造空文件');
+    assert.ok(/canceled: true/.test(body), '用户取消要和失败区分开');
+    assert.ok(main.includes('digestFileName'), '默认文件名要用 digestFileName');
+    const preload = readFile('src/preload.js');
+    assert.ok(/digestExport: \(result\) => ipcRenderer\.invoke\('nyx:digest:export'/.test(preload), 'preload 要暴露 digestExport');
+    const html = readFile('src/renderer/index.html');
+    assert.ok(html.includes('id="digest-export"'), '侧栏要有「导出 .md」按钮');
+    const renderer = readFile('src/renderer/renderer.js');
+    assert.ok(renderer.includes('async function exportDigest('), '缺少 exportDigest');
+    assert.ok(renderer.includes('lastDigestPayload'), '导出必须用整份 payload，不能拿屏幕文本重拼');
+    assert.ok(/els\.digestExport\.addEventListener\('click'/.test(renderer), '按钮要真的绑上');
+  });
+
   const failed = checks.filter((item) => !item.ok);
   console.log(`\n页面摘要回归：${checks.length - failed.length} / ${checks.length} 通过`);
   if (failed.length) {

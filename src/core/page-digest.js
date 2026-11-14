@@ -372,6 +372,103 @@ function buildDigestText(payload) {
   return lines.join('\n');
 }
 
+/**
+ * 导出用的 Markdown。
+ *
+ * 和复制文本刻意分开：复制是为了粘给人看（纯文本最稳），导出是为了存成文件
+ * （标题层级、链接、表格都要是 Markdown 语法）。但两边的内容必须来自同一个 payload，
+ * 不许出现「导出的文件里少了几条被拦下的请求」这种两套说法。
+ *
+ * 文件末尾固定写一段来源说明：摘要只在 Nyx 里跑抽取，不是模型生成的；
+ * 存成文件之后就不再受「只在本机」保护了——这一点必须写进文件本身。
+ */
+function buildDigestMarkdown(payload, options) {
+  const data = payload && typeof payload === 'object' ? payload : {};
+  const page = data.page || {};
+  const net = data.network || {};
+  const when = options && options.now instanceof Date ? options.now : new Date();
+  const lines = [];
+
+  const title = page.title || page.url || '未命名页面';
+  lines.push(`# ${title}`, '');
+  if (page.url) lines.push(`- 来源：<${page.url}>`);
+  lines.push(`- 导出时间：${formatStamp(when)}`);
+  if (typeof page.chars === 'number') lines.push(`- 摘要长度：${page.chars} 字`);
+  if (typeof page.candidates === 'number') lines.push(`- 候选句子：${page.candidates} 句`);
+  lines.push('');
+
+  if (Array.isArray(page.headings) && page.headings.length) {
+    lines.push('## 页面小标题', '');
+    for (const item of page.headings) lines.push(`- ${item}`);
+    lines.push('');
+  }
+
+  if (Array.isArray(page.bullets) && page.bullets.length) {
+    lines.push('## 摘要（抽取自页面原文）', '');
+    for (const item of page.bullets) lines.push(`- ${item}`);
+    lines.push('');
+  }
+
+  if (Array.isArray(page.keywords) && page.keywords.length) {
+    lines.push('## 关键词', '');
+    lines.push(page.keywords.map((item) => `\`${item.word}\``).join(' · '), '');
+  }
+
+  if (net && typeof net.total === 'number') {
+    lines.push('## 网络请求', '');
+    lines.push(
+      `共 ${net.total} 个请求，失败 ${net.failed || 0} 个，被拦下 ${net.blocked || 0} 个。`,
+      '',
+    );
+    if (Array.isArray(net.hosts) && net.hosts.length) {
+      lines.push('| 域名 | 请求数 |', '| --- | ---: |');
+      for (const item of net.hosts) lines.push(`| ${item.host} | ${item.count} |`);
+      lines.push('');
+    }
+    if (Array.isArray(net.apis) && net.apis.length) {
+      lines.push('**主要接口**', '');
+      for (const item of net.apis) lines.push(`- \`${item.key}\` ×${item.count}`);
+      lines.push('');
+    }
+    if (Array.isArray(net.blockedHosts) && net.blockedHosts.length) {
+      lines.push('**被拦下的请求**（不是失败，是被浏览器或安全策略挡掉的）', '');
+      for (const item of net.blockedHosts) {
+        lines.push(`- \`${item.host}\` ×${item.count}（${item.reason}）`);
+      }
+      lines.push('');
+    }
+    if (net.warning) lines.push(`> ${net.warning}`, '');
+    if (net.missing) lines.push('> 这次没有取到抓包记录，网络部分只是空的，不代表页面没请求。', '');
+  }
+
+  lines.push('---', '');
+  lines.push(
+    '这份摘要由 Nyx 的「页面摘要」功能生成：**只从页面原文里抽取句子，不调用任何生成式模型**，' +
+      '每一句都能在对应页面上找到。',
+  );
+  lines.push(
+    '它只是这次阅读的一个快照。存成文件之后，这份内容就不再受 Nyx 的隐私模式与本机缓存保护，' +
+      '请自己决定放在哪里、发给谁。',
+  );
+  return `${lines.join('\n').trim()}\n`;
+}
+
+/** 导出文件名里不用冒号与空格，免得在 Windows 上直接失败 */
+function digestFileName(now) {
+  const stamp = formatStamp(now instanceof Date ? now : new Date())
+    .replace(/[:\s]/g, '-')
+    .replace(/-(\d{3})$/, '');
+  return `页面摘要-${stamp}.md`;
+}
+
+function formatStamp(date) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  );
+}
+
 /** 开关关着的时候也要给出可读的原因，不许静默不干活 */
 function digestDisabledPayload() {
   return {
@@ -383,10 +480,12 @@ function digestDisabledPayload() {
 
 module.exports = {
   DIGEST_LIMITS,
+  buildDigestMarkdown,
   buildDigestText,
   buildExtractScript,
   classifyBlocked,
   digestDisabledPayload,
+  digestFileName,
   keywords,
   splitSentences,
   summarize,
