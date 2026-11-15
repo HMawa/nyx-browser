@@ -50,6 +50,12 @@ build/signing/
 *.pfx
 *.cer
 
+# ---- 更新清单签名私钥：绝不入库 ----
+# 由 `node scripts/make-update-key.js` 生成（默认 %APPDATA%\Nyx\update-signing-key.pem）；
+# 泄漏等于任何人可以签出「客户端认为合法」的更新清单
+*.pem
+!vendor/**/*.pem
+
 # ---- 早期探针脚本与运行日志（历史遗留，不入库）----
 ai-*-probe.js
 hf-*.js

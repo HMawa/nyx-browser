@@ -17,7 +17,9 @@
  *     "file": "Nyx-Setup-0.2.0.exe",   // 相对更新源的安装包文件名
  *     "sha256": "…",                    // 必须提供（64 位十六进制）；缺失或格式不对一律拒绝安装
  *     "size": 12345678,                 // 选填，仅用于进度显示
- *     "mandatory": false                // 选填，true 时提示语更强调
+ *     "mandatory": false,               // 选填，true 时提示语更强调
+ *     "signature": "…",                 // 必须提供（Ed25519，base64）；见 src/core/update-signature.js
+ *     "keyId": "dc2cec223e6ea7c7"       // 必须提供；不是这把钥匙签的一律拒绝
  *   }
  *
  * 升级流程：读清单 → 版本比较 → 复制/下载到 update-cache（支持断点续传） →
@@ -46,7 +48,60 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const http = require('node:http');
 const https = require('node:https');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
+const { decideInstallerSignature, verifyManifestSignature } = require('./update-signature');
+
+/**
+ * 读一个 exe 的 Authenticode 签名状态（安全审计 P0-2 第二阶段，安装前最后一道门）。
+ *
+ * 为什么用 PowerShell：Node 侧没有读 Authenticode 的内置能力，
+ * 而 `Get-AuthenticodeSignature` 是系统自带、不引入任何依赖。
+ * 输出统一转成 JSON 再解析；**读不到就算没签名**（失败关闭）。
+ */
+function readAuthenticode(file) {
+  const script = [
+    '$ErrorActionPreference = "Stop";',
+    `$s = Get-AuthenticodeSignature -LiteralPath '${String(file).replace(/'/g, "''")}';`,
+    '$out = @{',
+    '  status = [string]$s.Status;',
+    '  statusMessage = [string]$s.StatusMessage;',
+    '  thumbprint = if ($s.SignerCertificate) { [string]$s.SignerCertificate.Thumbprint } else { "" };',
+    '  notAfter = if ($s.SignerCertificate) { [string]$s.SignerCertificate.NotAfter } else { "" }',
+    '};',
+    '$out | ConvertTo-Json -Compress',
+  ].join(' ');
+
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+    encoding: 'buffer',
+    windowsHide: true,
+    timeout: 20000,
+  });
+  if (result.error || !result.stdout) {
+    return { ok: false, error: `读不到安装包的签名状态：${(result.error && result.error.message) || '没有输出'}` };
+  }
+  // PowerShell 的默认输出编码在本机是 GBK，按 utf8 解会把中文解坏
+  let text = '';
+  try {
+    text = new TextDecoder('gbk').decode(result.stdout);
+  } catch {
+    text = result.stdout.toString('utf8');
+  }
+  const trimmed = text.trim();
+  if (!trimmed) return { ok: false, error: '读不到安装包的签名状态（没有输出）' };
+  try {
+    return { ok: true, value: JSON.parse(trimmed) };
+  } catch {
+    return { ok: false, error: `读不懂安装包的签名状态：${trimmed.slice(0, 120)}` };
+  }
+}
+
+/** 证书到期时间是否已过（读不到就当过期，宁可拒绝） */
+function isCertExpired(notAfter) {
+  if (!notAfter) return false;
+  const at = Date.parse(notAfter);
+  if (!Number.isFinite(at)) return true;
+  return at < Date.now();
+}
 
 /**
  * 旧版默认更新源：早期把收件目录放在安装目录里（<安装目录>\updates）。
@@ -740,6 +795,14 @@ class Updater {
       const manifest = await this.fetchManifest(source);
       if (!manifest || !manifest.version) throw new Error('更新清单缺少 version 字段');
 
+      // 安全审计 P0-2 第二阶段：清单必须先过签名，签名不成立就不许往下走一步。
+      // 以前只信清单里的 sha256，而清单本身就在更新源目录里——改目录 = 全绿通过。
+      const signature = verifyManifestSignature(manifest);
+      if (!signature.ok) {
+        this.log(`[升级] ${signature.error}`);
+        throw new Error(signature.error);
+      }
+
       const fileName = manifest.file || `Nyx-Setup-${manifest.version}.exe`;
       const cmp = compareVersion(manifest.version, this.currentVersion);
       this.checkedAt = new Date().toISOString();
@@ -903,6 +966,29 @@ class Updater {
     }
     if (!this.readyFile || !fs.existsSync(this.readyFile)) {
       return { ok: false, error: '升级包尚未准备好，请先检查并获取更新' };
+    }
+
+    // 安全审计 P0-2 第二阶段：装之前最后核一次"这个 exe 是不是我们签的"。
+    // 清单签名保证 sha256 没被改；这一层保证磁盘上那个文件没被换。
+    const signed = readAuthenticode(this.readyFile);
+    if (!signed.ok) {
+      this.log(`[升级] ${signed.error}`);
+      this.setState({ phase: 'error', message: signed.error, lastError: signed.error });
+      return { ok: false, error: signed.error };
+    }
+    const verdict = decideInstallerSignature({
+      status: signed.value && signed.value.status,
+      statusMessage: signed.value && signed.value.statusMessage,
+      thumbprint: signed.value && signed.value.thumbprint,
+      expired: isCertExpired(signed.value && signed.value.notAfter),
+    });
+    if (!verdict.ok) {
+      this.log(`[升级] ${verdict.error}`);
+      this.setState({ phase: 'error', message: verdict.error, lastError: verdict.error });
+      return { ok: false, error: verdict.error };
+    }
+    if (verdict.code === 'UNTRUSTED_CHAIN') {
+      this.log('[升级] 安装包签名有效，但本机没把 Nyx 的自签名证书装进受信任根；已按证书指纹放行。');
     }
 
     const installDir = path.dirname(this.execPath);

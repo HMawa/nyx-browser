@@ -211,6 +211,32 @@ function readOptionalValue(name) {
 }
 
 /**
+ * 给清单签名（安全审计 P0-2 第二阶段）。
+ *
+ * 私钥位置：`--sign-key=<path>` 或默认 `%APPDATA%\Nyx\update-signing-key.pem`
+ * （由 `node scripts/make-update-key.js` 生成，绝不入库）。
+ *
+ * 没有私钥就**直接失败**：宁可这一版发不出去，也不要发一份客户端会拒装的清单。
+ */
+function signManifestObject(manifest) {
+  const { signManifest, UPDATE_KEY_ID } = require(path.join(ROOT, 'src', 'core', 'update-signature.js'));
+  const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+  const keyPath = readArg('sign-key', path.join(appData, 'Nyx', 'update-signing-key.pem'));
+  if (!fs.existsSync(keyPath)) {
+    fail(
+      `找不到更新签名私钥：${keyPath}\n` +
+        '  没有私钥就不发版（客户端只认签名过的清单）。\n' +
+        '  生成一次即可：node scripts/make-update-key.js\n' +
+        '  （生成后把输出的公钥与 keyId 写进 src/core/update-signature.js）',
+    );
+  }
+  const privateKeyPem = fs.readFileSync(keyPath, 'utf8');
+  const signature = signManifest(manifest, privateKeyPem);
+  if (!signature) fail('清单签名失败（私钥读到了但签不出来），已中止发版');
+  return { signature, keyId: UPDATE_KEY_ID };
+}
+
+/**
  * 流式计算 sha256：历史 dist 里出现过 900MB+ 的安装包，
  * 用 readFileSync 一次性读入容易把内存顶爆，这里按 4MB 分块读。
  */
@@ -1200,6 +1226,12 @@ function releaseMode() {
     mandatory: false,
     blocks: blocksName,
   };
+
+  // 安全审计 P0-2 第二阶段：清单必须带签名，否则客户端会拒绝这份更新。
+  // 没有私钥就不许发版——发出一个"客户端装不上"的清单比不发更糟。
+  const signed = signManifestObject(manifest);
+  manifest.signature = signed.signature;
+  manifest.keyId = signed.keyId;
 
   fs.writeFileSync(path.join(DIST_DIR, MANIFEST_NAME), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
   fs.writeFileSync(path.join(DIST_DIR, blocksName), `${JSON.stringify(blockManifest, null, 2)}\n`, 'utf8');
