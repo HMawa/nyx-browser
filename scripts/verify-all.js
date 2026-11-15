@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把三十四个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把三十六个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
@@ -209,7 +209,7 @@ const STEPS = [
   {
     label: '打包产物冒烟',
     script: 'verify-packaged-smoke.js',
-    items: '11 项',
+    items: '12 项',
     timeoutMs: 240000,
     /** 依赖解包产物：不存在就跳过（跳过不算失败） */
     requires: path.join(ROOT, 'dist', 'win-unpacked', 'Nyx.exe'),
@@ -297,6 +297,18 @@ const STEPS = [
     label: 'IPC 发送方校验回归',
     script: 'verify-ipc-guard.js',
     items: '9 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '本地接口鉴权回归',
+    script: 'verify-http-api-auth.js',
+    items: '7 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '安全审计 P2 批次回归',
+    script: 'verify-audit-p2.js',
+    items: '14 项',
     timeoutMs: 60000,
   },
 ];
