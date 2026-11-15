@@ -250,6 +250,284 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* 卡片折叠（清单 A1，v1.17.8）                                          */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * 设置页有九个分区、四十来张卡片。原来全摊开，找一项要滚很久。
+   * 这里给每张卡片加「铺开 / 收回」两态：收回时标题右侧仍然显示**当前值**，
+   * 因为"收起来看不见现状"比"不折叠"更糟——用户还得挨个展开找。
+   *
+   * 不改 settings.html 的四十处结构，启动时统一增强：卡片头（.info-head）变成
+   * 可点/可聚焦的折叠开关，值由 describeCardValue 统一推导。
+   */
+
+  /** 默认铺开的分区：常用区先给全，其余先收起；用户点过之后按他点的来 */
+  const FOLD_OPEN_SECTIONS = ['appearance', 'network'];
+
+  /** 卡片稳定 id：分区 + 标题 slug。标题改了 id 就变，等于「没记过」→ 回到分区默认 */
+  function foldCardId(section, title) {
+    const slug = String(title || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    return `${section}:${slug || 'card'}`;
+  }
+
+  /**
+   * 收起态右侧显示的「当前值」。取值优先级写死在这里，界面不许各判一套：
+   * 徽标（不是「—」时）→ 第一个复选框（开/关）→ 第一个下拉的选中项 →
+   * 第一个文本框的值 → 第一条提示的首句 → 空（宁可空着，也不编一句假的）。
+   */
+  function describeCardValue(card) {
+    if (!card) return '';
+
+    const badge = card.querySelector('.info-head .badge');
+    const badgeText = badge ? String(badge.textContent || '').trim() : '';
+    if (badgeText && badgeText !== '—' && badgeText !== '-') return badgeText;
+
+    const box = card.querySelector('input[type="checkbox"]');
+    if (box) return box.checked ? '开' : '关';
+
+    const select = card.querySelector('select');
+    const option = select && select.selectedOptions ? select.selectedOptions[0] : null;
+    const optionText = option ? String(option.textContent || '').trim() : '';
+    if (optionText) return optionText;
+
+    const text = card.querySelector('input[type="text"], input[type="number"], input[type="search"]');
+    const value = text ? String(text.value || '').trim() : '';
+    if (value) return value.length > 24 ? `${value.slice(0, 24)}…` : value;
+
+    const hint = card.querySelector('.hint');
+    if (hint) {
+      // 先把换行与缩进压平再切句：卡片里的说明经常是缩进过的多行文本，
+      // 直接按 \n 切会切出一个空串，收起态就变成"什么都没有"。
+      const flat = String(hint.textContent || '').replace(/\s+/g, ' ').trim();
+      const line = flat.split(/[。；]/)[0].trim();
+      if (line) return line.length > 28 ? `${line.slice(0, 28)}…` : line;
+    }
+
+    // 纯状态卡（加固状态这类）：没有控件也没有说明，就取第一行事实的「值」
+    const fact = card.querySelector('.kv-grid .kv-item .v');
+    const factText = fact ? String(fact.textContent || '').trim() : '';
+    if (factText) return factText.length > 24 ? `${factText.slice(0, 24)}…` : factText;
+
+    return '';
+  }
+
+  /** 折叠记录（JSON 字符串 → 对象；坏数据一律当成"一条都没记过"） */
+  function readFoldMap() {
+    const raw = uiPrefs ? uiPrefs.settingsFold : '';
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(String(raw));
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  /** 这张卡片该不该收起：用户记过就按记录，没记过按分区默认 */
+  function foldStateOf(card) {
+    const saved = readFoldMap();
+    const id = card && card.dataset ? card.dataset.foldId : '';
+    if (id && Object.prototype.hasOwnProperty.call(saved, id)) return Number(saved[id]) === 1;
+    const panel = card ? card.closest('.sec-panel') : null;
+    const sec = panel && panel.dataset.sec ? panel.dataset.sec : '';
+    return !FOLD_OPEN_SECTIONS.includes(sec);
+  }
+
+  let foldSaveTimer = null;
+
+  /** 把「与分区默认不同」的卡片状态写回偏好（只存差异，文件才不会被四十条撑大） */
+  function persistFoldState() {
+    if (foldSaveTimer) clearTimeout(foldSaveTimer);
+    foldSaveTimer = setTimeout(async () => {
+      foldSaveTimer = null;
+      const map = {};
+      for (const card of document.querySelectorAll('.info-card[data-fold-id]')) {
+        const folded = card.classList.contains('is-folded');
+        const panel = card.closest('.sec-panel');
+        const sec = panel && panel.dataset.sec ? panel.dataset.sec : '';
+        const normal = !FOLD_OPEN_SECTIONS.includes(sec);
+        if (folded !== normal) map[card.dataset.foldId] = folded ? 1 : 0;
+      }
+      try {
+        const res = await window.nyx.setUiPref('settingsFold', JSON.stringify(map));
+        if (res && res.ok === false) {
+          setStatus(`折叠状态没能保存：${res.error || '未知原因'}`, true);
+        } else if (res && res.ui) {
+          uiPrefs = res.ui;
+        }
+      } catch {
+        setStatus('折叠状态没能保存：界面与内核的通道没有响应。', true);
+      }
+    }, 260);
+  }
+
+  /** 应用一张卡片的折叠态；animate=false 用于首次渲染，避免进入设置页时整片闪一下 */
+  function applyFold(card, folded, animate) {
+    const body = card.querySelector('.info-body');
+    const head = card.querySelector('.info-head');
+    const value = card.querySelector('.fold-value');
+    const reduce =
+      typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (value) value.textContent = describeCardValue(card);
+    if (head) head.setAttribute('aria-expanded', folded ? 'false' : 'true');
+
+    if (!body || !animate || reduce) {
+      card.classList.toggle('is-folded', folded);
+      if (body) body.style.maxHeight = '';
+      return;
+    }
+
+    if (body.style.maxHeight) body.style.maxHeight = '';
+    if (folded) {
+      // 先量出真实高度并写死一个起点，再切到 0——中间强制一次重排（读 offsetHeight），
+      // 否则浏览器会把"auto → 0"合并成一次跳变，动画看不到（用 requestAnimationFrame
+      // 也可以，但后台标签里 rAF 会被节流甚至不触发，功能就得跟着一起坏）。
+      body.style.maxHeight = `${body.scrollHeight}px`;
+      void body.offsetHeight;
+      card.classList.add('is-folded');
+      body.style.maxHeight = '0px';
+    } else {
+      card.classList.remove('is-folded');
+      body.style.maxHeight = `${body.scrollHeight}px`;
+      window.setTimeout(() => {
+        if (!card.classList.contains('is-folded')) body.style.maxHeight = '';
+      }, 200);
+    }
+  }
+
+  /** 刷新一批卡片显示的当前值（控件改完之后调用，别让收起态显示旧值） */
+  function refreshFoldValues(root) {
+    const scope = root || document;
+    for (const card of scope.querySelectorAll('.info-card[data-fold-id]')) {
+      const value = card.querySelector('.fold-value');
+      if (value) value.textContent = describeCardValue(card);
+    }
+  }
+
+  /** 把一张卡片的卡片头增强成折叠开关（head 保持 div，只加 role/tabindex，避免动四十处的结构） */
+  function enhanceCardFold(sec, card) {
+    const head = card.querySelector('.info-head');
+    if (!head || card.dataset.foldId) return;
+
+    const titleEl = head.querySelector('h3');
+    const title = titleEl ? String(titleEl.textContent || '').trim() : '';
+    card.dataset.foldId = foldCardId(sec, title);
+    head.classList.add('fold-head');
+    head.setAttribute('role', 'button');
+    head.setAttribute('tabindex', '0');
+    head.setAttribute('title', `${title}：点击铺开或收回`);
+
+    const value = document.createElement('span');
+    value.className = 'fold-value';
+    // 插在标题后面。这里不能用 head.querySelector('.badge') 当锚点——有些卡片里嵌着
+    // 另一层带 badge 的结构，取到的节点不是 head 的直接子节点，insertBefore 会直接抛错。
+    const anchor = titleEl ? titleEl.nextSibling : head.firstChild;
+    head.insertBefore(value, anchor || null);
+
+    const caret = document.createElement('span');
+    caret.className = 'fold-caret';
+    caret.setAttribute('aria-hidden', 'true');
+    caret.textContent = '⌄';
+    head.appendChild(caret);
+
+    applyFold(card, foldStateOf(card), false);
+  }
+
+  let foldWired = false;
+
+  /** 启动时跑一次：加分区级「全部铺开 / 全部收回」，并增强每一张卡片 */
+  function setupCardFolding() {
+    if (foldWired) return;
+    foldWired = true;
+
+    for (const panel of panels) {
+      const sec = panel.dataset.sec || '';
+      const head = panel.querySelector('.sec-head');
+      if (head && !head.querySelector('.sec-fold-tools')) {
+        const tools = document.createElement('div');
+        tools.className = 'sec-fold-tools';
+
+        const openAll = document.createElement('button');
+        openAll.type = 'button';
+        openAll.className = 'btn btn-mini';
+        openAll.dataset.foldAll = 'open';
+        openAll.textContent = '全部铺开';
+
+        const closeAll = document.createElement('button');
+        closeAll.type = 'button';
+        closeAll.className = 'btn btn-mini';
+        closeAll.dataset.foldAll = 'close';
+        closeAll.textContent = '全部收回';
+
+        tools.appendChild(openAll);
+        tools.appendChild(closeAll);
+        head.appendChild(tools);
+      }
+
+      const scroll = panel.querySelector('.sec-scroll');
+      if (!scroll) continue;
+      for (const card of scroll.querySelectorAll('section.info-card')) {
+        enhanceCardFold(sec, card);
+      }
+    }
+
+    document.addEventListener('click', (event) => {
+      const all = event.target && event.target.closest ? event.target.closest('[data-fold-all]') : null;
+      if (all) {
+        const panel = all.closest('.sec-panel');
+        const folded = all.dataset.foldAll === 'close';
+        if (panel) {
+          for (const card of panel.querySelectorAll('.info-card[data-fold-id]')) {
+            applyFold(card, folded, true);
+          }
+          persistFoldState();
+          setStatus(folded ? '这个分区的卡片已全部收回。' : '这个分区的卡片已全部铺开。');
+        }
+        return;
+      }
+
+      const head = event.target && event.target.closest ? event.target.closest('.fold-head') : null;
+      if (!head) return;
+      const card = head.closest('.info-card');
+      if (!card) return;
+      const unfolding = card.classList.contains('is-folded');
+      applyFold(card, !unfolding, true);
+      persistFoldState();
+    });
+
+    document.addEventListener(
+      'keydown',
+      (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        const head = event.target && event.target.closest ? event.target.closest('.fold-head') : null;
+        if (!head) return;
+        event.preventDefault();
+        const card = head.closest('.info-card');
+        if (!card) return;
+        applyFold(card, !card.classList.contains('is-folded'), true);
+        persistFoldState();
+      },
+      true
+    );
+
+    // 控件改完之后，收起态显示的值要跟着变（否则用户收起后看到的还是旧值）
+    document.addEventListener(
+      'change',
+      (event) => {
+        const card = event.target && event.target.closest ? event.target.closest('.info-card') : null;
+        if (card && card.dataset.foldId) refreshFoldValues(card);
+      },
+      true
+    );
+  }
+
+  /* ------------------------------------------------------------------ */
   /* 分区导航                                                            */
   /* ------------------------------------------------------------------ */
 
@@ -328,6 +606,14 @@
       loadDiagnostics();
       // 外壳防护现值（清单 C3）：跟着诊断一起刷新——它是"现状"，不能缓存
       loadSecuritySwitches();
+    }
+
+    // 卡片收起时显示的「当前值」要跟上本分区刚加载的数据（清单 A1）
+    const current = panels.find((panel) => panel.dataset.sec === section);
+    if (current) {
+      refreshFoldValues(current);
+      // 分区里的数据多半是异步回填的，加载完再补刷一次
+      window.setTimeout(() => refreshFoldValues(current), 400);
     }
   }
 
@@ -3871,6 +4157,8 @@ async function loadFootprint() {
   async function init() {
     bindScrollMemory();
     await Promise.all([loadUiPrefs(), loadAppInfo(), loadHardware()]);
+    // 折叠态依赖界面偏好（settingsFold），必须等 loadUiPrefs 落地再增强卡片
+    setupCardFolding();
     await loadStartupPrefs();
     bindDownloadPrefs();
     await loadDownloadPrefs();

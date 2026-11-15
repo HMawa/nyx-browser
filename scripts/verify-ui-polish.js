@@ -877,6 +877,133 @@ async function main() {
       check('设置页分区就绪', settingsReady);
 
       if (settingsReady) {
+        /* ---------- A1：设置页卡片折叠（v1.17.8） ---------- */
+        const foldFlow = await settings.eval(`(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          // 卡片增强发生在 init（要等界面偏好读回来），这里先等它落地
+          let enhanced = 0;
+          for (let i = 0; i < 40 && enhanced < 5; i += 1) {
+            enhanced = document.querySelectorAll('.info-card[data-fold-id]').length;
+            if (enhanced < 5) await wait(150);
+          }
+          const panelOf = (name) => document.querySelector('.sec-panel[data-sec="' + name + '"]');
+          // 量高度必须在可见分区里量：display:none 的子树上 getBoundingClientRect 全是 0
+          document.querySelector('.nav-item[data-sec="privacy"]').click();
+          await wait(350);
+          const cardsOf = (p) => Array.from(p.querySelectorAll('.info-card[data-fold-id]'));
+          const foldedCount = (p) => cardsOf(p).filter((c) => c.classList.contains('is-folded')).length;
+          const bodyHeightOf = (card) => Math.round(card.querySelector('.info-body').getBoundingClientRect().height);
+
+          const appearance = panelOf('appearance');
+          const privacy = panelOf('privacy');
+          const defaults = {
+            appearanceTotal: cardsOf(appearance).length,
+            appearanceFolded: foldedCount(appearance),
+            privacyTotal: cardsOf(privacy).length,
+            privacyFolded: foldedCount(privacy),
+          };
+
+          const firstFolded = cardsOf(privacy).find((c) => c.classList.contains('is-folded'));
+          const foldedProbe = firstFolded
+            ? {
+                value: String((firstFolded.querySelector('.fold-value') || {}).textContent || '').trim(),
+                expanded: firstFolded.querySelector('.info-head').getAttribute('aria-expanded'),
+                bodyHeight: bodyHeightOf(firstFolded),
+              }
+            : null;
+
+          if (firstFolded) firstFolded.querySelector('.info-head').click();
+          await wait(280);
+          const afterClick = firstFolded
+            ? {
+                folded: firstFolded.classList.contains('is-folded'),
+                expanded: firstFolded.querySelector('.info-head').getAttribute('aria-expanded'),
+                bodyHeight: bodyHeightOf(firstFolded),
+              }
+            : null;
+
+          const closeAll = privacy.querySelector('[data-fold-all="close"]');
+          if (closeAll) closeAll.click();
+          await wait(340);
+          const values = cardsOf(privacy).map((c) => String((c.querySelector('.fold-value') || {}).textContent || '').trim());
+          const afterCloseAll = {
+            total: cardsOf(privacy).length,
+            folded: foldedCount(privacy),
+            emptyValues: values.filter((v) => !v).length,
+            emptyIds: cardsOf(privacy)
+              .filter((c) => !String((c.querySelector('.fold-value') || {}).textContent || '').trim())
+              .map((c) => c.dataset.foldId),
+            notFoldedIds: cardsOf(privacy)
+              .filter((c) => !c.classList.contains('is-folded'))
+              .map((c) => c.dataset.foldId),
+            values: values.slice(0, 6),
+          };
+
+          // 落盘只记"与分区默认不同"的卡片，所以要先在外观区收一张（外观默认是铺开的），
+          // 这样才有差异可写；隐私区全收起等于默认，按设计不写盘。
+          document.querySelector('.nav-item[data-sec="appearance"]').click();
+          await wait(300);
+          const appearanceCard = cardsOf(appearance)[0];
+          if (appearanceCard) appearanceCard.querySelector('.info-head').click();
+          await wait(500);
+          let savedKeys = 0;
+          let savedSample = null;
+          try {
+            const prefs = await window.nyx.getUiPrefs();
+            const ui = prefs && prefs.ui ? prefs.ui : null;
+            const saved = ui && ui.settingsFold ? JSON.parse(ui.settingsFold) : null;
+            savedKeys = saved ? Object.keys(saved).length : 0;
+            savedSample = saved
+              ? Object.keys(saved).map((k) => k + '=' + saved[k]).slice(0, 2)
+              : null;
+          } catch {
+            savedKeys = -1;
+          }
+
+          // 复原：铺开后清掉记录，别把折叠态留给后面几条断言
+          const openAll = privacy.querySelector('[data-fold-all="open"]');
+          if (openAll) openAll.click();
+          await wait(280);
+          await window.nyx.setUiPref('settingsFold', '');
+          // 回到外观分区，别把"当前分区"这种副作用带给后面的断言
+          document.querySelector('.nav-item[data-sec="appearance"]').click();
+          await wait(200);
+          return { enhanced, defaults, foldedProbe, afterClick, afterCloseAll, savedKeys, savedSample };
+        })()`);
+
+        check(
+          '卡片默认按分区折叠：常用区铺开、其余收起（A1）',
+          foldFlow &&
+            foldFlow.defaults.appearanceTotal > 0 &&
+            foldFlow.defaults.appearanceFolded === 0 &&
+            foldFlow.defaults.privacyTotal > 0 &&
+            foldFlow.defaults.privacyFolded === foldFlow.defaults.privacyTotal,
+          foldFlow && JSON.stringify(foldFlow.defaults),
+        );
+        check(
+          '收起态仍显示当前值，正文确实收起来了（A1）',
+          foldFlow && foldFlow.foldedProbe && foldFlow.foldedProbe.expanded === 'false' && foldFlow.foldedProbe.bodyHeight < 2,
+          foldFlow && JSON.stringify(foldFlow.foldedProbe),
+        );
+        check(
+          '点卡片头能铺开，aria-expanded 跟着变（A1）',
+          foldFlow &&
+            foldFlow.afterClick &&
+            foldFlow.afterClick.folded === false &&
+            foldFlow.afterClick.expanded === 'true' &&
+            foldFlow.afterClick.bodyHeight > 4,
+          foldFlow && JSON.stringify(foldFlow.afterClick),
+        );
+        check(
+          '「全部收回」一次收起本区所有卡片，并写进界面偏好（A1）',
+          foldFlow &&
+            foldFlow.afterCloseAll.folded === foldFlow.afterCloseAll.total &&
+            foldFlow.afterCloseAll.emptyValues === 0 &&
+            foldFlow.savedKeys > 0,
+          foldFlow &&
+            `收起 ${foldFlow.afterCloseAll.folded}/${foldFlow.afterCloseAll.total}，空值 ${JSON.stringify(foldFlow.afterCloseAll.emptyIds)}，未收起 ${JSON.stringify(foldFlow.afterCloseAll.notFoldedIds)}，落盘 ${foldFlow.savedKeys} 条 ${JSON.stringify(foldFlow.savedSample)}`,
+        );
+
         const scrollFlow = await settings.eval(`(async () => {
           const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 

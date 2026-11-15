@@ -1669,3 +1669,78 @@
   border-color: var(--accent-55);
   background: var(--accent-06);
 }
+
+/* ---------------- 卡片折叠（清单 A1，v1.17.8） ---------------- */
+
+/* 卡片头变成折叠开关：保留原有布局，只补"可点"的视觉与手感 */
+.info-head.fold-head {
+  cursor: pointer;
+  user-select: none;
+}
+
+.info-head.fold-head:hover h3 {
+  color: var(--accent);
+}
+
+.info-head.fold-head:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent-soft), var(--ring);
+}
+
+/* 收起时右侧显示的当前值：扫一眼就知道这张卡片现在是什么状态 */
+.info-head .fold-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: 8px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.info-head .fold-caret {
+  flex: 0 0 auto;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--text-faint);
+  transition: transform 0.16s ease;
+}
+
+.info-card.is-folded .info-head .fold-caret {
+  transform: rotate(-90deg);
+}
+
+/* 折叠动画由 settings.js 写内联 max-height 驱动；这里给两态各自的基线 */
+.info-card .info-body {
+  overflow: hidden;
+  transition: max-height 0.16s ease, opacity 0.16s ease;
+}
+
+.info-card.is-folded .info-body {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* 分区级的「全部铺开 / 全部收回」按钮组：贴在分区标题的右上角，不挤动原来的标题与说明 */
+.sec-head {
+  position: relative;
+}
+
+.sec-fold-tools {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  display: flex;
+  gap: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .info-head .fold-caret,
+  .info-card .info-body {
+    transition: none;
+  }
+}
