@@ -54,7 +54,7 @@
 
 - 新增 `scripts/lib/nightly-plan.js`（参数拼法、输出解析、三态描述），`nightly-e2e.js` 增 `--register` / `--unregister` / `--status` / `--apply` / `--elevated`。
 - 两个**真修**：
-  - `schtasks` 的输出是 **GBK**。按 utf8 解，`错误: 系统找不到指定的文件。` 变成 `����: ϵͳ...`，「任务不存在」被误判成「读不出来」→ 一律 `encoding: 'buffer'` + `new TextDecoder('gbk')`。
+  - `schtasks` 的输出是 **GBK**。按 utf8 解，`错误: 系统找不到指定的文件。` 会变成一串「锟斤拷」式的乱码方框，「任务不存在」被误判成「读不出来」→ 一律 `encoding: 'buffer'` + `new TextDecoder('gbk')`。
   - 默认参数原来带 `/RL HIGHEST`（要管理员），第一次真注册直接「拒绝访问」。Nyx 是 `perMachine:false` 装到用户目录，**普通权限就够** → 默认不提权，要提权显式 `--elevated`。
 - 状态文件多写一段 `scheduled`，设置页的状态卡里多一行「计划任务」。
 
