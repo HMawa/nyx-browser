@@ -102,6 +102,7 @@ const {
   readAgentModeFromPrefs,
 } = require('./core/agent-mode');
 const { ACTIVE_MS: AGENT_LAMP_ACTIVE_MS, decideLamp, describeLamp } = require('./core/agent-lamp');
+const { agentDocFilename, buildAgentDoc } = require('./core/agent-doc');
 const {
   buildDigestCsv,
   buildDigestMarkdown,
@@ -4282,6 +4283,7 @@ function registerIpc() {
   registerAgentAuditIpc();
   registerAgentSitesIpc();
   registerAgentModeIpc();
+  registerAgentDocIpc();
   registerDigestIpc();
   registerAgentSettingsIpc();
 
@@ -9970,6 +9972,100 @@ function readAuditDays(raw) {
 function readAuditSince(raw) {
   const days = readAuditDays(raw);
   return days > 0 ? Date.now() - days * 24 * 60 * 60 * 1000 : 0;
+}
+
+/**
+ * agent 接入说明（清单 D1）。
+ *
+ * 为什么要"生成"而不是写一份静态文档：端点端口、鉴权头、模式、急停状态、白名单条数
+ * 都是运行时事实。写死示例端口的结果一定是"照着文档填，连不上"。
+ * 所以这里只做一件事：把当前真实状态喂给 `src/core/agent-doc.js`，拼出一份可粘贴的说明。
+ */
+function agentDocOptions() {
+  const policy = runtime.agentSites || sanitizeSitePolicy(null);
+  const modeInfo = agentModeStatus();
+  return {
+    port: runtime.apiPort,
+    tokenFile: userDataFile('api-token.txt'),
+    mode: runtime.agentMode,
+    modeLabel: modeInfo.label,
+    auditComplete: modeInfo.auditComplete !== false,
+    stopped: runtime.agentStopped === true,
+    stopShortcut: AGENT_STOP_SHORTCUT,
+    stopShortcutOk: runtime.agentStopShortcutOk !== false,
+    cdpPort: runtime.agentDebugPort,
+    allowCount: Array.isArray(policy.allow) ? policy.allow.length : 0,
+  };
+}
+
+function buildAgentDocPayload() {
+  const options = agentDocOptions();
+  return {
+    ok: true,
+    markdown: buildAgentDoc(options),
+    filename: agentDocFilename(Date.now()),
+    mode: options.mode,
+    port: options.port,
+    auditComplete: options.auditComplete,
+    stopped: options.stopped,
+  };
+}
+
+function registerAgentDocIpc() {
+  ipcMain.handle('nyx:agent:doc', () => {
+    try {
+      return buildAgentDocPayload();
+    } catch (err) {
+      diagnostics.error('AGENT_DOC_FAILED', 'agent 接入说明没能生成', {
+        error: err && err.message ? err.message : String(err),
+      });
+      return { ok: false, error: `接入说明没能生成：${err && err.message ? err.message : err}` };
+    }
+  });
+
+  ipcMain.handle('nyx:agent:doc-copy', async () => {
+    const payload = buildAgentDocPayload();
+    try {
+      await writeClipboardText(payload.markdown);
+    } catch (err) {
+      return { ok: false, error: err && err.message ? err.message : '系统剪贴板当前不可用，接入说明没能复制' };
+    }
+    // 写完回读一次：剪贴板被别的程序抢走时必须如实说失败，别让用户粘出别的东西
+    const back = await readClipboardText();
+    const head = payload.markdown.slice(0, 40);
+    if (typeof back !== 'string' || !back.includes(head)) {
+      diagnostics.warn('AGENT_DOC_COPY_VERIFY_FAILED', '接入说明复制后回读不一致', {
+        chars: payload.markdown.length,
+      });
+      return { ok: false, error: '系统剪贴板当前不可用（可能被其它程序占用），接入说明没能复制' };
+    }
+    diagnostics.info('AGENT_DOC_COPIED', '已复制 agent 接入说明', {
+      chars: payload.markdown.length,
+      mode: payload.mode,
+    });
+    return { ok: true, chars: payload.markdown.length, mode: payload.mode };
+  });
+
+  ipcMain.handle('nyx:agent:doc-save', () => {
+    const payload = buildAgentDocPayload();
+    try {
+      const target = dialog.showSaveDialogSync(runtime.mainWindow || undefined, {
+        title: '保存 agent 接入说明',
+        defaultPath: path.join(app.getPath('documents'), payload.filename),
+        filters: [{ name: 'Markdown', extensions: ['md'] }],
+      });
+      if (!target) return { ok: false, code: 'CANCELED', error: '已取消保存。' };
+      fs.writeFileSync(target, payload.markdown, 'utf8');
+      const bytes = fs.statSync(target).size;
+      diagnostics.info('AGENT_DOC_SAVED', '已保存 agent 接入说明', { bytes });
+      return { ok: true, path: target, bytes };
+    } catch (err) {
+      diagnostics.error('AGENT_DOC_SAVE_FAILED', 'agent 接入说明没能保存', {
+        error: err && err.message ? err.message : String(err),
+      });
+      return { ok: false, error: `没能保存：${err && err.message ? err.message : err}` };
+    }
+  });
 }
 
 /**

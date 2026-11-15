@@ -183,6 +183,10 @@ contextBridge.exposeInMainWorld('nyx', {
   digestPanel: (payload) => ipcRenderer.invoke('nyx:digest:panel', payload || {}),
   // 清单 A5：agent 状态面板（三色灯 + 最近动作 + 急停）
   agentPanel: (payload) => ipcRenderer.invoke('nyx:agent:panel', payload || {}),
+  // 清单 D1：按当前真实状态生成的接入说明（端点 / 鉴权 / 能做什么 / 会被拦什么 / 出错看哪）
+  agentDoc: () => ipcRenderer.invoke('nyx:agent:doc'),
+  agentDocCopy: () => ipcRenderer.invoke('nyx:agent:doc-copy'),
+  agentDocSave: () => ipcRenderer.invoke('nyx:agent:doc-save'),
   // 清单 A3：进程详情（PID 与系统任务管理器一致，可复制对照）
   processList: () => ipcRenderer.invoke('nyx:proc:list'),
   processCopy: (payload) => ipcRenderer.invoke('nyx:proc:copy', payload || {}),

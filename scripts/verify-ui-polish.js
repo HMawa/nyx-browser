@@ -3548,6 +3548,43 @@ async function main() {
       JSON.stringify(lampPanel),
     );
 
+    /* ---------- D1：接入说明能复制，且文案里带真实边界 ---------- */
+    const agentDoc = await settings.eval(`(async () => {
+      document.querySelector('.nav-item[data-sec="agent"]').click();
+      await new Promise((r) => setTimeout(r, 700));
+      const copy = document.getElementById('btn-agent-doc-copy');
+      const status = document.getElementById('agent-doc-status');
+      const badge = document.getElementById('agent-doc-badge');
+      if (!copy || !status) return { noUi: true };
+      const before = { badge: badge ? badge.textContent : '', copyHidden: copy.hidden };
+      copy.click();
+      let text = '';
+      for (let i = 0; i < 40; i += 1) {
+        await new Promise((r) => setTimeout(r, 250));
+        text = status.textContent || '';
+        if (/已复制|没能|不可用/.test(text)) break;
+      }
+      const res = await window.nyx.agentDoc();
+      return {
+        noUi: false,
+        before,
+        status: text,
+        chars: res && res.ok ? res.markdown.length : 0,
+        hasBoundary: res && res.ok
+          ? /只监听回环/.test(res.markdown) && /审计/.test(res.markdown)
+          : false,
+      };
+    })()`);
+    check(
+      '接入说明按当前状态生成，能一键复制，并写明「只监听回环」与审计边界（D1）',
+      agentDoc
+        && agentDoc.noUi !== true
+        && /已复制/.test(agentDoc.status)
+        && agentDoc.chars > 600
+        && agentDoc.hasBoundary === true,
+      JSON.stringify(agentDoc),
+    );
+
     /* ---------- 运行时无脚本异常 ---------- */
     const shellErrors = shell.exceptions();
     /* ---------- B3（设置页侧）：卡片 / 未勾确认被拦 / 勾选后可改可回 ---------- */

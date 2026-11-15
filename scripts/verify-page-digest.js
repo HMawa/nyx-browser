@@ -209,7 +209,8 @@ async function main() {
     assert.ok(main.includes("ipcMain.handle('nyx:digest:copy'"), '缺少 nyx:digest:copy');
     assert.ok(main.includes('digestDisabledPayload('), '未开启时必须返回明确原因');
     assert.ok(main.includes('summarizeNetwork('), '必须把抓包摘要一起给');
-    assert.ok(/registerAgentModeIpc\(\);\s*\n\s*registerDigestIpc\(\);/.test(main), 'registerIpc 里没调用 registerDigestIpc');
+    // 只要求"regIpc 里确实挂上了摘要这套"，不锁死与相邻注册函数的先后（那块每批都在加新 IPC）
+    assert.ok(/^\s*registerDigestIpc\(\);/m.test(main), 'registerIpc 里没调用 registerDigestIpc');
 
     const store = readFile('src/core/ui-store.js');
     assert.ok(/digestEnabled:\s*false/.test(store), '页面摘要默认必须是关闭的');

@@ -1,11 +1,11 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把三十个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把三十一个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
- *  2. scripts/verify-ui-polish.js（界面体验，133 项）
+ *  2. scripts/verify-ui-polish.js（界面体验，134 项）
  *  3. scripts/verify-link-guard.js（出站链路守卫，14 项；纯 Node，不启动 Electron）
  *  4. scripts/verify-downloads.js（下载链路，16 项；纯 Node，不启动 Electron）
  *  5. scripts/verify-gpu-policy.js（图形性能策略，14 项；纯 Node，不启动 Electron）
@@ -34,6 +34,7 @@
  * 28. scripts/verify-motion.js（动效档位：两档时长与缓动同源、减少动效时降级、按住有反馈、不做外发光，8 项；纯 Node，不启动 Electron）
  * 29. scripts/verify-onboard.js（首次安装引导：四种判定口径、选"先不定"不落盘、"全部默认"一步落盘、非法取值整组拒绝，10 项；纯 Node，不启动 Electron）
  * 30. scripts/verify-onboard-e2e.js（首次引导真机：全新安装弹一次、点默认后落盘并关窗、再启动与升级安装都不弹，7 项）
+ * 31. scripts/verify-agent-doc.js（agent 接入说明：端点来自运行时、两种模式边界、会被拦下的四种情况、复制回读，9 项；纯 Node，不启动 Electron）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -74,7 +75,7 @@ const STEPS = [
   {
     label: '界面体验回归',
     script: 'verify-ui-polish.js',
-    items: '133 项',
+    items: '134 项',
     timeoutMs: 360000,
   },
   {
@@ -249,6 +250,12 @@ const STEPS = [
     script: 'verify-onboard-e2e.js',
     items: '7 项',
     timeoutMs: 240000,
+  },
+  {
+    label: 'agent 接入说明回归',
+    script: 'verify-agent-doc.js',
+    items: '9 项',
+    timeoutMs: 60000,
   },
 ];
 
