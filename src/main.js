@@ -60,6 +60,8 @@ const {
 const sessions = require('./core/sessions');
 const { PrivacyHardening } = require('./core/privacy-hardening');
 const { buildCdpSteps, describeSurfaceFailure, shouldAttachSurface } = require('./core/privacy-surface');
+// IPC 发送方校验（安全审计 P1-5）：只认 Nyx 自己 renderer/ 下的本地页面
+const { decideIpcSender } = require('./core/ipc-guard');
 const { Vault } = require('./core/vault');
 const { ProxyService } = require('./core/proxy-service');
 const { TabManager, normalizeInput } = require('./core/tabs');
@@ -3804,7 +3806,93 @@ function openOnboardingWindow() {
   return win;
 }
 
+/* ------------------------------------------------------------------ */
+/* IPC 发送方校验（安全审计 P1-5）                                     */
+/* ------------------------------------------------------------------ */
+
+const RENDERER_FILE_PREFIX = pathToFileURL(`${path.join(__dirname, 'renderer')}${path.sep}`).href;
+
+/**
+ * 这几个通道的调用方本来就是"网页里的 preload"（密码库、表单记忆、标签配置），
+ * 所以不能按"只认 renderer/ 下的 file:// 页面"去卡；但它们仍然只接受最外层文档，
+ * 且 vault/forms 自己还会按 origin 隔离（那是第二层）。
+ */
+const PAGE_CONTEXT_CHANNELS = new Set([
+  'nyx:tab:config',
+  'nyx:vault:has',
+  'nyx:vault:fill',
+  'nyx:forms:save',
+  'nyx:forms:load',
+]);
+
+function checkIpcSender(event, channel) {
+  const frame = event && event.senderFrame ? event.senderFrame : null;
+  const url = frame && typeof frame.url === 'string' ? frame.url : '';
+  const isMainFrame = !frame || frame.parent == null;
+  if (PAGE_CONTEXT_CHANNELS.has(channel)) {
+    if (!isMainFrame) {
+      return {
+        ok: false,
+        code: 'SENDER_NOT_MAIN_FRAME',
+        error: '这个请求来自嵌入的子框架，已拒绝（Nyx 只接受最外层页面的请求）。',
+      };
+    }
+    return { ok: true };
+  }
+  const verdict = decideIpcSender({ url, isMainFrame, allowedPrefix: RENDERER_FILE_PREFIX });
+  if (!verdict.ok) return verdict;
+  return { ok: true };
+}
+
+/**
+ * 把 ipcMain 的三个注册口包一层：所有 handler 先过发送方校验。
+ * 用包装而不是"逐个 handler 手写检查"，是因为逐个写一定会漏（本项目已经有一百多个通道）。
+ */
+function installIpcSenderGuard() {
+  if (runtime.ipcGuardInstalled) return;
+  runtime.ipcGuardInstalled = true;
+  const rawHandle = ipcMain.handle.bind(ipcMain);
+  const rawOn = ipcMain.on.bind(ipcMain);
+  const rawOnce = ipcMain.once.bind(ipcMain);
+
+  const deny = (channel, verdict) => {
+    console.warn(`[Nyx] IPC 请求被拦下（${channel}，${verdict.code}）`);
+    try {
+      diagnostics.warn('IPC_SENDER_BLOCKED', verdict.error || '发送方不可信，已拒绝', {
+        channel,
+        code: verdict.code,
+      });
+    } catch {
+      /* 诊断没准备好也不影响拦截 */
+    }
+    return { ok: false, code: verdict.code, error: verdict.error };
+  };
+
+  ipcMain.handle = (channel, listener) =>
+    rawHandle(channel, (event, ...args) => {
+      const verdict = checkIpcSender(event, channel);
+      if (!verdict.ok) return deny(channel, verdict);
+      return listener(event, ...args);
+    });
+
+  const wrapEvented = (raw) => (channel, listener) =>
+    raw(channel, (event, ...args) => {
+      const verdict = checkIpcSender(event, channel);
+      if (!verdict.ok) {
+        // sendSync 必须回填 returnValue，否则发送方会一直等
+        if (event && event.returnValue === undefined) event.returnValue = deny(channel, verdict);
+        else deny(channel, verdict);
+        return;
+      }
+      listener(event, ...args);
+    });
+
+  ipcMain.on = wrapEvented(rawOn);
+  ipcMain.once = wrapEvented(rawOnce);
+}
+
 function registerIpc() {
+  installIpcSenderGuard();
   /* ---------------- 首次安装引导（清单 D2） ---------------- */  ipcMain.handle('nyx:onboard:state', () => ({
     ok: true,
     steps: ONBOARD_STEPS,

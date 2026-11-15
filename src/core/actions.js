@@ -30,6 +30,9 @@ const {
   summarizeReadPage,
 } = require('./page-reader');
 
+/** 导航上限（安全审计 P1-4）：超过这么久没完成就如实报超时，不让整条通道挂住 */
+const NAVIGATE_TIMEOUT_MS = 15000;
+
 const ACTION_TYPES = [
   'navigate',
   'readPage',
@@ -207,7 +210,31 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog, ge
         case 'navigate': {
           if (!params.url) return { ok: false, action: type, error: '缺少参数 url', elapsedMs: Date.now() - started };
           if (aborted()) return interrupted();
-          const result = await getTabManager().navigate(params.url);
+          // 安全审计 P1-4：导航要有上限。
+          // 以前 `await navigate()` 一直等加载完成——遇到不返回的站点、被系统吞掉的
+          // 请求、或者一个永远在重定向的页面，这一个动作就会把整条动作通道挂住，
+          // 后面的动作全部排队，用户只看到"agent 卡住了"。
+          const budget = Number.isFinite(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : NAVIGATE_TIMEOUT_MS;
+          let timer = null;
+          const timeout = new Promise((resolve) => {
+            timer = setTimeout(() => resolve({ __timeout: true }), budget);
+          });
+          let result;
+          try {
+            result = await Promise.race([getTabManager().navigate(params.url), timeout]);
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
+          if (result && result.__timeout) {
+            return {
+              ok: false,
+              action: type,
+              code: 'NAVIGATE_TIMEOUT',
+              error: `打开这个地址超过 ${Math.round(budget / 1000)} 秒还没完成（可能站点很慢、一直在跳转，或者网络断了）。地址本身已经交给浏览器，你可以稍后用 state / readPage 看看是否已经加载好。`,
+              url: params.url,
+              elapsedMs: Date.now() - started,
+            };
+          }
           return wrap(result.ok ? { ok: true, url: result.url } : { ok: false, error: result.error });
         }
 

@@ -408,6 +408,37 @@ async function main() {
     };
   });
 
+  // 安全审计 P1-4：导航必须有上限；空白页要能靠一次导航起步（不再被当成"没站点可授权"卡死）
+  await check('23. 导航有超时上限，空白页能靠一次导航起步（P1-4）', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const root = path.join(__dirname, '..');
+    const actionsSrc = fs.readFileSync(path.join(root, 'src', 'core', 'actions.js'), 'utf8');
+    const mainSrc = fs.readFileSync(path.join(root, 'src', 'main.js'), 'utf8');
+
+    const hasBudget = /const NAVIGATE_TIMEOUT_MS = \d+;/.test(actionsSrc);
+    const hasRace = /Promise\.race\(\[getTabManager\(\)\.navigate\(/.test(actionsSrc);
+    const hasCode = /NAVIGATE_TIMEOUT/.test(actionsSrc) && /还没完成/.test(actionsSrc);
+    const clears = /clearTimeout\(timer\)/.test(actionsSrc);
+
+    // 空白页起步：navigate 的判定按目标站点算（targetSite），因此空 host 也能放行一次
+    const authStart = mainSrc.indexOf('async function authorizeAgentAction');
+    const authFn = mainSrc.slice(authStart, authStart + 2600);
+    const blankBootstrap = /type === 'navigate' \? siteOfUrl\(params\.url\)/.test(authFn) && /const judgeSite = targetSite \|\| site;/.test(authFn);
+
+    const ok = hasBudget && hasRace && hasCode && clears && blankBootstrap;
+    return {
+      ok,
+      detail: {
+        导航上限常量: hasBudget,
+        与超时赛跑: hasRace,
+        超时有错误码与说明: hasCode,
+        记得清定时器: clears,
+        空白页按目标站点判定: blankBootstrap,
+      },
+    };
+  });
+
   // 附带打印一次能力清单，便于人工核对确认策略
   console.log('');
   console.log('[Nyx] 动作确认策略：');
