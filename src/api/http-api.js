@@ -6,10 +6,11 @@
  * 安全约束：
  *   1. 只监听 127.0.0.1，不接受外部网段连接；
  *   2. 非回环来源一律拒绝；
- *   3. 除 /health 外，所有请求必须携带正确的 Token（常量时间比较）。
+ *   3. 除 /health 的「存活探针」形态外，所有请求必须携带正确的 Token（常量时间比较）；
+ *      Token 只认请求头 x-nyx-token，不再接受 ?token= ——放在 URL 里会进日志、进历史、进代理。
  *
  * 端点：
- *   GET  /health                健康检查（免鉴权）
+ *   GET  /health                存活探针（不带 Token 时只说"活着"，带对 Token 才给版本号）
  *   GET  /state                 浏览器状态
  *   GET  /capabilities          能力清单（含哪些动作必须人工确认）
  *   POST /action                执行动作，body 为 { type, params }
@@ -104,6 +105,7 @@ function readBody(req) {
  */
 function startHttpApi({
   token,
+  version = '',
   dispatch,
   mode,
   privacy,
@@ -129,15 +131,20 @@ function startHttpApi({
       return sendJson(res, 400, { ok: false, error: '非法请求路径' });
     }
 
-    // 免鉴权端点
+    // 存活探针：不鉴权也能知道"它活着"，但不泄版本号、不泄配置；
+    // 带了正确 Token 才把真实版本号给出来（旧版这里硬编码 0.1.0，误导排障）。
     if (url.pathname === '/health') {
-      return sendJson(res, 200, { ok: true, name: 'Nyx', version: '0.1.0', ts: Date.now() });
+      const probe = req.headers['x-nyx-token'] || '';
+      const trusted = safeEqual(probe, token);
+      const body = { ok: true, name: 'Nyx', ts: Date.now() };
+      if (trusted) body.version = version || null;
+      return sendJson(res, 200, body);
     }
 
-    // Token 鉴权
-    const provided = req.headers['x-nyx-token'] || url.searchParams.get('token') || '';
+    // Token 鉴权：只认请求头。URL 里带 Token 会被历史、日志、代理各留一份。
+    const provided = req.headers['x-nyx-token'] || '';
     if (!safeEqual(provided, token)) {
-      return sendJson(res, 401, { ok: false, error: 'Token 无效' });
+      return sendJson(res, 401, { ok: false, error: 'Token 无效（请放在 x-nyx-token 请求头里）' });
     }
 
     if (url.pathname === '/state' && req.method === 'GET') {

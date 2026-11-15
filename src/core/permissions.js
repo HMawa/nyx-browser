@@ -78,11 +78,14 @@ const NORMAL_BASELINE = {
   // 无隐私含义、且弹窗会打扰使用的，直接放行
   fullscreen: ALLOW,
   'clipboard-sanitized-write': ALLOW,
-  'storage-access': ALLOW,
   openExternal: ASK,
+  // 跨站读存储 / 摆布窗口：正常模式也改成询问。
+  // 前者等于让别的站点读这一站的 Cookie 与存储，后者能让网页挪动你的窗口；
+  // 都不是"打开网页就该给"的能力（安全审计 P2）。
+  'storage-access': ASK,
+  'window-management': ASK,
   // 风险高且极少有人真心需要，正常模式也给拒绝
   midiSysex: DENY,
-  'window-management': ALLOW,
 };
 
 /** 全隐私模式基线：默认全拒，只留与隐私无关的两项 */

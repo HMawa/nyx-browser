@@ -9542,10 +9542,23 @@ async function askAgentSiteTrust(input) {
  * 权限判定 = 站点三层授权（清单 E）。
  * 注意：**站点放行不等于动作放行**——确认规则（输入、下载）在通道里独立执行，白名单不豁免。
  */
+
+/** 隐私模式下直接拒绝的 agent 动作（安全审计 P2）：它们天生就是"把页面内容带出去" */
+const PRIVATE_MODE_AGENT_BLOCKED = new Set(['screenshot', 'readPage']);
 async function authorizeAgentAction(action, ctx) {
   const type = action && action.type ? action.type : '';
   const site = (ctx && ctx.site) || '';
   const params = (action && action.params) || {};
+  // 安全审计 P2：隐私模式下不许 agent 截图或读页面。
+  // 这两类动作的意义就是"把页面内容拿出来"，而隐私模式的承诺是"这一页不留痕"——
+  // 内容一旦进了 agent 的上下文与留痕，承诺就不成立了。要读就退出隐私模式再读。
+  if (PRIVATE_MODE_AGENT_BLOCKED.has(type) && sessions.getMode() === 'private') {
+    return {
+      decision: 'deny',
+      reason: '隐私模式下不允许 agent 截图或读取页面内容：它会离开"这一页不留痕"的范围。退出隐私模式再做。',
+      rule: 'private-mode',
+    };
+  }
   // 安全审计 P1-3：navigate 要按「要去的地方」判定，不是按「现在在哪」判定。
   // 以前 authorize 拿到的是当前页 host，于是"在已信任的站点上让 agent 跳到屏蔽站点"
   // 会被放行——屏蔽名单对 navigate 形同不存在。
@@ -10969,6 +10982,8 @@ async function startLocalApi() {
 
   runtime.apiServer = await startHttpApi({
     token: runtime.apiToken,
+    // 版本号取真实的 app 版本（旧版 /health 里硬编码 0.1.0，排障时误导人）
+    version: app.getVersion(),
     // 只传通道，不传执行器：执行器从这里拿不到，绕不过权限与留痕
     dispatch: (action) => runtime.agentDispatcher.dispatch(action),
     mode: modeControl,

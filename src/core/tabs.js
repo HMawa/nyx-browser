@@ -17,6 +17,8 @@ const { WebContentsView } = require('electron');
 const { describeLoadError } = require('./diagnostics');
 // 清单 A3：给每个视图挂上可辨识的身份参数（任务管理器「命令行」列可见）
 const { buildTabProcessArgs, mergeAdditionalArguments } = require('./process-args');
+// 安全审计 P2：普通模式不再用 Electron 默认 UA（那个 UA 会自报 Nyx/Electron 与版本）
+const { normalUserAgent } = require('./user-agent');
 // 标签生命周期（清单 G）：休眠判定与文案。判定在纯函数里，执行（释放 / 重建视图）在这边，
 // 两边用同一份判定，避免"判定说该睡、执行说没睡"的分裂。
 const {
@@ -419,6 +421,9 @@ class TabManager {
       nodeIntegration: false,
       sandbox: true,
       spellcheck: false,
+      // 安全审计 P2：普通模式的 UA 只报真实内核，不报 Nyx/Electron。
+      // 隐私模式会被 attachPrivacySurface() 用画像里的 UA 覆盖（那边口径更强）。
+      ...(mode === 'private' ? {} : { userAgent: normalUserAgent() }),
     };
     // 登记到外壳防护现值表（清单 C3）：远端内容窗口必须沙箱 + 隔离 + 无 Node 能力
     this.onSecurityWindow('tab', webPreferences);
