@@ -103,8 +103,60 @@ check(
   JSON.stringify({ wired: true }),
 );
 
+// 5. executeJS 的留痕只记摘要，不记正文
+const dispatch = require(path.join(ROOT, 'src', 'core', 'agent-dispatch.js'));
+const codeA = 'document.querySelector("input[type=password]").value';
+const paramsA = dispatch.redactParams('executeJS', { code: codeA });
+const paramsB = dispatch.redactParams('executeJS', { code: `${codeA} + "x"` });
+check(
+  'executeJS 的留痕只记长度与 sha256，不再抄一段脚本正文（P2）',
+  paramsA.codeLength === codeA.length &&
+    /^[0-9a-f]{64}$/.test(paramsA.codeSha256 || '') &&
+    !('codeHead' in paramsA) &&
+    paramsB.codeSha256 !== paramsA.codeSha256 &&
+    dispatch.sha256Of(codeA) === paramsA.codeSha256,
+  JSON.stringify({ len: paramsA.codeLength, sha: String(paramsA.codeSha256).slice(0, 12) }),
+);
+
+check(
+  '留痕里不会出现脚本原文（拿一段明显的密码去跑，全文里也不许出现）（P2）',
+  !JSON.stringify(paramsA).includes('password') && paramsA.codeSha256 !== codeA,
+  JSON.stringify({ leaked: JSON.stringify(paramsA).includes('password') }),
+);
+
+// 6. 诊断包只能导出到「下载」或「临时」目录
+check(
+  '诊断包只许导出到「下载」/「临时」目录，且必须是 .zip（P2）',
+  /EXPORT_PATH_NOT_ALLOWED/.test(mainSrc) &&
+    /\['downloads', 'temp'\]/.test(mainSrc) &&
+    /EXPORT_BAD_EXTENSION/.test(mainSrc) &&
+    /!rel\.startsWith\('\.\.'\)/.test(mainSrc),
+  JSON.stringify({ wired: true }),
+);
+
+// 7. Electron fuses 在 afterPack 里焊死（签名之前）
+const afterPackSrc = fs.readFileSync(path.join(ROOT, 'build', 'after-pack.js'), 'utf8');
+check(
+  'afterPack 焊死 RunAsNode / NODE_OPTIONS / --inspect，并只从 app.asar 加载（P1-6）',
+  /require\('@electron\/fuses'\)/.test(afterPackSrc) &&
+    /\[FuseV1Options\.RunAsNode\]: false/.test(afterPackSrc) &&
+    /\[FuseV1Options\.EnableNodeOptionsEnvironmentVariable\]: false/.test(afterPackSrc) &&
+    /\[FuseV1Options\.EnableNodeCliInspectArguments\]: false/.test(afterPackSrc) &&
+    /\[FuseV1Options\.OnlyLoadAppFromAsar\]: true/.test(afterPackSrc) &&
+    /await flipSecurityFuses\(context\);/.test(afterPackSrc) &&
+    afterPackSrc.indexOf('flipSecurityFuses(context)') < afterPackSrc.indexOf("const manifestPath"),
+  JSON.stringify({ wired: true }),
+);
+
+// 8. 包内冒烟会把「exe 还能当 Node 用」当成失败（唯一能证明开关真翻了的检查）
+const smokeSrc = fs.readFileSync(path.join(ROOT, 'scripts', 'verify-packaged-smoke.js'), 'utf8');
+check(
+  '包内冒烟真的去试 ELECTRON_RUN_AS_NODE，而不是只查配置（P1-6）',
+  /NYX_FUSE_LEAK/.test(smokeSrc) && /ELECTRON_RUN_AS_NODE: '1'/.test(smokeSrc),
+  JSON.stringify({ wired: true }),
+);
+
 const failed = checks.filter((c) => !c.ok);
-console.log('');
 if (failed.length) {
   console.log(`[验证] 共 ${checks.length} 项，通过 ${checks.length - failed.length} 项，失败 ${failed.length} 项`);
   for (const item of failed) console.log(`  · 失败项：${item.name}`);

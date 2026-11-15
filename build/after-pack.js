@@ -31,6 +31,48 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { flipFuses, FuseVersion, FuseV1Options } = require('@electron/fuses');
+
+/**
+ * 安全审计 P1-6：把 Electron 的「调试/旁路」开关焊死。
+ *
+ * 默认的 Electron 可执行文件认 ELECTRON_RUN_AS_NODE=1（把自己当成 node 跑任意脚本）、
+ * 认 NODE_OPTIONS（可预加载代码）、认 --inspect（可挂调试器）。
+ * 对一个浏览器来说这三条都属于"安装包自带的后门"：能改安装目录的程序
+ * 可以借此在用户毫无察觉的情况下跑自己的代码。翻掉它们之后这些入口直接失效。
+ *
+ * 注意：必须放在 afterPack（签名之前）——签名之后再改字节，签名立刻失效。
+ *
+ * `EnableEmbeddedAsarIntegrityValidation` 暂时不开：它要求 asar 里带一枚
+ * 由构建流程写入的完整性标记，electron-builder 这条链路默认不写；
+ * 贸然开启会让装了也起不来。这一条在台账里记为"未做，原因是会砸掉启动"。
+ */
+const FUSE_FLAGS = {
+  [FuseV1Options.RunAsNode]: false,
+  [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
+  [FuseV1Options.EnableNodeCliInspectArguments]: false,
+  [FuseV1Options.OnlyLoadAppFromAsar]: true,
+};
+
+async function flipSecurityFuses(context) {
+  const productName = (() => {
+    try {
+      return String(context.packager.appInfo.productFilename || 'Nyx');
+    } catch {
+      return 'Nyx';
+    }
+  })();
+  const exePath = path.join(context.appOutDir, `${productName}.exe`);
+  if (!fs.existsSync(exePath)) {
+    // 非 Windows 目标不适用；本项目只发 Windows 安装包
+    console.log(`[Nyx] 跳过 fuses：未找到可执行文件（${exePath}）`);
+    return;
+  }
+  await flipFuses(exePath, { version: FuseVersion.V1, ...FUSE_FLAGS });
+  console.log(
+    `[Nyx] fuses 已焊死：RunAsNode / NODE_OPTIONS / --inspect 全部关闭，只从 app.asar 加载（${path.basename(exePath)}）`,
+  );
+}
 
 /** 清单文件名（放在 resources 目录下） */
 const MANIFEST_NAME = 'integrity.json';
@@ -95,6 +137,9 @@ function collectTree(resourcesDir, relativeDir, output) {
  * @param {import('electron-builder').AfterPackContext} context 打包上下文
  */
 module.exports = async function afterPack(context) {
+  // 先翻 fuses 再写清单：清单只覆盖 resources/，但顺序保持"先改动产物、再记录产物"的直觉
+  await flipSecurityFuses(context);
+
   const resourcesDir = path.join(context.appOutDir, 'resources');
   if (!fs.existsSync(resourcesDir)) {
     // 非 Windows 目标（例如 mac 的 Contents/Resources 结构）不适用本清单，

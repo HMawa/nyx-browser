@@ -132,6 +132,24 @@ async function main() {
     return;
   }
 
+  // 安全审计 P1-6：fuses 焊死之后，包内 exe 不能再被当作 Node 使用。
+  // 这是唯一能真正证明"开关确实翻了"的办法——查文档/查配置都可能是假的。
+  {
+    const nodeEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' };
+    const asNode = spawnSync(EXE, ['-e', 'console.log("NYX_FUSE_LEAK")'], {
+      env: nodeEnv,
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 60000,
+    });
+    const output = `${asNode.stdout || ''}${asNode.stderr || ''}`;
+    check(
+      'ELECTRON_RUN_AS_NODE 被 fuses 焊死：包内 exe 不再把自己当 Node 跑脚本（P1-6）',
+      !output.includes('NYX_FUSE_LEAK'),
+      `exit=${asNode.status}，输出长度 ${output.trim().length}`,
+    );
+  }
+
   fs.mkdirSync(userData, { recursive: true });
   PORT = await pickFreePort();
 

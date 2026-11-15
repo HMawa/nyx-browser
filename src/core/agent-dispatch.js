@@ -18,8 +18,18 @@
  * 授权名单都由调用方注入（E 与 D 分别替换 confirm 与 audit 两个注入点）。
  */
 
-const DISPATCH_TYPES = [
-  'navigate',
+const crypto = require('node:crypto');
+
+/**
+ * 摘要一段文本，用在留痕里替代正文（安全审计 P2）。
+ * 只留摘要的好处：事后能核对"是不是同一段脚本"，但不会把页面上的密码抄进日志。
+ */
+function sha256Of(text) {
+  if (typeof text !== 'string' || !text) return '';
+  return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+const DISPATCH_TYPES = [  'navigate',
   'readPage',
   'screenshot',
   'click',
@@ -163,9 +173,12 @@ function redactParams(type, params) {
         maxElements: Number.isFinite(source.maxElements) ? source.maxElements : 0,
       };
     case 'executeJS':
+      // 安全审计 P2：审计里不记脚本正文，只记长度与摘要。
+      // 正文里完全可能写着页面上的密码、token、私人数据——留痕是给"事后核对谁做了什么"
+      // 用的，不是给"再抄一遍隐私内容"用的。要看正文请当事人在当场看确认框。
       return {
         codeLength: typeof source.code === 'string' ? source.code.length : 0,
-        codeHead: typeof source.code === 'string' ? source.code.slice(0, 60) : '',
+        codeSha256: sha256Of(source.code),
       };
     case 'extractText':
       return {
@@ -684,4 +697,5 @@ module.exports = {
   redactText,
   redactUrl,
   requiresConfirmation,
+  sha256Of,
 };

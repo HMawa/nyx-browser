@@ -4014,6 +4014,34 @@ function registerIpc() {
     const options = payload || {};
     let destPath = options.path ? path.resolve(String(options.path)) : '';
 
+    if (destPath) {
+      // 安全审计 P2：自动化通道只许写进"用户自己也会用的地方"（下载目录/临时目录）。
+      // 以前这里接受任意绝对路径 —— 一个被诱导的界面就能把诊断包写到启动目录之类的位置。
+      const allowedRoots = ['downloads', 'temp']
+        .map((name) => {
+          try {
+            return path.resolve(app.getPath(name));
+          } catch {
+            return '';
+          }
+        })
+        .filter(Boolean);
+      const inside = allowedRoots.some((root) => {
+        const rel = path.relative(root, destPath);
+        return rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+      });
+      if (!inside) {
+        return {
+          ok: false,
+          code: 'EXPORT_PATH_NOT_ALLOWED',
+          error: `诊断包只能导出到「下载」或「临时」目录（当前请求写到 ${destPath}）。手动导出时请在保存对话框里选位置。`,
+        };
+      }
+      if (!/\.zip$/i.test(destPath)) {
+        return { ok: false, code: 'EXPORT_BAD_EXTENSION', error: '诊断包必须是 .zip 文件。' };
+      }
+    }
+
     if (!destPath) {
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const result = await dialog.showSaveDialog(runtime.mainWindow || undefined, {
