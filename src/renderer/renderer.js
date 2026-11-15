@@ -27,6 +27,17 @@ const els = {
   // agent 接入模式（A）：外部接入时这条标识常驻
   agentModeFlag: document.getElementById('agent-mode-flag'),
   agentModeText: document.getElementById('agent-mode-text'),
+  // agent 状态灯与窄面板（A5）
+  agentLamp: document.getElementById('btn-agent-lamp'),
+  agentLampDot: document.getElementById('agent-lamp-dot'),
+  agentPanel: document.getElementById('agent-panel'),
+  agentPanelLamp: document.getElementById('agent-panel-lamp'),
+  agentPanelTitle: document.getElementById('agent-panel-title'),
+  agentPanelText: document.getElementById('agent-panel-text'),
+  agentPanelList: document.getElementById('agent-panel-list'),
+  agentPanelClose: document.getElementById('agent-panel-close'),
+  agentPanelStop: document.getElementById('agent-panel-stop'),
+  agentPanelSettings: document.getElementById('agent-panel-settings'),
   // 断网提示（G 离线/在线）
   netOfflineFlag: document.getElementById('net-offline-flag'),
   netOfflineText: document.getElementById('net-offline-text'),
@@ -1029,6 +1040,24 @@ function applyAgentStatus(payload) {
     els.agentStop.dataset.auditKept = String(audit.kept);
   }
   applyAgentModeFlag(payload && payload.modeInfo);
+  applyAgentLamp(payload && payload.lamp);
+}
+
+/**
+ * 三色状态灯（清单 A5）。
+ *
+ * 只回答一个问题：现在有没有人正在动这个浏览器。所以
+ * 灰 = 没接入（接口关着或已紧急停止）、金 = 接入了但空闲、红 = 有动作正在执行。
+ * 点灯打开窄面板，看最近动作与就地急停。
+ */
+function applyAgentLamp(lamp) {
+  const info = lamp || null;
+  const level = info && info.level ? info.level : 'off';
+  if (els.agentLampDot) els.agentLampDot.className = `agent-lamp-dot is-${level}`;
+  if (!els.agentLamp) return;
+  els.agentLamp.dataset.level = level;
+  els.agentLamp.title = `agent 状态：${(info && info.label) || '没有 agent 接入'}`;
+  els.agentLamp.setAttribute('aria-label', els.agentLamp.title);
 }
 
 /**
@@ -1343,6 +1372,112 @@ function closeDigestPanel() {
   syncDigestLayout(false);
 }
 
+/**
+ * agent 状态窄面板（清单 A5）。
+ *
+ * 之所以也走"让位"而不是浮在海报上：标签页是 WebContentsView，永远画在外壳 DOM
+ * 之上，任何贴右边的浮层都会被压住一半。让标签视图把宽度让出来才是真可见。
+ */
+const AGENT_LAMP_LABELS = {
+  off: '没有 agent 接入',
+  ready: 'agent 已接入，当前空闲',
+  busy: 'agent 正在操作这个浏览器',
+};
+/** 面板开着时的复核定时器（灯只有几秒生命，不刷新会停在旧状态） */
+let agentPanelTimer = null;
+
+function renderAgentPanel(res) {
+  const data = res || {};
+  const lamp = data.lamp || null;
+  const level = lamp && lamp.level ? lamp.level : 'off';
+  if (els.agentPanelLamp) els.agentPanelLamp.className = `agent-panel-lamp is-${level}`;
+  if (els.agentPanelTitle) els.agentPanelTitle.textContent = AGENT_LAMP_LABELS[level] || 'agent 状态';
+  if (els.agentPanelText) {
+    const lines = [];
+    if (lamp && lamp.text) lines.push(lamp.text);
+    if (data.auditComplete === false) lines.push('当前是外部接入模式：审计只看得到经过浏览器的部分。');
+    if (data.stopped === true) lines.push('已紧急停止：点下面的按钮才会重新放行。');
+    els.agentPanelText.textContent = lines.join('\n');
+  }
+  if (els.agentPanelStop) {
+    els.agentPanelStop.textContent = data.stopped === true ? '恢复 agent' : '紧急停止';
+    els.agentPanelStop.classList.toggle('is-resume', data.stopped === true);
+  }
+  if (els.agentPanelList) {
+    const rows = Array.isArray(data.recent) ? data.recent : [];
+    els.agentPanelList.replaceChildren(...rows.map((row) => {
+      const li = document.createElement('li');
+      li.className = 'agent-panel-item';
+      const when = String(row.time || '').replace('T', ' ').slice(0, 19);
+      const type = row.type || '动作';
+      const site = row.site ? ` · ${row.site}` : '';
+      const tag = row.decision === 'deny' ? '（被拒）' : row.ok === false ? '（失败）' : '';
+      li.textContent = `${when}  ${type}${site}${tag}`;
+      if (row.decision === 'deny' || row.ok === false) li.classList.add('is-blocked');
+      return li;
+    }));
+    if (!rows.length) {
+      const li = document.createElement('li');
+      li.className = 'agent-panel-item is-empty';
+      li.textContent = '还没有动作记录。';
+      els.agentPanelList.replaceChildren(li);
+    }
+  }
+  if (els.agentLampDot) els.agentLampDot.className = `agent-lamp-dot is-${level}`;
+  if (els.agentLamp) {
+    els.agentLamp.dataset.level = level;
+    els.agentLamp.title = `agent 状态：${(lamp && lamp.label) || AGENT_LAMP_LABELS.off}`;
+  }
+}
+
+async function syncAgentPanelLayout(open) {
+  if (!window.nyx.agentPanel) return null;
+  try {
+    const res = await window.nyx.agentPanel({ open: !!open });
+    if (els.agentPanel && res && res.open) {
+      const shift = res.toolboxOpen ? Number(res.toolboxWidth) || 0 : 0;
+      els.agentPanel.style.right = shift ? `${(Number(res.gap) || 14) + shift + 8}px` : '';
+      els.agentPanel.classList.toggle('is-beside-toolbox', Boolean(shift));
+    } else if (els.agentPanel) {
+      els.agentPanel.style.right = '';
+      els.agentPanel.classList.remove('is-beside-toolbox');
+    }
+    return res || null;
+  } catch (err) {
+    return null;
+  }
+}
+
+async function openAgentPanel() {
+  if (!els.agentPanel) return;
+  els.agentPanel.hidden = false;
+  if (els.agentLamp) els.agentLamp.setAttribute('aria-expanded', 'true');
+  const res = await syncAgentPanelLayout(true);
+  renderAgentPanel(res);
+  // 面板开着时每 3 秒复核一次：灯会过期（4 秒窗口），不刷新就会一直停在"正在被驱动"
+  if (agentPanelTimer) clearInterval(agentPanelTimer);
+  agentPanelTimer = setInterval(() => {
+    if (!els.agentPanel || els.agentPanel.hidden) return;
+    window.nyx.agentPanel({ open: true }).then(renderAgentPanel).catch(() => {});
+  }, 3000);
+}
+
+function closeAgentPanel() {
+  if (els.agentPanel) els.agentPanel.hidden = true;
+  if (els.agentLamp) els.agentLamp.setAttribute('aria-expanded', 'false');
+  if (agentPanelTimer) {
+    clearInterval(agentPanelTimer);
+    agentPanelTimer = null;
+  }
+  syncAgentPanelLayout(false);
+}
+
+function toggleAgentPanel() {
+  if (!els.agentPanel) return;
+  if (els.agentPanel.hidden) openAgentPanel();
+  else closeAgentPanel();
+}
+
 async function runDigest() {
   if (!window.nyx.digestRun) {
     setDigestStatus('当前内核不支持页面摘要。', 'warn');
@@ -1434,7 +1569,30 @@ if (els.digestClose) els.digestClose.addEventListener('click', closeDigestPanel)
 // 工具箱开合/换宽度时，摘要面板跟着挪（清单 A2：两边都贴右边，必须并排避让）
 window.addEventListener('nyx:toolbox-layout', () => {
   if (els.digestPanel && !els.digestPanel.hidden) syncDigestLayout(true);
+  if (els.agentPanel && !els.agentPanel.hidden) syncAgentPanelLayout(true);
 });
+
+// agent 状态灯与窄面板（A5）：点灯开合，面板里只放"看"和"急停"，改配置回设置页
+if (els.agentLamp) els.agentLamp.addEventListener('click', () => { toggleAgentPanel(); });
+if (els.agentPanelClose) els.agentPanelClose.addEventListener('click', closeAgentPanel);
+if (els.agentPanelStop) {
+  els.agentPanelStop.addEventListener('click', async () => {
+    els.agentPanelStop.disabled = true;
+    try {
+      await toggleAgentStop();
+      const res = await window.nyx.agentPanel({ open: true });
+      renderAgentPanel(res);
+    } finally {
+      els.agentPanelStop.disabled = false;
+    }
+  });
+}
+if (els.agentPanelSettings) {
+  els.agentPanelSettings.addEventListener('click', () => {
+    closeAgentPanel();
+    if (window.nyx.openSettings) window.nyx.openSettings({ section: 'agent' });
+  });
+}
 if (els.digestRun) els.digestRun.addEventListener('click', () => { runDigest(); });
 if (els.digestCopy) els.digestCopy.addEventListener('click', () => { copyDigest(); });
 if (els.digestExport) els.digestExport.addEventListener('click', () => { exportDigest('md'); });

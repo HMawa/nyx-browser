@@ -101,6 +101,7 @@ const {
   planAgentModeSwitch,
   readAgentModeFromPrefs,
 } = require('./core/agent-mode');
+const { ACTIVE_MS: AGENT_LAMP_ACTIVE_MS, decideLamp, describeLamp } = require('./core/agent-lamp');
 const {
   buildDigestCsv,
   buildDigestMarkdown,
@@ -578,6 +579,10 @@ const runtime = {
   toolboxWidth: 460,
   /** 摘要面板是否展开（清单 A2）：展开时标签视图同样要让出右侧宽度 */
   digestOpen: false,
+  /** agent 状态面板是否展开（清单 A5）：和摘要面板共用让位机制 */
+  agentPanelOpen: false,
+  /** 最近一次动作执行的截止时间（清单 A5）：三色灯只在"正在被驱动"时亮 */
+  agentDrivingUntil: 0,
 };
 
 /**
@@ -2246,11 +2251,22 @@ const DIGEST_PANEL_GAP = 14;
  * 用户看到的是「摘要被遮」。现在两边各自占的宽度都从这里算，标签视图一起让开，
  * 页面对应的那块区域跟着变窄——不遮，也不叠。
  */
+/** agent 状态面板宽度（清单 A5）：面板本体 280 + 右边距 14 + 8 呼吸位 */
+const AGENT_PANEL_W = 302;
+
+/**
+ * 右侧被界面占掉的宽度（清单 A2 / A5）。
+ *
+ * 摘要面板、agent 状态面板与工具箱都贴右边，以前只把工具箱算进去：面板一展开就被
+ * 标签页压住，用户看到的是「被遮」。现在各自占的宽度都从这里算，标签视图一起让开，
+ * 页面对应的那块区域跟着变窄——不遮，也不叠。
+ */
 function applyRightInsets() {
   if (!runtime.tabManager) return 0;
   const toolbox = runtime.toolboxOpen ? runtime.toolboxWidth : 0;
   const digest = runtime.digestOpen ? DIGEST_PANEL_W : 0;
-  const total = toolbox + digest;
+  const agent = runtime.agentPanelOpen ? AGENT_PANEL_W : 0;
+  const total = toolbox + digest + agent;
   runtime.tabManager.setRightInset(total);
   return total;
 }
@@ -9259,6 +9275,11 @@ function touchAgentSession(record) {
   const manager = runtime.tabManager;
   if (!manager) return;
   const stage = record && record.stage;
+  // 清单 A5：只有"真的在执行动作"才点亮状态灯。authorize/confirm 是在问人，
+  // result/observe 是回执——把它们算进"正在被驱动"会让灯一直亮着，灯就没意义了。
+  if (stage === 'execute') {
+    runtime.agentDrivingUntil = Date.now() + AGENT_LAMP_ACTIVE_MS;
+  }
   // authorize/confirm 还没真正碰页面，只有真的执行或观察到动作才续命
   if (stage === 'execute' || stage === 'result' || stage === 'observe') {
     manager.markAgentDriven(undefined, AGENT_KEEP_AWAKE_MS);
@@ -9270,6 +9291,40 @@ function touchAgentSession(record) {
     }, AGENT_SESSION_IDLE_MS);
     if (typeof runtime.agentSessionTimer.unref === 'function') runtime.agentSessionTimer.unref();
   }
+}
+
+/**
+ * 状态灯快照（清单 A5）。
+ *
+ * 「有没有 agent 接入」看本地接口是否在听；「是不是正在被驱动」只看
+ * `runtime.agentDrivingUntil`——那是 execute 阶段打的时间戳，几秒就过期。
+ * 「审计不完整」是另一件事，由 modeInfo / 外壳常驻标识负责，不混进灯里。
+ */
+function buildAgentLamp() {
+  const api = runtime.localApi;
+  const listening = Boolean(api && api.listening);
+  let lastAction = '';
+  if (runtime.agentAudit) {
+    const listed = runtime.agentAudit.list({ limit: 1 });
+    const row = listed && listed.rows && listed.rows[0];
+    if (row) {
+      const when = row.time || '';
+      const what = row.type || '动作';
+      const where = row.site ? ` @ ${row.site}` : '';
+      lastAction = `${when} ${what}${where}`.trim();
+    }
+  }
+  return describeLamp(
+    decideLamp({
+      agentStopped: runtime.agentStopped === true,
+      enabled: listening,
+      drivingUntil: runtime.agentDrivingUntil || 0,
+    }),
+    {
+      lastAction,
+      auditComplete: (runtime.agentMode || 'builtin') === 'builtin',
+    },
+  );
 }
 
 /** 急停状态快照：界面角标、设置页、诊断都读这一份 */
@@ -9287,6 +9342,8 @@ function agentStatusPayload() {
     modeInfo: agentModeStatus(),
     channel: inner || null,
     audit: runtime.agentAudit ? runtime.agentAudit.stats() : null,
+    // 清单 A5：三色灯（未接入 / 空闲 / 正在被驱动）
+    lamp: buildAgentLamp(),
   };
 }
 
@@ -10137,6 +10194,39 @@ function registerDigestIpc() {
       toolboxOpen: runtime.toolboxOpen,
       toolboxWidth: runtime.toolboxOpen ? runtime.toolboxWidth : 0,
       inset,
+    };
+  });
+
+  // agent 状态面板（清单 A5）：和摘要面板一样贴右边、同样让标签视图让位。
+  // 返回体里带三色灯、最近几条动作、急停状态，界面一次拿全，不用拼三个请求。
+  ipcMain.handle('nyx:agent:panel', async (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    if (typeof input.open === 'boolean') {
+      runtime.agentPanelOpen = input.open;
+      applyRightInsets();
+    }
+    let recent = [];
+    if (runtime.agentAudit) {
+      const listed = runtime.agentAudit.list({ limit: 5 });
+      recent = (listed && listed.rows ? listed.rows : []).map((row) => ({
+        time: row.time || '',
+        type: row.type || '',
+        site: row.site || '',
+        decision: row.decision || '',
+        ok: row.ok !== false,
+      }));
+    }
+    return {
+      ok: true,
+      open: runtime.agentPanelOpen === true,
+      width: runtime.agentPanelOpen ? AGENT_PANEL_W : 0,
+      gap: DIGEST_PANEL_GAP,
+      lamp: buildAgentLamp(),
+      stopped: runtime.agentStopped === true,
+      stopShortcut: AGENT_STOP_SHORTCUT,
+      auditComplete: (runtime.agentMode || 'builtin') === 'builtin',
+      recent,
+      inset: applyRightInsets(),
     };
   });
 

@@ -2218,8 +2218,7 @@ body.private-mode .shell {
   top: 94px;
   right: 14px;
   bottom: 14px;
-  width: min(380px, calc(100vw - 28px));
-  display: flex;
+  width: min(380px, calc(100vw - 28px));  display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 14px 16px;
@@ -2728,6 +2727,148 @@ body.private-mode .shell {
 
   .pe-actions .tb-btn,
   .pe-link {
+    transition: none;
+  }
+}
+
+/* ---------- agent 状态灯与窄面板（清单 A5，v1.17.9） ---------- */
+
+.agent-lamp {
+  position: relative;
+  width: 26px;
+  padding: 0;
+}
+
+.agent-lamp-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  transition: background-color 0.2s, box-shadow 0.2s;
+}
+
+/* 灰：没接入；金：接入了但空闲；红：有动作正在执行 */
+.agent-lamp-dot.is-ready {
+  background: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.agent-lamp-dot.is-busy {
+  background: var(--danger);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 26%, transparent);
+}
+
+.agent-panel {
+  position: fixed;
+  top: 94px;
+  right: 14px;
+  width: min(280px, calc(100vw - 28px));
+  max-height: calc(100vh - 120px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--bg-tab);
+  box-shadow: 0 24px 60px -30px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+  z-index: 40;
+}
+
+.agent-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-panel-lamp {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--text-faint);
+}
+
+.agent-panel-lamp.is-ready {
+  background: var(--accent);
+}
+
+.agent-panel-lamp.is-busy {
+  background: var(--danger);
+}
+
+.agent-panel-title {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.agent-panel-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  white-space: pre-line;
+}
+
+.agent-panel-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.agent-panel-actions .tb-btn {
+  flex: 1 1 0;
+}
+
+.agent-panel-sub {
+  margin: 2px 0 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-faint);
+}
+
+.agent-panel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-panel-item {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  padding: 4px 6px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--bg-input) 60%, transparent);
+  word-break: break-all;
+}
+
+.agent-panel-item.is-blocked {
+  color: var(--danger-soft);
+}
+
+.agent-panel-item.is-empty {
+  color: var(--text-faint);
+  background: none;
+}
+
+.agent-lamp:focus-visible,
+.agent-panel .tb-btn:focus-visible,
+.agent-panel-close:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+  box-shadow: var(--ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-lamp-dot {
     transition: none;
   }
 }

@@ -3378,6 +3378,53 @@ async function main() {
       JSON.stringify(followMode),
     );
 
+    /* ---------- agent 状态灯与窄面板（A5） ---------- */
+    const lampPanel = await shell.eval(`(async () => {
+      const lampBtn = document.getElementById('btn-agent-lamp');
+      const dot = document.getElementById('agent-lamp-dot');
+      const panel = document.getElementById('agent-panel');
+      if (!lampBtn || !dot || !panel) return { noUi: true };
+
+      const before = { level: dot.className, expanded: lampBtn.getAttribute('aria-expanded'), hidden: panel.hidden };
+      lampBtn.click();
+      await new Promise((r) => setTimeout(r, 700));
+
+      const open = {
+        hidden: panel.hidden,
+        expanded: lampBtn.getAttribute('aria-expanded'),
+        level: dot.className,
+        title: document.getElementById('agent-panel-title').textContent.trim(),
+        hasInputs: panel.querySelectorAll('input,select,textarea').length,
+        items: panel.querySelectorAll('.agent-panel-item').length,
+        stopText: document.getElementById('agent-panel-stop').textContent.trim(),
+        rect: (() => { const r = panel.getBoundingClientRect(); return { right: r.right, w: Math.round(r.width), top: Math.round(r.top) }; })(),
+        innerWidth: window.innerWidth,
+      };
+
+      document.getElementById('agent-panel-close').click();
+      await new Promise((r) => setTimeout(r, 600));
+      const closed = { hidden: panel.hidden, expanded: lampBtn.getAttribute('aria-expanded') };
+      return { noUi: false, before, open, closed };
+    })()`);
+    check(
+      '工具栏那盏灯点开就是 agent 窄面板：三色、最近动作、就地急停，且面板里没有改配置的入口（A5）',
+      lampPanel
+        && lampPanel.noUi !== true
+        && lampPanel.before.hidden === true
+        && lampPanel.open.hidden === false
+        && lampPanel.open.expanded === 'true'
+        && /is-(off|ready|busy)/.test(lampPanel.open.level)
+        && /没有 agent 接入|已接入|正在操作/.test(lampPanel.open.title)
+        && lampPanel.open.hasInputs === 0
+        && lampPanel.open.items >= 1
+        && /紧急停止|恢复 agent/.test(lampPanel.open.stopText)
+        && lampPanel.open.rect.right <= lampPanel.open.innerWidth
+        && lampPanel.open.rect.w > 200
+        && lampPanel.closed.hidden === true
+        && lampPanel.closed.expanded === 'false',
+      JSON.stringify(lampPanel),
+    );
+
     /* ---------- 运行时无脚本异常 ---------- */
     const shellErrors = shell.exceptions();
     /* ---------- B3（设置页侧）：卡片 / 未勾确认被拦 / 勾选后可改可回 ---------- */

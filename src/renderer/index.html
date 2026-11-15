@@ -74,6 +74,13 @@
           <span class="agent-mode-text" id="agent-mode-text">审计不完整</span>
         </div>
 
+        <!-- agent 状态灯（A5）：三色只回答"现在有没有人正在动这个浏览器"，
+             点开是窄面板（状态 + 最近动作 + 急停）。「审计不完整」另有一条常驻标识，
+             两件事不合并，否则红色同时表示两种意思。 -->
+        <button class="icon-btn agent-lamp" id="btn-agent-lamp" title="agent 状态" aria-label="agent 状态" aria-expanded="false" aria-controls="agent-panel">
+          <span class="agent-lamp-dot" id="agent-lamp-dot" aria-hidden="true"></span>
+        </button>
+
         <!-- agent 急停（D）：常驻按钮，agent 运行时也必须一眼能找到，不藏在菜单里 -->
         <button class="icon-btn agent-stop" id="btn-agent-stop" title="停止 agent 操作">
           <span class="agent-stop-dot" id="agent-stop-dot" aria-hidden="true"></span>
@@ -451,6 +458,23 @@
       </div>
       <p class="digest-status" id="digest-status" role="status" aria-live="polite"></p>
       <div class="digest-body" id="digest-body"></div>
+    </aside>
+
+    <!-- agent 状态面板（A5）：窄栏，和摘要一样贴右边、让标签视图让位。
+         只给"看"和"急停"，改设置一律回设置页，这里不开第二条改配置的路。 -->
+    <aside class="agent-panel" id="agent-panel" hidden aria-label="agent 状态">
+      <div class="agent-panel-head">
+        <span class="agent-panel-lamp" id="agent-panel-lamp" aria-hidden="true"></span>
+        <h2 class="agent-panel-title" id="agent-panel-title">agent 状态</h2>
+        <button class="digest-close" id="agent-panel-close" type="button" aria-label="关闭 agent 状态面板">✕</button>
+      </div>
+      <p class="agent-panel-text" id="agent-panel-text" role="status" aria-live="polite"></p>
+      <div class="agent-panel-actions">
+        <button class="tb-btn tb-btn-primary" id="agent-panel-stop" type="button">紧急停止</button>
+        <button class="tb-btn" id="agent-panel-settings" type="button">去设置</button>
+      </div>
+      <h3 class="agent-panel-sub">最近的 5 条动作</h3>
+      <ul class="agent-panel-list" id="agent-panel-list"></ul>
     </aside>
 
     <script src="renderer.js"></script>
