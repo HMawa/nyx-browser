@@ -3139,6 +3139,74 @@ async function main() {
       JSON.stringify(toolbarFlow),
     );
 
+    /* ---------- 动效档位（清单 B2）：小按钮有边框/悬停/按下，两档可切，减少动效时自动降 ---------- */
+    const motionCalm = await shell.eval(`(() => {
+      const root = document.documentElement;
+      const btn = document.getElementById('btn-more');
+      if (!btn) return { noUi: true };
+      const style = getComputedStyle(btn);
+      const css = Array.from(document.styleSheets)
+        .map((sheet) => { try { return Array.from(sheet.cssRules).map((r) => r.cssText).join('\\n'); } catch { return ''; } })
+        .join('\\n');
+      return {
+        noUi: false,
+        level: root.dataset.motion || '',
+        ms: root.style.getPropertyValue('--motion-ms').trim(),
+        borderWidth: style.borderTopWidth,
+        borderStyle: style.borderTopStyle,
+        transition: style.transitionDuration,
+        hasActiveRule: /\\.icon-btn:active:not\\(:disabled\\)/.test(css),
+        activeUsesVar: /\\.icon-btn:active:not\\(:disabled\\)\\s*\\{[^}]*var\\(--motion-press/.test(css),
+        hasGlow: /drop-shadow/.test(css.slice(css.indexOf('.icon-btn'), css.indexOf('.icon-btn:hover'))),
+      };
+    })()`);
+    check(
+      '小按钮看得出能点：有边框、悬停提亮、按下有反馈，且过渡时长来自同一份数字（B2）',
+      motionCalm
+        && motionCalm.noUi !== true
+        && motionCalm.level === 'calm'
+        && motionCalm.ms === '150ms'
+        && /^[01](\.\d+)?px$/.test(String(motionCalm.borderWidth))
+        && parseFloat(motionCalm.borderWidth) > 0.5
+        && motionCalm.borderStyle === 'solid'
+        && /0?\.?15s/.test(String(motionCalm.transition))
+        && motionCalm.hasActiveRule === true
+        && motionCalm.activeUsesVar === true
+        && motionCalm.hasGlow === false,
+      JSON.stringify(motionCalm),
+    );
+
+    // 切到活泼档：时长应变成 220ms；改完切回来，别污染后面的断言
+    await shell.eval(`window.nyx.setUiPref('motionLevel', 'lively')`);
+    let motionLively = null;
+    for (let i = 0; i < 24; i += 1) {
+      motionLively = await shell.eval(`(() => {
+        const root = document.documentElement;
+        const btn = document.getElementById('btn-more');
+        if (!btn) return null;
+        const style = getComputedStyle(btn);
+        return {
+          level: root.dataset.motion || '',
+          ms: root.style.getPropertyValue('--motion-ms').trim(),
+          transition: style.transitionDuration,
+        };
+      })()`);
+      if (motionLively && motionLively.level === 'lively') break;
+      await sleep(250);
+    }
+    await shell.eval(`window.nyx.setUiPref('motionLevel', 'calm')`);
+    await sleep(300);
+    const motionBack = await shell.eval(`document.documentElement.dataset.motion || ''`);
+    check(
+      '动效档位切到「活泼」真的变长（220ms），切回来复原（B2）',
+      motionLively
+        && motionLively.level === 'lively'
+        && motionLively.ms === '220ms'
+        && /0?\.?22s/.test(String(motionLively.transition))
+        && motionBack === 'calm',
+      JSON.stringify({ lively: motionLively, back: motionBack }),
+    );
+
     /* ---------- 页面摘要（清单 F）：默认关 → 明确原因；开启后能抽取正文 + 网络结论 ---------- */
     // 先确认默认是关的（userData 是隔离的，没写过 digestEnabled）
     const digestDefault = await shell.eval(`window.nyx.digestGet()`);

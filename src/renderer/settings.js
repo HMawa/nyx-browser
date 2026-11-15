@@ -1104,10 +1104,36 @@
     byId('pref-show-link-badge').checked = uiPrefs.showLinkBadge !== false;
     byId('pref-show-mode-switch').checked = uiPrefs.showModeSwitch !== false;
     if (byId('pref-toolbar-labels')) byId('pref-toolbar-labels').checked = uiPrefs.toolbarLabels !== false;
+    if (byId('pref-motion-level')) byId('pref-motion-level').value = uiPrefs.motionLevel === 'lively' ? 'lively' : 'calm';
+    applySettingsMotion(uiPrefs);
     // 主题回填 + 设置窗口自身立即换肤（主窗口由主进程 pushState 同步）
     byId('pref-theme').value = uiPrefs.theme || 'ink';
     document.documentElement.dataset.theme = uiPrefs.theme || 'ink';
     byId('appearance-state').textContent = '已生效';
+  }
+
+  /**
+   * 动效档位（清单 B2）：设置页自己也吃这一套，否则"改了没反应"。
+   * 时长/缓动的唯一来源仍是 src/core/motion.js，这里只把结果写成 CSS 变量。
+   */
+  function applySettingsMotion(ui) {
+    const root = document.documentElement;
+    if (!root) return;
+    let reduced = false;
+    try {
+      reduced = Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch {
+      reduced = false;
+    }
+    const level = (ui && ui.motionLevel) === 'lively' ? 'lively' : 'calm';
+    const motion = (window.nyx && window.nyx.motionResolve)
+      ? window.nyx.motionResolve({ level, reducedMotion: reduced })
+      : { durationMs: 150, easing: 'ease', press: 'none', level, reduced };
+    root.style.setProperty('--motion-ms', `${motion.durationMs}ms`);
+    root.style.setProperty('--motion-ease', motion.easing);
+    root.style.setProperty('--motion-press', motion.press || 'none');
+    root.dataset.motion = motion.level;
+    root.classList.toggle('motion-reduced', Boolean(motion.reduced));
   }
 
   async function saveUiPref(key, value) {
@@ -1118,6 +1144,13 @@
       return;
     }
     uiPrefs = res.ui;
+    if (key === 'motionLevel') {
+      applySettingsMotion(res.ui);
+      const motionLabel = res.ui && res.ui.motionLevel === 'lively' ? '活泼' : '克制';
+      byId('appearance-hint').textContent = `动效已切到「${motionLabel}」，主窗口与设置页都已生效。`;
+      setStatus('外观设置已更新');
+      return;
+    }
     const label =
       key === 'showLinkBadge'
         ? '出站链路徽标'
@@ -1139,6 +1172,12 @@
   if (byId('pref-toolbar-labels')) {
     byId('pref-toolbar-labels').addEventListener('change', (event) => {
       saveUiPref('toolbarLabels', event.target.checked);
+    });
+  }
+
+  if (byId('pref-motion-level')) {
+    byId('pref-motion-level').addEventListener('change', (event) => {
+      saveUiPref('motionLevel', event.target.value === 'lively' ? 'lively' : 'calm');
     });
   }
 

@@ -548,6 +548,36 @@ function applyUiPrefs() {
   const showLabels = ui.toolbarLabels !== false;
   for (const label of els.toolbarLabels || []) label.hidden = !showLabels;
   document.documentElement.classList.toggle('tb-labels', showLabels);
+  applyMotionPrefs(ui);
+}
+
+/**
+ * 动效档位（清单 B2）。
+ * 三件事：① 把 --motion-ms / --motion-ease / --motion-press 写到根元素上（样式侧只读变量）；
+ * ② 用 data-motion 标出当前档，便于细调个别组件；③ 系统要求减少动效时不看用户选了什么。
+ */
+function applyMotionPrefs(ui) {
+  const root = document.documentElement;
+  if (!root) return;
+  const level = (ui && ui.motionLevel) || 'calm';
+  const reducedMotion = prefersReducedMotion();
+  // 时长与缓动的唯一来源是 src/core/motion.js，界面侧不另写一份数字
+  const motion = (window.nyx && window.nyx.motionResolve)
+    ? window.nyx.motionResolve({ level, reducedMotion })
+    : { level: reducedMotion ? 'calm' : level, durationMs: 150, easing: 'ease', press: 'none', reduced: reducedMotion };
+  root.style.setProperty('--motion-ms', `${motion.durationMs}ms`);
+  root.style.setProperty('--motion-ease', motion.easing);
+  root.style.setProperty('--motion-press', motion.press || 'none');
+  root.dataset.motion = motion.level;
+  root.classList.toggle('motion-reduced', Boolean(motion.reduced));
+}
+
+function prefersReducedMotion() {
+  try {
+    return Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  } catch {
+    return false;
+  }
 }
 
 /**

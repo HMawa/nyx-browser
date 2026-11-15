@@ -8,6 +8,8 @@
  */
 
 const { contextBridge, ipcRenderer } = require('electron');
+// 动效档位的时长与缓动只有一份（src/core/motion.js）；界面侧同步取用，避免两处各写一套数字
+const motionCore = require('./core/motion');
 
 /**
  * 主题启动前置：渲染层要等 getState() 回调才知道主题，
@@ -41,6 +43,9 @@ contextBridge.exposeInMainWorld('nyx', {
 
   /** 界面偏好（顶栏元素显隐等纯外观开关） */
   getUiPrefs: () => ipcRenderer.invoke('nyx:ui:prefs'),
+
+  /** 动效档位解析（清单 B2）：同步返回时长/缓动/按压，系统减少动效时自动降级 */
+  motionResolve: (payload) => motionCore.resolveMotion(payload || {}),
 
   /** 写入单项界面偏好；仅接受白名单键与布尔值 */
   setUiPref: (key, value) => ipcRenderer.invoke('nyx:ui:prefs-set', { key, value }),

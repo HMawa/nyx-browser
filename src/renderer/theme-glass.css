@@ -347,6 +347,8 @@ body.private-mode .shell::after {
    五、按钮与交互控件：霓虹辉光 + 缩放反馈
    ================================================================== */
 
+/* 清单 B2：按钮的过渡时长与缓动只从 src/core/motion.js 来（--motion-ms / --motion-ease），
+   不再用主题自己的 --fx-dur（那是给玻璃面板的）。这样"克制 / 活泼"两档对按钮才真的生效。 */
 .icon-btn,
 .tb-btn,
 .btn,
@@ -354,15 +356,17 @@ body.private-mode .shell::after {
 .bm-item,
 .tb-mini,
 .bm-op {
-  transition: transform var(--fx-dur) var(--fx-ease), background-color 0.16s ease,
-    border-color 0.16s ease, color 0.16s ease, box-shadow var(--fx-dur) var(--fx-ease);
+  transition: transform var(--motion-ms, 150ms) var(--motion-ease, ease),
+    background-color var(--motion-ms, 150ms) var(--motion-ease, ease),
+    border-color var(--motion-ms, 150ms) var(--motion-ease, ease),
+    color var(--motion-ms, 150ms) var(--motion-ease, ease);
 }
 
+/* 悬停只做"边框变亮 + 背景提亮"：不做位移，也不做外发光（清单 B2 点名的 AI 味来源） */
 .icon-btn:hover:not(:disabled),
 .tb-btn:hover:not(:disabled),
 .btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: var(--neon-glow-soft);
+  border-color: var(--border-strong);
 }
 
 .icon-btn:active:not(:disabled),
@@ -370,37 +374,38 @@ body.private-mode .shell::after {
 .btn:active:not(:disabled),
 .tb-chip:active,
 .bm-item:active {
-  transform: translateY(0) scale(0.95);
-  transition-duration: 0.08s;
+  transition-duration: var(--motion-ms, 150ms);
 }
 
-/* 主按钮：常态就带一点辉光，hover 泛光增强 + 弹性回弹 */
+/* 主按钮：不再带常态辉光，只靠边框与底色表达"这是主操作"（清单 B2） */
 .tb-btn-primary,
 .btn-primary {
-  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: var(--accent-55);
 }
 
 .tb-btn-primary:hover:not(:disabled),
 .btn-primary:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: var(--neon-glow);
+  transform: none;
+  box-shadow: none;
+  border-color: var(--accent);
 }
 
 .tb-btn-primary:active:not(:disabled),
 .btn-primary:active:not(:disabled) {
-  transform: scale(0.96);
+  transform: var(--motion-press, translateY(1px) scale(0.97));
 }
 
-/* 危险按钮 hover：红光晕 */
+/* 危险按钮 hover：只变边框与文字色，不发光（清单 B2） */
 .tb-btn-danger:hover:not(:disabled),
 .btn-danger:hover:not(:disabled) {
-  box-shadow: 0 0 14px color-mix(in srgb, var(--danger) 26%, transparent);
+  border-color: var(--danger);
 }
 
-/* 图标按钮开启态：霓虹描边 + 辉光 */
+/* 图标按钮开启态：用描边与底色区分，不用霓虹辉光（清单 B2） */
 .icon-btn.is-on,
 .tb-btn.is-on {
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--bg-tab) 74%, var(--accent) 26%);
 }
 
 /* 页签按钮 / 筛选胶囊：激活态霓虹 */

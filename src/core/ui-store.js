@@ -22,6 +22,11 @@ const UI_PREF_DEFAULTS = {
    * 默认开：图标认不出来的时候，一行小字比 tooltip 更救急；认得出的人可以在外观里关掉。
    */
   toolbarLabels: true,
+  /**
+   * 动效档位（清单 B2）：calm 克制（默认）/ lively 活泼。
+   * 只影响小按钮的过渡与按压缩放；系统开了「减少动效」时一律降到最短，不看这个值。
+   */
+  motionLevel: 'calm',
   /** 界面主题：ink 墨夜 / aurora 极光 / paper 素纸 / quiet 静谧 */
   theme: 'ink',
   /** 下载保存目录；空字符串 = 跟随系统下载目录 */
@@ -116,6 +121,8 @@ const UI_PREF_ENUMS = {
   gpuPolicy: ['low-power', 'high-performance', 'auto'],
   cacheSiteMode: ['all', 'allowlist'],
   privateSiteMode: ['all', 'allowlist'],
+  /** 动效档位（清单 B2）；系统「减少动效」在渲染层再降一档，不改这里存的值 */
+  motionLevel: ['calm', 'lively'],
 };
 
 class UiStore {

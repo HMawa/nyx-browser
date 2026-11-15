@@ -895,13 +895,24 @@ body.private-mode .shell {
   border-radius: var(--r-md);
   background: var(--bg-tab);
   color: var(--text-main);
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  /* 清单 B2：时长与缓动只从 motion.js 来，这里不再写死 0.15s */
+  transition: background var(--motion-ms, 150ms) var(--motion-ease, ease),
+    border-color var(--motion-ms, 150ms) var(--motion-ease, ease),
+    color var(--motion-ms, 150ms) var(--motion-ease, ease),
+    transform var(--motion-ms, 150ms) var(--motion-ease, ease),
+    box-shadow var(--motion-ms, 150ms) var(--motion-ease, ease);
 }
 
 .btn:hover:not(:disabled) {
   background: var(--accent-06);
   border-color: var(--accent-40);
   color: var(--accent-soft);
+}
+
+/* 按下有反馈：不靠外发光，只靠一点点下压（清单 B2 的硬约束） */
+.btn:active:not(:disabled),
+.btn-mini:active:not(:disabled) {
+  transform: var(--motion-press, translateY(1px) scale(0.97));
 }
 
 .btn-primary {
@@ -915,7 +926,19 @@ body.private-mode .shell {
   background: var(--accent-24);
   border-color: var(--accent);
   color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+/* 系统要求减少动效时：不留位移，过渡也缩到最短（清单 B2 / 可访问性） */
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .btn-mini {
+    transition-duration: 90ms;
+  }
+
+  .btn:active:not(:disabled),
+  .btn-mini:active:not(:disabled) {
+    transform: none;
+  }
 }
 
 .btn-danger:hover:not(:disabled) {

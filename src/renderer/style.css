@@ -200,11 +200,21 @@ body {
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
-  transition: background 0.16s ease, border-color 0.16s ease, opacity 0.16s ease;
+  /* 清单 B2：时长与缓动由 src/core/motion.js 写到根元素上，这里只读变量 */
+  transition: background var(--motion-ms, 150ms) var(--motion-ease, ease),
+    border-color var(--motion-ms, 150ms) var(--motion-ease, ease),
+    transform var(--motion-ms, 150ms) var(--motion-ease, ease),
+    opacity var(--motion-ms, 150ms) var(--motion-ease, ease);
 }
 
 .icon-btn:hover:not(:disabled) {
-  background: var(--bg-tab-active);
+  background: color-mix(in srgb, var(--bg-tab-active) 92%, var(--text-main) 8%);
+  border-color: var(--border-strong);
+}
+
+/* 按下要有反馈：一点点下压 + 缩，别人不靠猜也知道点到了（清单 B2） */
+.icon-btn:active:not(:disabled) {
+  transform: var(--motion-press, translateY(1px) scale(0.97));
   border-color: var(--accent);
 }
 
@@ -220,6 +230,17 @@ body {
 .icon-btn:disabled {
   opacity: 0.35;
   cursor: default;
+}
+
+/* 系统要求减少动效时：过渡缩到最短、取消位移（清单 B2 / 可访问性） */
+@media (prefers-reduced-motion: reduce) {
+  .icon-btn {
+    transition-duration: 90ms;
+  }
+
+  .icon-btn:active:not(:disabled) {
+    transform: none;
+  }
 }
 
 /* ---------------- 工具栏下载入口（清单 A1） ----------------
