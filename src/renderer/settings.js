@@ -449,6 +449,24 @@
   let foldWired = false;
 
   /** 启动时跑一次：加分区级「全部铺开 / 全部收回」，并增强每一张卡片 */
+  /**
+   * 标记「必须整行」的卡片（设置页重排版）。
+   *
+   * 宽窗口下分区里是两列卡片，但表格、站点名单、进程表这类内容塞进半列会看不清列；
+   * 这里按**内容**判断（卡片里有没有 table / 名单 / 键值网格），不写死一堆 id——
+   * 以后新加表格卡片也自动整行，不用回来改这份名单。
+   * @param {Element} [root] 只处理某个分区；不传就整页
+   */
+  function markWideCards(root) {
+    const scope = root && root.querySelectorAll ? root : document;
+    for (const card of scope.querySelectorAll('.sec-scroll > .info-card')) {
+      const wide = Boolean(
+        card.querySelector('table, .agent-site-list, .kv-grid, .template-list, .proc-table, pre'),
+      );
+      card.classList.toggle('card-wide', wide);
+    }
+  }
+
   function setupCardFolding() {
     if (foldWired) return;
     foldWired = true;
@@ -484,9 +502,10 @@
       }
     }
 
+    markWideCards();
+
     document.addEventListener('click', (event) => {
-      const all = event.target && event.target.closest ? event.target.closest('[data-fold-all]') : null;
-      if (all) {
+      const all = event.target && event.target.closest ? event.target.closest('[data-fold-all]') : null;      if (all) {
         const panel = all.closest('.sec-panel');
         const folded = all.dataset.foldAll === 'close';
         if (panel) {
@@ -554,6 +573,10 @@
 
     // 面板此刻才由 display:none 变可见，只能在这里恢复一次位置
     restoreScroll(section);
+
+    // 卡片宽度跟随分区内容（表格类整行、表单类两列）；面板刚变可见才量得准
+    markWideCards();
+    setTimeout(() => markWideCards(), 400);
 
     setStatus(`已进入「${SEC_LABELS[section]}」`);
 

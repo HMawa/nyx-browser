@@ -5,7 +5,7 @@
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
- *  2. scripts/verify-ui-polish.js（界面体验，135 项）
+ *  2. scripts/verify-ui-polish.js（界面体验，136 项）
  *  3. scripts/verify-link-guard.js（出站链路守卫，14 项；纯 Node，不启动 Electron）
  *  4. scripts/verify-downloads.js（下载链路，16 项；纯 Node，不启动 Electron）
  *  5. scripts/verify-gpu-policy.js（图形性能策略，14 项；纯 Node，不启动 Electron）
@@ -76,7 +76,7 @@ const STEPS = [
   {
     label: '界面体验回归',
     script: 'verify-ui-polish.js',
-    items: '135 项',
+    items: '136 项',
     timeoutMs: 360000,
   },
   {

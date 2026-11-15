@@ -88,6 +88,28 @@
   border-top: 1px solid var(--border-soft);
 }
 
+/* 导航分组（十个分区平铺看不出层次，按用途分四组）。
+   组标题不可点，只做分隔；组与组之间用一条细线，不用额外色块。 */
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-group + .nav-group {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.nav-group-label {
+  padding: 3px 10px 3px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-faint);
+}
+
 /* ---------------- 内容区 ---------------- */
 .settings-main {
   flex: 1;
@@ -114,10 +136,28 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px 16px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  /* 一屏铺到底太乱：宽窗口下改成两列卡片，窄窗口自动落回一列。
+     列宽用 auto-fill 而不是定值，窗口从 640 拉到 1600 都不会出现半张卡。 */
+  padding: 16px 18px 22px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  align-content: start;
+  /* 卡片按自己的内容高度排，不要被行高拉伸：卡片是 flex 列且 overflow:hidden，
+     一旦被拉伸到"行高"，正文会溢出卡片被裁掉（表现出来就是"点开没反应"）。 */
+  align-items: start;
+  gap: 14px;
+}
+
+/* 卡片以外的直接子元素（提示行、状态行、站点名单块等）一律整行，
+   不然它们会被塞进半列里挤成两三个字一行。 */
+.sec-scroll > *:not(.info-card) {
+  grid-column: 1 / -1;
+}
+
+/* 带表格 / 长名单的卡片必须整行：两列会把它压到看不清列。
+   settings.js 的 markWideCards() 会给这些卡片补 .card-wide（按内容判断，不写死 id）。 */
+.sec-scroll > .info-card.card-wide {
+  grid-column: 1 / -1;
 }
 
 .sec-head {
@@ -1755,14 +1795,18 @@
   transform: rotate(-90deg);
 }
 
-/* 折叠动画由 settings.js 写内联 max-height 驱动；这里给两态各自的基线 */
+/* 折叠动画由 settings.js 写内联 max-height 驱动；这里给两态各自的基线。
+   flex: 0 0 auto 是必须的：body 带 overflow:hidden，flex 的「自动最小尺寸」会被算成 0，
+   卡片在网格里就只按 head 的 40px 排行高，铺开后正文被压成 0 高（看着像点了没反应）。 */
 .info-card .info-body {
   overflow: hidden;
+  flex: 0 0 auto;
   transition: max-height 0.16s ease, opacity 0.16s ease;
 }
 
 /* 分区里卡片一多，flex 默认会把它们压扁：铺开的那张会被挤成 0 高（点开像没反应）。
-   卡片按内容高度排，超出就让 .sec-scroll 自己滚。 */
+   卡片按内容高度排，超出就让 .sec-scroll 自己滚。
+   改成两列网格后不再有压扁问题，这条留着兜住不支持 grid 的极端情况。 */
 .sec-scroll > .info-card {
   flex: 0 0 auto;
 }

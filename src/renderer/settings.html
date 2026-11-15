@@ -24,16 +24,29 @@
         </div>
 
         <ul class="nav-list" id="nav-list">
-          <li><button type="button" class="nav-item active" data-sec="appearance">外观</button></li>
-          <li><button type="button" class="nav-item" data-sec="display">主题与显示</button></li>
-          <li><button type="button" class="nav-item" data-sec="startup">启动与主页</button></li>
-          <li><button type="button" class="nav-item" data-sec="privacy">隐私与安全</button></li>
-          <li><button type="button" class="nav-item" data-sec="network">网络与代理</button></li>
-          <li><button type="button" class="nav-item" data-sec="downloads">下载</button></li>
-          <li><button type="button" class="nav-item" data-sec="extensions">扩展插件</button></li>
-          <li><button type="button" class="nav-item" data-sec="diagnostics">诊断</button></li>
-          <li><button type="button" class="nav-item" data-sec="agent">Agent 访问</button></li>
-          <li><button type="button" class="nav-item" data-sec="about">关于与更新</button></li>
+          <!-- 十个分区平铺会看不出层次，按用途分成四组；组标题只是分组线，不可点 -->
+          <li class="nav-group">
+            <span class="nav-group-label">外观与显示</span>
+            <button type="button" class="nav-item active" data-sec="appearance">外观</button>
+            <button type="button" class="nav-item" data-sec="display">主题与显示</button>
+            <button type="button" class="nav-item" data-sec="startup">启动与主页</button>
+          </li>
+          <li class="nav-group">
+            <span class="nav-group-label">隐私与网络</span>
+            <button type="button" class="nav-item" data-sec="privacy">隐私与安全</button>
+            <button type="button" class="nav-item" data-sec="network">网络与代理</button>
+            <button type="button" class="nav-item" data-sec="downloads">下载</button>
+          </li>
+          <li class="nav-group">
+            <span class="nav-group-label">能力与工具</span>
+            <button type="button" class="nav-item" data-sec="extensions">扩展插件</button>
+            <button type="button" class="nav-item" data-sec="agent">Agent 访问</button>
+          </li>
+          <li class="nav-group">
+            <span class="nav-group-label">诊断与关于</span>
+            <button type="button" class="nav-item" data-sec="diagnostics">诊断</button>
+            <button type="button" class="nav-item" data-sec="about">关于与更新</button>
+          </li>
         </ul>
 
         <p class="nav-note">

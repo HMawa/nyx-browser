@@ -1014,6 +1014,61 @@ async function main() {
             `收起 ${foldFlow.afterCloseAll.folded}/${foldFlow.afterCloseAll.total}，空值 ${JSON.stringify(foldFlow.afterCloseAll.emptyIds)}，未收起 ${JSON.stringify(foldFlow.afterCloseAll.notFoldedIds)}，落盘 ${foldFlow.savedKeys} 条 ${JSON.stringify(foldFlow.savedSample)}`,
         );
 
+        /* ---------- 设置页重排版：导航分组 + 两列网格 + 表格类整卡 ---------- */
+        // 用户反馈「设置页面极度混乱」，重排版做的是：导航分四组、宽窗口两列、
+        // 表格/长名单卡片整行。这里量的是**运行时**结果，不是源码里有几条 CSS。
+        const layoutFlow = await settings.eval(`(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          document.querySelector('.nav-item[data-sec="privacy"]').click();
+          await wait(420);
+
+          const panel = document.querySelector('.sec-panel[data-sec="privacy"]');
+          const box = panel.querySelector('.sec-scroll');
+          const cs = getComputedStyle(box);
+          const cols = String(cs.gridTemplateColumns || '').split(' ').filter(Boolean).length;
+          const inner = Math.round(
+            box.clientWidth - parseFloat(cs.paddingLeft || '0') - parseFloat(cs.paddingRight || '0'),
+          );
+          const cards = Array.from(box.querySelectorAll(':scope > .info-card'));
+          const probe = cards.map((c) => ({
+            id: c.dataset.foldId || '',
+            wide: c.classList.contains('card-wide'),
+            w: Math.round(c.getBoundingClientRect().width),
+          }));
+          const wide = probe.filter((c) => c.wide);
+          const narrow = probe.filter((c) => !c.wide);
+          const groups = Array.from(document.querySelectorAll('.nav-group-label')).map((g) =>
+            String(g.textContent || '').trim(),
+          );
+
+          return {
+            display: cs.display,
+            cols,
+            inner,
+            groups,
+            cards: probe.length,
+            wideCount: wide.length,
+            narrowCount: narrow.length,
+            // 整行卡片必须和容器内容宽一致；两列里的卡片必须窄于容器
+            wideFullRow: wide.every((c) => Math.abs(c.w - inner) <= 4),
+            narrowHalfRow: narrow.length === 0 || narrow.every((c) => c.w < inner - 20),
+            sampleWide: wide.slice(0, 3),
+          };
+        })()`);
+        check(
+          '设置页重排版：导航分成四组、宽窗口两列、表格类卡片整行（重排版）',
+          layoutFlow &&
+            layoutFlow.display === 'grid' &&
+            layoutFlow.cols >= 2 &&
+            layoutFlow.groups.length === 4 &&
+            layoutFlow.groups.includes('隐私与网络') &&
+            layoutFlow.cards >= 3 &&
+            layoutFlow.wideCount >= 1 &&
+            layoutFlow.wideFullRow === true &&
+            layoutFlow.narrowHalfRow === true,
+          layoutFlow && JSON.stringify(layoutFlow),
+        );
+
         const scrollFlow = await settings.eval(`(async () => {
           const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
