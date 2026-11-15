@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把三十三个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把三十四个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
@@ -37,6 +37,7 @@
  * 31. scripts/verify-agent-doc.js（agent 接入说明：端点来自运行时、两种模式边界、会被拦下的四种情况、复制回读，9 项；纯 Node，不启动 Electron）
  * 32. scripts/verify-themes.js（主题：六套主题与枚举一一对应、新主题令牌齐全、对比度实算、不许有渐变、主题与显示分区，7 项；纯 Node，不启动 Electron）
  * 33. scripts/verify-shell-guard.js（外壳导航守卫：只许停在自己那份文档、网络地址与伪协议全拦、弹窗只放行 http(s)、不许内嵌 webview、接线与提示，11 项；纯 Node，不启动 Electron）
+ * 34. scripts/verify-update-policy.js（更新通道准入：只许 https、本地目录必须显式确认、版本必须单调、缺 sha256 一律拒绝，10 项；纯 Node，不启动 Electron）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -269,6 +270,12 @@ const STEPS = [
     label: '外壳导航守卫回归',
     script: 'verify-shell-guard.js',
     items: '11 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '更新通道准入回归',
+    script: 'verify-update-policy.js',
+    items: '10 项',
     timeoutMs: 60000,
   },
 ];

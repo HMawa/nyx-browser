@@ -15,7 +15,7 @@
  *     "version": "0.2.0",
  *     "notes": "本次更新说明（中文，可多行）",
  *     "file": "Nyx-Setup-0.2.0.exe",   // 相对更新源的安装包文件名
- *     "sha256": "…",                    // 选填，但强烈建议提供，缺失时不做完整性校验
+ *     "sha256": "…",                    // 必须提供（64 位十六进制）；缺失或格式不对一律拒绝安装
  *     "size": 12345678,                 // 选填，仅用于进度显示
  *     "mandatory": false                // 选填，true 时提示语更强调
  *   }
@@ -785,13 +785,18 @@ class Updater {
   /**
    * 流式 sha256 校验：createReadStream 分块喂给 hash，内存占用与文件大小无关
    * （113MB 整包不再 readFileSync 一次性读入）。
-   * 保持原行为：清单没给 sha256 时跳过校验；比较时大小写不敏感。
+   *
+   * 安全审计 P0-2：清单没给 sha256 时**必须判失败**。以前这里 return true
+   * （"没给就跳过校验"），等于谁能在更新源里改文件、就能让更新器装一个
+   * 完全没人校验过的 exe。现在缺摘要 = 不可信 = 拒绝安装，并把原因说清楚。
+   * 比较时大小写不敏感。
    * 返回 Promise<boolean>，调用方需要 await。
    */
   verifyFile(file, sha256) {
-    if (!sha256) {
-      this.log('更新清单未提供 sha256，跳过完整性校验');
-      return Promise.resolve(true);
+    const expected = String(sha256 == null ? '' : sha256).trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(expected)) {
+      this.log('更新清单缺少有效的 sha256，已拒绝校验与安装（缺摘要的更新包不可信）');
+      return Promise.resolve(false);
     }
     return new Promise((resolve) => {
       const hash = crypto.createHash('sha256');
@@ -799,7 +804,7 @@ class Updater {
       stream.on('data', (chunk) => hash.update(chunk));
       stream.on('error', () => resolve(false));
       stream.on('end', () => {
-        resolve(hash.digest('hex').toLowerCase() === String(sha256).trim().toLowerCase());
+        resolve(hash.digest('hex').toLowerCase() === expected);
       });
     });
   }

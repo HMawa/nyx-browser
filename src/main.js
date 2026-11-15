@@ -134,6 +134,7 @@ const {
   decideShellWindowOpen,
   describeAttachBlock,
 } = require('./core/shell-guard');
+const { decideUpdateSource } = require('./core/update-policy');
 const {
   CACHE_SITE_MODES,
   addCustomTemplate,
@@ -8781,18 +8782,29 @@ function registerUpdateIpc() {
   ipcMain.handle('nyx:update:set-source', (_event, payload) => {
     if (!runtime.updater) return missing;
     const source = String((payload && payload.source) || '').trim();
-    if (!source) return { ok: false, error: '更新源不能为空' };
-    const isRemote = /^https?:\/\//i.test(source);
-    const isLocal = /^[a-zA-Z]:[\\/]/.test(source) || source.startsWith('\\\\') || /^file:\/\//i.test(source);
-    if (!isRemote && !isLocal) {
-      return { ok: false, error: '更新源必须是 http(s) 地址或本地目录路径' };
+    // 安全审计 P0-2：不是"填了就算"，先过准入（https / 显式确认的本地目录 / 版本单调）
+    const verdict = decideUpdateSource(source, { allowLocal: payload && payload.allowLocal === true });
+    if (!verdict.ok) {
+      diagnostics.warn('UPDATE_SOURCE_REJECTED', verdict.error || '更新源被拒绝', {
+        code: verdict.code,
+        source: source.slice(0, 80),
+      });
+      return { ok: false, code: verdict.code, needsLocalAck: Boolean(verdict.needsLocalAck), error: verdict.error };
     }
     const autoCheck = payload && payload.autoCheck;
     const config = runtime.updater.writeConfig({
-      source,
+      source: verdict.source,
       ...(typeof autoCheck === 'boolean' ? { autoCheck } : {}),
     });
-    return { ok: true, config };
+    if (verdict.kind === 'local') {
+      // 本地源是显式确认过的，但每次设置都要让用户看见它的代价
+      notifyNotice({
+        level: 'warn',
+        title: '已改用本地更新源',
+        message: '任何能写这个目录的程序都能换掉升级包；只在你自己这台机器上用。',
+      });
+    }
+    return { ok: true, config, kind: verdict.kind };
   });
 }
 
