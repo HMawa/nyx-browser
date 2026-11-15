@@ -120,14 +120,14 @@
 
 ## 9. 当前任务指针
 
-- 正在执行的清单：`docs/实测修复台账.md`（来源：`Nyx浏览器v1实测修复清单.md`，12 项）。
+- 正在执行的清单：`docs/实测修复台账.md`（来源：外部实测清单 `Nyx浏览器v1实测修复清单.md`，不在本仓库内，12 项）。
 - 顺序：**C1 → A4 → A2 → A1 → B4+B5 → B1/B2/B3 → A3/A5 → C2/C3 → C4**，一项一提交。
 - 进度：C1（`b848b6b`）、A4（`d33be32` + `018780b` + `2c9f248`）、A2（`4919583`）、A1（`e214f9d`）、B4+B5（`533ea57`）、B1（`e7c5288`）、B2（`6bb61f0`）、B3（`1a6e6e1`）、A3（`8942dab`，已测基线 + 已可量化）、A5（`9d76966`，默认核显优先）、C2（`321da29`，安全基线可自查）、C3（`9533ef8`，外壳防护现值 + 注入演示）、C4（`a8e42d8`，进隐私模式前查录屏与被远控）**已全部完成（12/12）**。
 - 清单已清空：下一步等用户决定（候选：发版 1.17.1 / 安装器端到端复验 / 修更新源 `latest.json` 指向已删 exe 的 404 / 补 `extensions.json` 的 history / 做一次真机安装版冒烟）。
 
 ### 9.1 当前清单：Agent 化 A–G（2026-11-14 开工）
 
-- 来源：`Nyx浏览器Agent化实现清单.md`（A–G 七项 + §4 验收清单 + 六条不可回退约束）。
+- 来源：外部清单 `Nyx浏览器Agent化实现清单.md`（不在本仓库内；A–G 七项 + §4 验收清单 + 六条不可回退约束）。
 - 执行顺序（已与清单 §0 的意图对齐，**C 是枢纽必须最先**）：**C → B → D → E → A → F → G**，一项一提交。
 - 进度：**C 完成（`79c9477`）**、**B 完成（`4795ab4`）**、**D 完成（`9a811c3`）**、**E 完成（`6ae78a8`）**、**A 完成（`ea4bb34`）**、**F 完成（`65ea440`）**、**G 完成（`1b6711c` + 休眠阈值设置项 `d2bc416` + 断网判定 `9801414`）** —— **A–G 七项全部完成**（明细见 `docs/实测修复台账.md` 的「Agent 化清单（A–G）状态」表）。E 的落点：`src/core/agent-sites.js`（三层判定 + 域名级名单）、`main.js` 的 `readAgentSites/writeAgentSites/askAgentSiteTrust/authorizeAgentAction/registerAgentSitesIpc`、`agent-dispatch` 的 `await authorize`、设置「Agent 访问 → 站点授权」卡片。A 的落点：`src/core/agent-mode.js`（模式表 + 两步确认状态机 + 状态载荷）、`main.js` 的 `readBootAgentMode/writeAgentMode/registerAgentModeIpc`（启动前 appendSwitch CDP 端口）、外壳 `#agent-mode-flag`、设置「Agent 访问 → 接入模式」卡片。F 的落点：`src/core/page-digest.js`（切句/关键词/抽取式摘要/网络摘要）、`main.js` 的 `registerDigestIpc`（默认关必须给原因）、`ui-store` 的 `digestEnabled`、外壳 `#btn-digest` / `#digest-panel`、设置「页面摘要」卡片。G 的落点：`src/core/tab-lifecycle.js`（三态判定 + 阈值解析 + 中文原因）、`tabs.js` 的 `startLifecycle/applyLifecycle/sleepTab/wakeTab/markAgentDriven/setAgentSessionActive`、`main.js` 的 `readTabSleepAfterMs` 与 `touchAgentSession`（审计入口续命）、外壳 `.tab.is-asleep` 淡显；断网部分：`src/core/link-guard.js` 的 `offline` 动作、`src/core/network-state.js`、`main.js` 的 `onlineState()` + `nyx:net:state`、外壳 `#net-offline-flag`。
 - G 的诚实边界（写进台账，也要对用户说）：休眠等于卸载页面，**未提交的输入与滚动位置会丢**；5 秒巡检最晚晚 5 秒才睡；「降低占用」只做到"闲置标签不占内存"，没做离线/在线切换策略。休眠阈值已做成设置项（`d2bc416`：外观 → 标签休眠，0 = 关闭，1–240 分钟，改完立刻生效，环境变量 `NYX_TAB_SLEEP_MS` 仅作验证旋钮并优先于界面设置）。

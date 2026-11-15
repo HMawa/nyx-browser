@@ -69,7 +69,7 @@ function buildQueryArgs(input) {
 
 /**
  * `schtasks` 的输出是 **GBK**（中文 Windows 控制台代码页），按 utf8 解会把
- * 「错误: 系统找不到指定的文件。」解成 `乱码方块`，于是"任务不存在"被误判成"读不出来"。
+ * 「错误: 系统找不到指定的文件。」解成一片乱码方块，于是"任务不存在"被误判成"读不出来"。
  * 所以一律拿 Buffer 自己解。
  */
 function decodeConsole(buffer) {
