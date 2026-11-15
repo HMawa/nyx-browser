@@ -8292,7 +8292,20 @@ function registerToolboxIpc() {
 
   ipcMain.handle('nyx:tb:console-eval', (_event, payload) => {
     if (!runtime.pageTools) return notReady;
-    return runtime.pageTools.evalScript(wcIdOf(payload), payload && payload.expression);
+    // 安全审计 P1-2：控制台执行脚本只许对**当前活动标签**做。
+    // 以前传什么 wcId 就在那个 webContents 里执行——外壳一旦被导航走（P0-1）
+    // 就等于远程页面能拿它去改任意标签。现在显式拒绝非活动标签。
+    const requested = payload && payload.wcId;
+    const asked = requested == null || requested === '' ? null : Number(requested);
+    const active = activeWcId();
+    if (asked != null && Number.isFinite(asked) && active != null && asked !== active) {
+      return {
+        ok: false,
+        code: 'NOT_ACTIVE_TAB',
+        error: '控制台脚本只能对当前活动标签执行：先切到那个标签再执行，或直接用 agent 的动作通道（会经过确认与留痕）。',
+      };
+    }
+    return runtime.pageTools.evalScript(active, payload && payload.expression);
   });
 
   /* Cookie 管理：操作当前标签页的 session.cookies */
@@ -9325,10 +9338,34 @@ function currentAgentSite() {
   try {
     const manager = runtime.tabManager;
     if (!manager) return '';
+    // 安全审计 P1-3：以 webContents 自己报的地址为唯一权威。
+    // snapshot() 里的 url 是标签管理器记下的字符串，可能落后于真实的最后一次提交
+    // （重定向、history.replaceState、脚本改地址都会让两者分叉），
+    // 用它会拿旧站点去做授权，等于按错误的对象放行。
+    const wc = manager.getActiveWebContents();
+    if (wc && !wc.isDestroyed()) {
+      const live = wc.getURL();
+      if (live) {
+        const parsed = new URL(live);
+        if (parsed.host) return parsed.host;
+      }
+    }
     const snap = manager.snapshot();
     const active = (snap.tabs || []).find((tab) => tab.active);
     if (!active || !active.url) return '';
     const url = new URL(active.url);
+    return url.host || '';
+  } catch {
+    return '';
+  }
+}
+
+/** 从一条 URL 里取站点（只用于「要去的地方」判定；取不到返回空串） */
+function siteOfUrl(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+  try {
+    const url = new URL(text);
     return url.host || '';
   } catch {
     return '';
@@ -9420,15 +9457,30 @@ async function askAgentSiteTrust(input) {
 async function authorizeAgentAction(action, ctx) {
   const type = action && action.type ? action.type : '';
   const site = (ctx && ctx.site) || '';
+  const params = (action && action.params) || {};
+  // 安全审计 P1-3：navigate 要按「要去的地方」判定，不是按「现在在哪」判定。
+  // 以前 authorize 拿到的是当前页 host，于是"在已信任的站点上让 agent 跳到屏蔽站点"
+  // 会被放行——屏蔽名单对 navigate 形同不存在。
+  const targetSite = type === 'navigate' ? siteOfUrl(params.url) : '';
+  const judgeSite = targetSite || site;
   const verdict = evaluateSite({
-    site,
+    site: judgeSite,
     policy: runtime.agentSites || sanitizeSitePolicy(null),
     sessionTrusted: runtime.agentSessionTrust || [],
   });
+  if (type === 'navigate' && !targetSite && params.url) {
+    // 地址不合法就别猜：直接拒绝并说清原因（同一套失败关闭原则）
+    return {
+      decision: 'deny',
+      reason: `要打开的地址看不懂，没法判断站点：${String(params.url).slice(0, 120)}`,
+      rule: 'navigate-bad-url',
+    };
+  }
 
   if (verdict.decision === 'allow') {
     diagnostics.info('AGENT_AUTHORIZE', `${type} 放行（${verdict.layer}）`, {
       site: verdict.host,
+      from: site,
       decision: 'allow',
       layer: verdict.layer,
       rule: verdict.reason,
@@ -9439,11 +9491,16 @@ async function authorizeAgentAction(action, ctx) {
   if (verdict.decision === 'deny') {
     diagnostics.warn('AGENT_AUTHORIZE', `${type} 被拒绝（${verdict.layer}）`, {
       site: verdict.host,
+      from: site,
       decision: 'deny',
       layer: verdict.layer,
       rule: verdict.reason,
     });
-    return { decision: 'deny', reason: verdict.message, rule: verdict.layer };
+    // 跳到屏蔽站点时把话说全：用户屏蔽的是"这个站点"，不是在屏蔽"从哪跳过去"
+    const extra = targetSite && targetSite !== site
+      ? `（要打开的是 ${targetSite}，当前页是 ${site || '空白页'}）`
+      : '';
+    return { decision: 'deny', reason: `${verdict.message}${extra}`, rule: verdict.layer };
   }
 
   // 未命中任何名单 → 进站问一次

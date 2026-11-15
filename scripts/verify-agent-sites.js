@@ -482,6 +482,44 @@ check('34. 未来版本（v99）明确拒绝，不猜着导入', () => {
 
 /* ------------------------------------------------------------------ */
 
+// 安全审计 P1-3：navigate 要按「要去的地方」判定，且当前站点以 webContents 自己报的地址为准
+check('35. 站点判定接线：当前站点取 webContents.getURL()，navigate 按目标站点判定（P1-3）', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const root = path.join(__dirname, '..');
+  const mainSrc = fs.readFileSync(path.join(root, 'src', 'main.js'), 'utf8');
+
+  const siteFn = mainSrc.slice(mainSrc.indexOf('function currentAgentSite()'), mainSrc.indexOf('function siteOfUrl('));
+  assert.ok(/getActiveWebContents\(\)/.test(siteFn), '当前站点要先问 webContents 要地址');
+  assert.ok(/wc\.getURL\(\)/.test(siteFn), '必须用 getURL() 的实时地址');
+  assert.ok(
+    siteFn.indexOf('manager.getActiveWebContents()') < siteFn.indexOf('manager.snapshot()'),
+    '实时地址要排在 snapshot() 兜底之前',
+  );
+
+  const start = mainSrc.indexOf('async function authorizeAgentAction');
+  const authFn = mainSrc.slice(start, start + 2600);
+  assert.ok(/type === 'navigate' \? siteOfUrl\(params\.url\)/.test(authFn), 'navigate 要取目标地址的站点');
+  assert.ok(/site: judgeSite/.test(authFn), '判定要用 judgeSite（目标优先）');
+  assert.ok(/navigate-bad-url/.test(authFn), '目标地址看不懂时要失败关闭，不许猜');
+});
+
+check('36. 屏蔽名单对 navigate 真的生效：从白名单页跳到屏蔽站点会被拒，并说清两边站点（P1-3）', () => {
+  const policy = sites.sanitizePolicy({
+    globalEnabled: true,
+    allow: [{ target: 'good.example', mode: 'host' }],
+    block: [{ target: 'bad.example', mode: 'host' }],
+  });
+  const judge = (current, target) => sites.evaluateSite({ site: target || current, policy, sessionTrusted: [] });
+  const fromGoodToBad = judge('good.example', 'bad.example');
+  const onGood = judge('good.example', '');
+  assert.equal(fromGoodToBad.decision, 'deny', '跳到屏蔽站点必须被拒');
+  assert.equal(fromGoodToBad.layer, '屏蔽名单');
+  assert.equal(onGood.decision, 'allow', '留在白名单页要照常放行');
+  const fromBadToGood = judge('bad.example', 'good.example');
+  assert.equal(fromBadToGood.decision, 'allow');
+});
+
 const failed = checks.filter((item) => !item.ok);
 const total = checks.length;
 console.log('');

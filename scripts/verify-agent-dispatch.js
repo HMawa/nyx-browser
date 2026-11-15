@@ -392,6 +392,22 @@ async function main() {
     };
   });
 
+  // 安全审计 P1-2：执行脚本必须人工确认，且工具箱控制台只许对活动标签执行
+  await check('22. 执行脚本（executeJS）必须人工确认，控制台执行只许针对活动标签（P1-2）', () => {
+    const rule = CONFIRM_RULES.executeJS;
+    const ruleOk = Boolean(rule && rule.required === true && /脚本/.test(String(rule.why || '')));
+    const fs = require('node:fs');
+    const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'utf8');
+    const start = mainSrc.indexOf("ipcMain.handle('nyx:tb:console-eval'");
+    const block = start >= 0 ? mainSrc.slice(start, start + 900) : '';
+    const activeOnly = /NOT_ACTIVE_TAB/.test(block) && /activeWcId\(\)/.test(block) && /asked !== active/.test(block);
+    const noRawWcId = !/evalScript\(wcIdOf\(payload\)/.test(block);
+    return {
+      ok: ruleOk && activeOnly && noRawWcId,
+      detail: { 确认规则: Boolean(ruleOk), 只许活动标签: activeOnly, 不再用透传的wcId: noRawWcId },
+    };
+  });
+
   // 附带打印一次能力清单，便于人工核对确认策略
   console.log('');
   console.log('[Nyx] 动作确认策略：');
