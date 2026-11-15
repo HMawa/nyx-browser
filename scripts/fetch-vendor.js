@@ -34,7 +34,7 @@ const zlib = require('zlib');
 
 /*
  * 许可提示：本脚本下载的 mihomo（Clash Meta）内核与 geo 数据均为 **GPL-3.0**，
- * 与本项目自身的 MIT 许可证不同。两者不可混同：
+ * 与本项目自身的许可证（PolyForm Noncommercial 1.0.0）不同。两者不可混同：
  *   - 内核以独立进程方式运行，本项目对其未作任何修改；
  *   - 权利义务与源码获取方式见仓库根目录 THIRD-PARTY-NOTICES.md；
  *   - GPL-3.0 许可证全文见 licenses/GPL-3.0.txt。
@@ -493,7 +493,7 @@ async function main() {
 
   const meta = readVersionFile();
   log('Nyx 依赖获取 · vendor/mihomo');
-  log('  本次获取的 mihomo 内核与 geo 数据为 GPL-3.0 许可（本项目自身为 MIT），');
+  log('  本次获取的 mihomo 内核与 geo 数据为 GPL-3.0 许可（本项目自身为 PolyForm Noncommercial 1.0.0），');
   log('  许可全文见 licenses/GPL-3.0.txt，说明见 THIRD-PARTY-NOTICES.md。');
   log('  VERSION.txt 解析: 内核 ' + meta.version + '，windows-amd64');
   if (DRY_RUN) log('  （dry-run：仅解析与打印计划，不下载任何文件）');

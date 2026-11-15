@@ -318,7 +318,7 @@ npm run dist
 - 产物：`dist/Nyx-Setup-<version>.exe`（默认英文文件名，界面与安装语言为简体中文）。
 - 安装器行为：非一键安装、可改安装目录、写入桌面与开始菜单快捷方式，配置见 `build/installer.nsh`。
 - 打包规则：`src/**` 与 `package.json` 进 asar；`vendor/` 通过 `extraResources` 原样放进安装目录；图标取自 `build/icon.ico`。
-- 许可证随包：安装目录 `resources/` 下同时放置 `LICENSE`（本项目 MIT）、`THIRD-PARTY-NOTICES.md` 与 `licenses/GPL-3.0.txt`（mihomo 内核的 GPL-3.0 全文）。
+- 许可证随包：安装目录 `resources/` 下同时放置 `LICENSE`（本项目 PolyForm Noncommercial 1.0.0）、`THIRD-PARTY-NOTICES.md` 与 `licenses/GPL-3.0.txt`（mihomo 内核的 GPL-3.0 全文）。
 - `npm run pack` 只生成未打包目录，便于检查文件是否齐全。
 
 ---
@@ -367,19 +367,27 @@ npm run dist
 
 ## 许可证
 
-本项目以 **MIT** 许可证发布，全文见 [LICENSE](LICENSE)。
+本项目以 **PolyForm Noncommercial License 1.0.0** 授权，全文见 [LICENSE](LICENSE)。该文件首行是本项目的 `Required Notice`，任何人转载或分发时都必须一并保留。
+
+一句话说清：**源码公开，非商业用途免费，商业用途需要事先取得授权。**
+
+- **可以**：个人学习、研究、试验、以及自己那些不涉及商业用途的项目里随便用、随便改；把改过的版本免费分享给别人也行（要带上许可证与 `Required Notice`）。
+- **不可以**：拿去卖、拿去收费、拿来做付费产品或付费服务——包括「改一改换个名字当成自己的产品卖」「加壳打包卖给客户」「做成收费的托管服务」；也**不能用于公司的商业经营**（在公司内部办公用同样算商业使用）。
+- **想商用**：到 [Issues](https://github.com/HMawa/nyx-browser/issues) 说明用途与规模，单独谈一份商业授权。不打算收费、只是公司内部想用，也按这条来处理。
+- **生效范围**：这条边界从 **1.17.8** 起适用。`1.17.7` 及更早的发行版当时按 MIT 发布，**已经授予出去的 MIT 授权收不回来**——拿到那几版代码的人仍可依 MIT 使用。要彻底堵死只能换一份全新实现，本项目选择的是「从这一版开始收口，并把这件事写在明处」，而不是装作以前没发生过。
+- **不再自称「开源」**：OSI 定义的开源许可证不允许限制商业用途，所以准确说法是**源码公开（source-available）**。代码仍然可以随便读、随便审、随便对照自己那台机器上装的东西——作品集想展示的正是这个。
 
 第三方组件各自遵循其自身许可证，详见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)，包括但不限于：
 
 - **Electron**（MIT）
-- **mihomo / Clash Meta**（**GPL-3.0**）：以**独立进程**方式启动并与本项目通过本地 HTTP 通信，不链接、不合并，因此不影响本项目的 MIT 授权。**仓库本身不提交其二进制**（`.gitignore` 排除，由 `scripts/fetch-vendor.js` 从上游官方发布页下载并校验 SHA256）；但**发行安装包会随包分发**该 GPL-3.0 二进制，故安装包内同时附带 GPL-3.0 许可证全文（`resources/licenses/GPL-3.0.txt`）与第三方声明（`resources/THIRD-PARTY-NOTICES.md`），并给出对应源码获取方式。本项目对 mihomo 未作任何修改。
+- **mihomo / Clash Meta**（**GPL-3.0**）：以**独立进程**方式启动并与本项目通过本地 HTTP 通信，不链接、不合并，两边各自遵循各自的许可证，本项目的非商业条款不会给它的用户增加限制。**仓库本身不提交其二进制**（`.gitignore` 排除，由 `scripts/fetch-vendor.js` 从上游官方发布页下载并校验 SHA256）；但**发行安装包会随包分发**该 GPL-3.0 二进制，故安装包内同时附带 GPL-3.0 许可证全文（`resources/licenses/GPL-3.0.txt`）与第三方声明（`resources/THIRD-PARTY-NOTICES.md`），并给出对应源码获取方式。本项目对 mihomo 未作任何修改。
 - **meta-rules-dat**（geo 数据 `geoip.metadb` / `geosite.dat`，上游许可为 **GPL-3.0**，分发方式同上）。
 
 ---
 
 ## 赞助与投喂
 
-Nyx 是完整开源、功能全给的：没有付费版，没有功能解锁，也不需要署名或表态。如果你用着顺手、想请我喝杯咖啡，下面两个码任选其一，金额随意，扫码即走，不需要留任何信息。
+Nyx 的功能是全给的（源码也全给，只是不许拿去商用）：没有付费版，没有功能解锁，也不需要署名或表态。如果你用着顺手、想请我喝杯咖啡，下面两个码任选其一，金额随意，扫码即走，不需要留任何信息。
 
 | 微信 | 支付宝 |
 | --- | --- |

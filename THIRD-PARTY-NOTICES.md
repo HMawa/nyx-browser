@@ -1,8 +1,8 @@
 # 第三方组件与许可声明（THIRD-PARTY NOTICES）
 
-Nyx（本项目，`package.json` → `"name": "nyx"`, `"version": "1.16.0"`）以 **MIT** 许可证发布，全文见仓库根目录 [`LICENSE`](LICENSE)（`Copyright (c) 2026 Nyx contributors`）。
+Nyx（本项目，`package.json` → `"name": "nyx"`，版本号以 `package.json` 的 `version` 为准）以 **PolyForm Noncommercial License 1.0.0** 授权（源码公开、非商业用途免费、商业用途需事先取得授权），全文见仓库根目录 [`LICENSE`](LICENSE)；该文件首行为本项目的 `Required Notice`，转载与分发时必须一并保留。
 
-本文件列出项目在**构建期**或**分发期**使用的第三方组件，以及它们各自的许可证与义务。除下列组件外，项目自有代码（含 `vendor/edge-abe-helper/edge_abe_helper.cs`）均按 MIT 发布。各第三方组件**不因被本项目使用而改变其许可证**。
+本文件列出项目在**构建期**或**分发期**使用的第三方组件，以及它们各自的许可证与义务。除下列组件外，项目自有代码（含 `vendor/edge-abe-helper/edge_abe_helper.cs`）同样按 PolyForm Noncommercial 1.0.0 授权。各第三方组件**不因被本项目使用而改变其许可证**。
 
 > 说明：本文件是许可事实的汇总声明，不替代各组件许可证原文。若本文件与上游许可证原文冲突，以上游原文为准。
 

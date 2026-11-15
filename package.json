@@ -5,7 +5,7 @@
   "description": "Nyx — 双模式隐私浏览器（普通模式 / 全隐私模式），内置本机代理强制转发",
   "main": "src/main.js",
   "author": "Nyx contributors",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "scripts": {
     "setup-vendor": "node scripts/fetch-vendor.js",
     "start": "electron .",
