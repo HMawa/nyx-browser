@@ -115,6 +115,7 @@ const {
 } = require('./core/page-digest');
 // 清单 A3：进程详情的纯逻辑（命令行参数拼装 + 进程表）
 const { buildProcessRows } = require('./core/process-args');
+const { screenshotFilename } = require('./core/toolbar');
 const {
   CACHE_SITE_MODES,
   addCustomTemplate,
@@ -10157,6 +10158,36 @@ function registerDigestIpc() {
       };
     }
   });
+
+  // 页面截图（清单 B1）：把当前标签可见部分存成 PNG。
+  // 三条纪律：落点同步确定（不出现"先放行再改路径"）、失败说清原因、绝不静默写到用户不知道的地方。
+  ipcMain.handle('nyx:page:screenshot', async () => {
+    const manager = runtime.tabManager;
+    const wc = manager && typeof manager.getActiveWebContents === 'function' ? manager.getActiveWebContents() : null;
+    if (!wc) return { ok: false, code: 'NO_PAGE', error: '当前没有可截图的页面。' };
+    const win = runtime.win || undefined;
+    const picked = dialog.showSaveDialogSync(win, {
+      title: '保存页面截图',
+      defaultPath: path.join(app.getPath('pictures'), screenshotFilename(Date.now())),
+      filters: [{ name: 'PNG 图片', extensions: ['png'] }],
+    });
+    if (!picked) return { ok: false, code: 'CANCELED', error: '已取消截图。' };
+    try {
+      const image = await wc.capturePage();
+      if (!image || image.isEmpty()) {
+        return { ok: false, code: 'EMPTY', error: '这一页现在截不出内容（可能还没加载完）。' };
+      }
+      fs.writeFileSync(picked, image.toPNG());
+      const bytes = fs.statSync(picked).size;
+      diagnostics.info('PAGE_SCREENSHOT', '保存了一张页面截图', { bytes });
+      return { ok: true, path: picked, bytes };
+    } catch (err) {
+      const reason = err && err.message ? err.message : String(err);
+      diagnostics.error('PAGE_SCREENSHOT_FAILED', '页面截图没能保存', { reason });
+      return { ok: false, error: `截图没能保存：${reason}` };
+    }
+  });
+
 
   // 复制进程详情：和摘要复制一样写完回读，剪贴板被占时不许假装成功
   ipcMain.handle('nyx:proc:copy', async (_event, payload) => {

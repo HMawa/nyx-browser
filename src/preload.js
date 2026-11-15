@@ -173,6 +173,7 @@ contextBridge.exposeInMainWorld('nyx', {
   // 清单 A3：进程详情（PID 与系统任务管理器一致，可复制对照）
   processList: () => ipcRenderer.invoke('nyx:proc:list'),
   processCopy: (payload) => ipcRenderer.invoke('nyx:proc:copy', payload || {}),
+  pageScreenshot: () => ipcRenderer.invoke('nyx:page:screenshot'),
   digestSet: (payload) => ipcRenderer.invoke('nyx:digest:set', payload || {}),
   digestRun: (payload) => ipcRenderer.invoke('nyx:digest:run', payload || {}),
   digestCopy: (text) => ipcRenderer.invoke('nyx:digest:copy', { text: String(text || '') }),

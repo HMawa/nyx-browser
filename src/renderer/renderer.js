@@ -61,8 +61,8 @@ const els = {
   peCachedNote: document.getElementById('pe-cached-note'),
   peCachedText: document.getElementById('pe-cached-text'),
   peCachedBlocks: document.getElementById('pe-cached-blocks'),
-  // 页面摘要侧栏（F）：纯抽取式，默认关
-  btnDigest: document.getElementById('btn-digest'),
+  // 页面摘要侧栏（F）：纯抽取式，默认关；入口在「更多」菜单里（清单 B1）
+  btnDigest: document.getElementById('more-digest'),
   digestPanel: document.getElementById('digest-panel'),
   digestEnabled: document.getElementById('digest-enabled'),
   digestClose: document.getElementById('digest-close'),
@@ -72,6 +72,18 @@ const els = {
   digestExportCsv: document.getElementById('digest-export-csv'),
   digestStatus: document.getElementById('digest-status'),
   digestBody: document.getElementById('digest-body'),
+  // 工具栏「更多」（清单 B1）：主路径之外的四个动作收在这里
+  btnMore: document.getElementById('btn-more'),
+  moreMenu: document.getElementById('more-menu'),
+  moreScreenshot: document.getElementById('more-screenshot'),
+  moreExtensions: document.getElementById('more-extensions'),
+  moreProxy: document.getElementById('more-proxy'),
+  toolbarLabels: [
+    document.getElementById('new-tab-label'),
+    document.getElementById('downloads-label'),
+    document.getElementById('toolbox-label'),
+    document.getElementById('more-label'),
+  ].filter(Boolean),
 };
 
 /** 当前界面状态快照 */
@@ -529,9 +541,13 @@ function hideCachedPage() {
  * 用 hidden 类而非内联 style，避免被页面 CSP 的 style-src 拦截。
  */
 function applyUiPrefs() {
-  const ui = state.ui || { showLinkBadge: true, showModeSwitch: true };
+  const ui = state.ui || { showLinkBadge: true, showModeSwitch: true, toolbarLabels: true };
   if (els.linkBadge) els.linkBadge.classList.toggle('hidden', ui.showLinkBadge === false);
   if (els.modeGroup) els.modeGroup.classList.toggle('hidden', ui.showModeSwitch === false);
+  // 按钮小字（清单 B1）：默认显示，认得出图标的人可以在外观里关掉
+  const showLabels = ui.toolbarLabels !== false;
+  for (const label of els.toolbarLabels || []) label.hidden = !showLabels;
+  document.documentElement.classList.toggle('tb-labels', showLabels);
 }
 
 /**
@@ -1558,8 +1574,102 @@ async function exportDigest(format) {
   }
 }
 
+/* ---------------- 工具栏「更多」菜单（清单 B1） ----------------
+ *
+ * 为什么要有这个菜单：常驻按钮每多一个，地址栏就窄一分；而"页面截图 / 页面摘要 /
+ * 扩展开关 / 代理中心"这四件事一周用不到几次。主路径留四个（新建、下载、隐私、工具箱），
+ * 其余收进这里——但要收得可见：菜单项写全名，不藏图标后面。
+ */
+function openMoreMenu() {
+  if (!els.moreMenu) return;
+  els.moreMenu.hidden = false;
+  if (els.btnMore) {
+    els.btnMore.classList.add('is-open');
+    els.btnMore.setAttribute('aria-expanded', 'true');
+  }
+}
+
+function closeMoreMenu() {
+  if (!els.moreMenu || els.moreMenu.hidden) return;
+  els.moreMenu.hidden = true;
+  if (els.btnMore) {
+    els.btnMore.classList.remove('is-open');
+    els.btnMore.setAttribute('aria-expanded', 'false');
+  }
+}
+
+function toggleMoreMenu() {
+  if (!els.moreMenu) return;
+  if (els.moreMenu.hidden) openMoreMenu();
+  else closeMoreMenu();
+}
+
+async function takeScreenshot() {
+  if (!window.nyx || typeof window.nyx.pageScreenshot !== 'function') {
+    showNotice({ level: 'warn', title: '当前内核不支持页面截图', message: '这一版的界面没有接上截图接口。' });
+    return;
+  }
+  try {
+    const res = await window.nyx.pageScreenshot();
+    if (res && res.ok) {
+      showNotice({
+        level: 'ok',
+        title: '截图已保存',
+        message: `${res.path}（${Math.max(1, Math.round((res.bytes || 0) / 1024))} KB）`,
+      });
+      return;
+    }
+    if (res && res.code === 'CANCELED') {
+      showNotice({ level: 'info', title: '已取消截图', message: '没有生成任何文件。' });
+      return;
+    }
+    showNotice({ level: 'warn', title: '没能截图', message: (res && res.error) || '原因未知。' });
+  } catch (err) {
+    showNotice({
+      level: 'warn',
+      title: '没能截图',
+      message: String(err && err.message ? err.message : err),
+    });
+  }
+}
+
+if (els.btnMore) {
+  els.btnMore.addEventListener('click', (event) => {
+    event.stopPropagation();
+    toggleMoreMenu();
+  });
+}
+if (els.moreScreenshot) {
+  els.moreScreenshot.addEventListener('click', () => {
+    closeMoreMenu();
+    takeScreenshot();
+  });
+}
+if (els.moreExtensions) {
+  els.moreExtensions.addEventListener('click', () => {
+    closeMoreMenu();
+    if (window.nyx.openSettings) window.nyx.openSettings({ section: 'extensions' });
+  });
+}
+if (els.moreProxy) {
+  els.moreProxy.addEventListener('click', () => {
+    closeMoreMenu();
+    if (window.nyx.openSettings) window.nyx.openSettings({ section: 'network' });
+  });
+}
+document.addEventListener('click', (event) => {
+  if (!els.moreMenu || els.moreMenu.hidden) return;
+  const target = event.target;
+  if (els.moreMenu.contains(target) || (els.btnMore && els.btnMore.contains(target))) return;
+  closeMoreMenu();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeMoreMenu();
+}, true);
+
 if (els.btnDigest) {
   els.btnDigest.addEventListener('click', () => {
+    closeMoreMenu();
     if (!els.digestPanel) return;
     if (els.digestPanel.hidden) openDigestPanel();
     else closeDigestPanel();

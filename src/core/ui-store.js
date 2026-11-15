@@ -17,6 +17,11 @@ const UI_PREF_DEFAULTS = {
   showLinkBadge: true,
   /** 顶栏是否显示隐私模式开关 */
   showModeSwitch: true,
+  /**
+   * 顶栏按钮是否带小字标签（清单 B1）。
+   * 默认开：图标认不出来的时候，一行小字比 tooltip 更救急；认得出的人可以在外观里关掉。
+   */
+  toolbarLabels: true,
   /** 界面主题：ink 墨夜 / aurora 极光 / paper 素纸 / quiet 静谧 */
   theme: 'ink',
   /** 下载保存目录；空字符串 = 跟随系统下载目录 */

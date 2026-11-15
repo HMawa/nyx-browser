@@ -1103,6 +1103,7 @@
     }
     byId('pref-show-link-badge').checked = uiPrefs.showLinkBadge !== false;
     byId('pref-show-mode-switch').checked = uiPrefs.showModeSwitch !== false;
+    if (byId('pref-toolbar-labels')) byId('pref-toolbar-labels').checked = uiPrefs.toolbarLabels !== false;
     // 主题回填 + 设置窗口自身立即换肤（主窗口由主进程 pushState 同步）
     byId('pref-theme').value = uiPrefs.theme || 'ink';
     document.documentElement.dataset.theme = uiPrefs.theme || 'ink';
@@ -1117,7 +1118,12 @@
       return;
     }
     uiPrefs = res.ui;
-    const label = key === 'showLinkBadge' ? '出站链路徽标' : '隐私模式开关';
+    const label =
+      key === 'showLinkBadge'
+        ? '出站链路徽标'
+        : key === 'toolbarLabels'
+          ? '顶栏按钮文字'
+          : '隐私模式开关';
     byId('appearance-hint').textContent = `${label}已${value ? '显示' : '隐藏'}，主窗口顶栏已同步。`;
     setStatus('外观设置已更新');
   }
@@ -1129,6 +1135,12 @@
   byId('pref-show-mode-switch').addEventListener('change', (event) => {
     saveUiPref('showModeSwitch', event.target.checked);
   });
+
+  if (byId('pref-toolbar-labels')) {
+    byId('pref-toolbar-labels').addEventListener('change', (event) => {
+      saveUiPref('toolbarLabels', event.target.checked);
+    });
+  }
 
   // 主题切换：只写偏好，主窗口由主进程 pushState 同步；设置窗口自己立即换肤
   byId('pref-theme').addEventListener('change', async (event) => {

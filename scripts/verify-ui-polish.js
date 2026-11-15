@@ -3087,10 +3087,65 @@ async function main() {
       JSON.stringify(modeFlow.done) + JSON.stringify(modeFlow.back),
     );
 
+    /* ---------- 工具栏主路径 + 「更多」菜单（清单 B1） ---------- */
+    const toolbarFlow = await shell.eval(`(async () => {
+      const more = document.getElementById('btn-more');
+      const menu = document.getElementById('more-menu');
+      if (!more || !menu) return { noUi: true };
+      const labels = Array.from(document.querySelectorAll('.tb-label')).map((el) => ({
+        text: el.textContent.trim(),
+        visible: !el.hidden,
+      }));
+      const before = { hidden: menu.hidden, expanded: more.getAttribute('aria-expanded') };
+
+      more.click();
+      await new Promise((r) => setTimeout(r, 250));
+      const opened = {
+        hidden: menu.hidden,
+        expanded: more.getAttribute('aria-expanded'),
+        items: Array.from(menu.querySelectorAll('.more-item')).map((el) => el.textContent.replace(/\\s+/g, ' ').trim()),
+        rect: (() => { const r = menu.getBoundingClientRect(); return { top: Math.round(r.top), right: Math.round(r.right), w: Math.round(r.width) }; })(),
+        innerWidth: window.innerWidth,
+      };
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await new Promise((r) => setTimeout(r, 250));
+      const closed = { hidden: menu.hidden, expanded: more.getAttribute('aria-expanded') };
+
+      // 页面摘要的入口只应该有一个：原来那颗 #btn-digest 必须已经不在了
+      const legacyDigest = Boolean(document.getElementById('btn-digest'));
+      return { noUi: false, labels, before, opened, closed, legacyDigest };
+    })()`);
+    check(
+      '顶栏只留四个主路径，其余收进「更多」菜单，且按钮带小字标签（B1）',
+      toolbarFlow
+        && toolbarFlow.noUi !== true
+        && toolbarFlow.before.hidden === true
+        && toolbarFlow.opened.hidden === false
+        && toolbarFlow.opened.expanded === 'true'
+        && toolbarFlow.opened.items.length === 4
+        && toolbarFlow.opened.items.some((t) => /页面截图/.test(t))
+        && toolbarFlow.opened.items.some((t) => /页面摘要/.test(t))
+        && toolbarFlow.opened.items.some((t) => /扩展开关/.test(t))
+        && toolbarFlow.opened.items.some((t) => /代理中心/.test(t))
+        && toolbarFlow.opened.rect.right <= toolbarFlow.opened.innerWidth
+        && toolbarFlow.opened.rect.w >= 200
+        && toolbarFlow.closed.hidden === true
+        && toolbarFlow.closed.expanded === 'false'
+        && toolbarFlow.legacyDigest === false
+        && toolbarFlow.labels.length >= 4
+        && toolbarFlow.labels.some((item) => item.text === '下载' && item.visible)
+        && toolbarFlow.labels.some((item) => item.text === '工具箱' && item.visible),
+      JSON.stringify(toolbarFlow),
+    );
+
     /* ---------- 页面摘要（清单 F）：默认关 → 明确原因；开启后能抽取正文 + 网络结论 ---------- */
     // 先确认默认是关的（userData 是隔离的，没写过 digestEnabled）
     const digestDefault = await shell.eval(`window.nyx.digestGet()`);
-    await shell.eval(`document.getElementById('btn-digest').click()`);
+    // 入口在「更多」菜单里（B1 之后没有独立的摘要按钮了），所以先展开菜单再点
+    await shell.eval(`document.getElementById('btn-more').click()`);
+    await sleep(250);
+    await shell.eval(`document.getElementById('more-digest').click()`);
     await sleep(400);
     await shell.eval(`document.getElementById('digest-run').click()`);
     await sleep(700);

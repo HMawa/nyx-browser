@@ -2731,6 +2731,111 @@ body.private-mode .shell {
   }
 }
 
+/* ---------- 工具栏四个主路径 + 「更多」菜单（清单 B1，v1.17.9） ---------- */
+
+/* 小字标签：默认显示，认得出图标的人可在「外观」里关掉（关掉后按钮回到 30px 方块） */
+.tb-label {
+  margin-left: 4px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.tb-labels .icon-btn {
+  width: auto;
+  min-width: 30px;
+  padding: 0 7px;
+  gap: 0;
+}
+
+.tb-labels .dl-entry {
+  position: relative;
+}
+
+.more-group {
+  position: relative;
+  display: inline-flex;
+}
+
+.more-entry.is-open {
+  border-color: var(--accent);
+  color: var(--accent-soft);
+  background: color-mix(in srgb, var(--bg-tab) 76%, var(--accent) 24%);
+}
+
+.more-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 950;
+  width: 226px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--bg-tab);
+  box-shadow: 0 22px 48px -26px rgba(0, 0, 0, 0.85);
+}
+
+.more-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-main);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+.more-item:hover {
+  background: color-mix(in srgb, var(--bg-tab) 80%, var(--accent) 20%);
+}
+
+.more-item:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+  box-shadow: var(--ring);
+}
+
+.more-item-icon {
+  width: 18px;
+  font-size: 13px;
+  line-height: 18px;
+  text-align: center;
+  color: var(--text-faint);
+}
+
+.more-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.more-item-text strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.more-item-text small {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .more-item,
+  .more-entry {
+    transition: none;
+  }
+}
+
 /* ---------- agent 状态灯与窄面板（清单 A5，v1.17.9） ---------- */
 
 .agent-lamp {

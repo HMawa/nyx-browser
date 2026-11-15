@@ -19,7 +19,10 @@
       <!-- 标签列表 -->
       <div class="tabbar">
         <div class="tabs" id="tabs" role="tablist" aria-label="标签页"></div>
-        <button class="icon-btn new-tab" id="new-tab" title="新建标签">＋</button>
+        <button class="icon-btn new-tab" id="new-tab" title="新建标签">
+          ＋
+          <span class="tb-label" id="new-tab-label" hidden>新建</span>
+        </button>
       </div>
 
       <!-- 工具栏 -->
@@ -42,10 +45,32 @@
         <!-- 书签星标（v1.4.0）：收藏 / 取消收藏当前页；状态由 renderer.js 按当前标签刷新 -->
         <button class="icon-btn bm-star" id="btn-bookmark" title="收藏当前页">☆</button>
 
-        <!-- 页面摘要（F）：侧栏展示 + 一键复制；默认关，开关本身在这里，用户点了才读页面 -->
-        <button class="icon-btn" id="btn-digest" title="页面摘要（纯抽取，默认关闭）">
-          <span aria-hidden="true">≡</span>
-        </button>
+        <!-- 页面截图 / 页面摘要 / 扩展开关 / 代理中心（清单 B1）：这四项不是每天用，
+             收进「更多」菜单；常驻的只有新建、下载、隐私、工具箱四个主路径。 -->
+        <div class="more-group">
+          <button class="icon-btn more-entry" id="btn-more" title="更多：页面截图、页面摘要、扩展开关、代理中心" aria-haspopup="menu" aria-expanded="false" aria-controls="more-menu">
+            <span aria-hidden="true">⋯</span>
+            <span class="tb-label" id="more-label" hidden>更多</span>
+          </button>
+          <div class="more-menu" id="more-menu" role="menu" hidden>
+            <button class="more-item" id="more-screenshot" role="menuitem" type="button">
+              <span class="more-item-icon" aria-hidden="true">▣</span>
+              <span class="more-item-text"><strong>页面截图</strong><small id="more-screenshot-hint">把当前页存成 PNG</small></span>
+            </button>
+            <button class="more-item" id="more-digest" role="menuitem" type="button">
+              <span class="more-item-icon" aria-hidden="true">≡</span>
+              <span class="more-item-text"><strong>页面摘要</strong><small id="more-digest-hint">纯抽取，默认关闭</small></span>
+            </button>
+            <button class="more-item" id="more-extensions" role="menuitem" type="button">
+              <span class="more-item-icon" aria-hidden="true">⊞</span>
+              <span class="more-item-text"><strong>扩展开关</strong><small>设置 → 扩展</small></span>
+            </button>
+            <button class="more-item" id="more-proxy" role="menuitem" type="button">
+              <span class="more-item-icon" aria-hidden="true">⇄</span>
+              <span class="more-item-text"><strong>代理中心</strong><small>设置 → 网络与代理</small></span>
+            </button>
+          </div>
+        </div>
 
         <button
           class="icon-btn"
@@ -53,6 +78,7 @@
           title="工具箱：资源嗅探、网络抓包、开发者模式、页面环境"
         >
           ⛭
+          <span class="tb-label" id="toolbox-label" hidden>工具箱</span>
         </button>
 
         <!-- 下载中心（A1）：进行中的数量用角标显示，失败可一眼看出 -->
@@ -60,6 +86,7 @@
           <span aria-hidden="true">⇩</span>
           <span class="dl-badge" id="dl-badge" hidden>0</span>
           <span class="sr-only" id="dl-badge-label"></span>
+          <span class="tb-label" id="downloads-label" hidden>下载</span>
         </button>
 
         <!-- 断网提示（G 的离线/在线部分）：只说明"是断网，不是代理坏了"，链路不动 -->

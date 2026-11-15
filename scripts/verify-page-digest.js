@@ -221,7 +221,9 @@ async function main() {
 
     const html = readFile('src/renderer/index.html');
     assert.ok(html.includes('id="digest-panel"'), '外壳缺少摘要侧栏');
-    assert.ok(html.includes('id="btn-digest"'), '外壳缺少摘要入口按钮');
+    // 入口在「更多」菜单里（清单 B1 把主路径之外的按钮收进菜单），且只保留这一个入口
+    assert.ok(html.includes('id="more-digest"'), '外壳缺少摘要入口（更多菜单里的「页面摘要」）');
+    assert.ok(!html.includes('id="btn-digest"'), '摘要入口应只有一处，旧的独立按钮要已移除');
     assert.ok(html.includes('id="digest-enabled"'), '侧栏缺少开关');
 
     const renderer = readFile('src/renderer/renderer.js');
