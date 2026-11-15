@@ -27,7 +27,7 @@ const UI_PREF_DEFAULTS = {
    * 只影响小按钮的过渡与按压缩放；系统开了「减少动效」时一律降到最短，不看这个值。
    */
   motionLevel: 'calm',
-  /** 界面主题：ink 墨夜 / aurora 极光 / paper 素纸 / quiet 静谧 */
+  /** 界面主题：ink 墨夜 / aurora 极光 / paper 素纸 / quiet 静谧 / cream 奶白 / sea 海盐 */
   theme: 'ink',
   /** 下载保存目录；空字符串 = 跟随系统下载目录 */
   downloadDir: '',
@@ -116,7 +116,7 @@ const UI_PREF_DEFAULTS = {
 /** 枚举型偏好的合法取值（键 → 允许值）。
  *  与 theme-nyx.css 里 <html data-theme="…"> 的取值必须一一对应。 */
 const UI_PREF_ENUMS = {
-  theme: ['ink', 'aurora', 'paper', 'quiet'],
+  theme: ['ink', 'aurora', 'paper', 'quiet', 'cream', 'sea'],
   privacyLink: ['proxy', 'direct'],
   gpuPolicy: ['low-power', 'high-performance', 'auto'],
   cacheSiteMode: ['all', 'allowlist'],

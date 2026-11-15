@@ -394,7 +394,14 @@
       body.style.maxHeight = '0px';
     } else {
       card.classList.remove('is-folded');
-      body.style.maxHeight = `${body.scrollHeight}px`;
+      // 分区不可见时（display:none）scrollHeight 是 0，把它写进 max-height 就等于
+      // 「铺开了但高度 0」。量不到真实高度就直接给 auto，别拿 0 当目标值。
+      const height = body.scrollHeight;
+      if (!height) {
+        body.style.maxHeight = '';
+        return;
+      }
+      body.style.maxHeight = `${height}px`;
       window.setTimeout(() => {
         if (!card.classList.contains('is-folded')) body.style.maxHeight = '';
       }, 200);
@@ -1109,7 +1116,31 @@
     // 主题回填 + 设置窗口自身立即换肤（主窗口由主进程 pushState 同步）
     byId('pref-theme').value = uiPrefs.theme || 'ink';
     document.documentElement.dataset.theme = uiPrefs.theme || 'ink';
+    renderDisplayBadges(uiPrefs);
     byId('appearance-state').textContent = '已生效';
+  }
+
+  /** 「主题与显示」三个徽标（清单 D3）：当前主题 / 动效档位 / 顶栏小字，一眼看到改了没有 */
+  const DISPLAY_THEME_LABELS = {
+    ink: '墨夜',
+    aurora: '极光',
+    paper: '素纸',
+    quiet: '静谧',
+    cream: '奶白',
+    sea: '海盐',
+  };
+
+  function renderDisplayBadges(ui) {
+    const theme = (ui && ui.theme) || 'ink';
+    const motion = (ui && ui.motionLevel) === 'lively' ? '活泼' : '克制';
+    const labels = (ui && ui.toolbarLabels) !== false;
+    const setBadge = (id, text) => {
+      const node = byId(id);
+      if (node) node.textContent = text;
+    };
+    setBadge('display-theme-badge', DISPLAY_THEME_LABELS[theme] || theme);
+    setBadge('display-motion-badge', `${motion} · 顶栏小字${labels ? '开' : '关'}`);
+    setBadge('display-badge', `${DISPLAY_THEME_LABELS[theme] || theme}`);
   }
 
   /**
@@ -1192,6 +1223,7 @@
     }
     uiPrefs = res.ui;
     document.documentElement.dataset.theme = theme;
+    renderDisplayBadges(res.ui);
     byId('appearance-hint').textContent = `主题已切换为${
       event.target.selectedOptions[0].textContent
     }，主窗口已同步。`;
@@ -1202,8 +1234,12 @@
     await saveUiPref('showLinkBadge', true);
     await saveUiPref('showModeSwitch', true);
     await saveUiPref('theme', 'ink');
+    // 「回复默认外观」现在也管这一页的三项：动效回克制、顶栏小字回开
+    await saveUiPref('motionLevel', 'calm');
+    await saveUiPref('toolbarLabels', true);
     await loadUiPrefs();
-    byId('appearance-hint').textContent = '已恢复默认外观：墨夜主题，顶栏显示链路徽标与模式开关。';
+    byId('appearance-hint').textContent =
+      '已恢复默认外观：墨夜主题、克制动效、顶栏显示小字与链路徽标、模式开关。';
     setStatus('外观已恢复默认');
   });
 
@@ -4285,11 +4321,38 @@ async function loadFootprint() {
   /* 初始化                                                              */
   /* ------------------------------------------------------------------ */
 
+  /**
+   * 带超时的初始化步骤（清单 D3 顺手修）：失败或超时都只记一条警告，
+   * 绝不让"一件小事没回来"变成"整页功能静默消失"。
+   */
+  async function settleInit(label, timeoutMs, fn) {
+    let timer = null;
+    try {
+      await Promise.race([
+        Promise.resolve().then(fn),
+        new Promise((resolve) => {
+          timer = setTimeout(() => {
+            console.warn(`[Nyx] ${label}在 ${timeoutMs}ms 内没有返回，先跳过它继续初始化。`);
+            resolve();
+          }, timeoutMs);
+        }),
+      ]);
+    } catch (err) {
+      console.warn(`[Nyx] ${label}加载失败，继续初始化：`, err);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   async function init() {
     bindScrollMemory();
-    await Promise.all([loadUiPrefs(), loadAppInfo(), loadHardware()]);
-    // 折叠态依赖界面偏好（settingsFold），必须等 loadUiPrefs 落地再增强卡片
+    // 折叠只依赖界面偏好，所以先把偏好等到手、立刻增强卡片，再让另外两件慢慢来。
+    // （硬件探测在部分驱动/远程会话下会挂住；把它排在折叠前面就等于"一颗钉子钉住整页"。）
+    await settleInit('界面偏好', 8000, loadUiPrefs);
     setupCardFolding();
+    // 这两件不影响折叠，失败也只是少了版本号/硬件信息，放在后台各自跑
+    settleInit('应用信息', 8000, loadAppInfo);
+    settleInit('硬件信息', 8000, loadHardware);
     await loadStartupPrefs();
     bindDownloadPrefs();
     await loadDownloadPrefs();
@@ -5036,13 +5099,91 @@ async function loadFootprint() {
     wireAgentSection();
     wireAgentSites();
     wireAgentMode();
+    wireAgentDoc();
     wireDigestSetting();
     loadAgentStatus();
     loadAgentAudit();
     loadAgentSites();
     loadAgentMode();
+    loadAgentDoc();
     loadDigestSetting();
     loadAgentSettings();
+  }
+
+  /**
+   * 接入说明（清单 D1）。
+   *
+   * 这里刻意不"预览全文"：说明里含 token 文件位置与当前端口，全文摆在设置页上反而容易被
+   * 顺手截屏外传。只显示字符数与模式，复制/保存都在主进程生成，界面只是一层壳。
+   */
+  let agentDocWired = false;
+
+  function renderAgentDoc(res) {
+    const badge = byId('agent-doc-badge');
+    const size = byId('agent-doc-size');
+    const ok = Boolean(res && res.ok);
+    if (badge) {
+      badge.textContent = ok ? `${res.mode === 'external' ? '外部接入' : '内置'} · ${res.markdown.length} 字` : '读不到';
+      badge.className = `badge ${ok ? (res.auditComplete === false ? 'warn' : 'ok') : 'bad'}`;
+    }
+    if (size) size.textContent = ok ? `共 ${res.markdown.split('\n').length} 行` : '—';
+  }
+
+  async function loadAgentDoc() {
+    if (!window.nyx || typeof window.nyx.agentDoc !== 'function') {
+      setAgentDocStatus('当前内核不支持生成接入说明。', true);
+      return;
+    }
+    try {
+      const res = await window.nyx.agentDoc();
+      renderAgentDoc(res);
+      if (res && res.ok === false) setAgentDocStatus(res.error || '接入说明没能生成。', true);
+    } catch (err) {
+      setAgentDocStatus(`读取接入说明失败：${err && err.message ? err.message : err}`, true);
+    }
+  }
+
+  function setAgentDocStatus(text, bad) {
+    const line = byId('agent-doc-status');
+    if (!line) return;
+    line.className = bad ? 'hint is-warn' : 'hint';
+    line.textContent = text;
+  }
+
+  function wireAgentDoc() {
+    if (agentDocWired) return;
+    agentDocWired = true;
+    const copy = byId('btn-agent-doc-copy');
+    const save = byId('btn-agent-doc-save');
+    if (copy) {
+      copy.addEventListener('click', async () => {
+        copy.disabled = true;
+        try {
+          const res = await window.nyx.agentDocCopy();
+          if (res && res.ok) setAgentDocStatus(`已复制 ${res.chars} 字，直接粘给你的 agent 就行。`);
+          else setAgentDocStatus((res && res.error) || '没能复制接入说明。', true);
+        } catch (err) {
+          setAgentDocStatus(`没能复制接入说明：${err && err.message ? err.message : err}`, true);
+        } finally {
+          copy.disabled = false;
+        }
+      });
+    }
+    if (save) {
+      save.addEventListener('click', async () => {
+        save.disabled = true;
+        try {
+          const res = await window.nyx.agentDocSave();
+          if (res && res.ok) setAgentDocStatus(`已保存 ${res.bytes} 字节：${res.path}`);
+          else if (res && res.code === 'CANCELED') setAgentDocStatus('已取消保存。');
+          else setAgentDocStatus((res && res.error) || '没能保存接入说明。', true);
+        } catch (err) {
+          setAgentDocStatus(`没能保存接入说明：${err && err.message ? err.message : err}`, true);
+        } finally {
+          save.disabled = false;
+        }
+      });
+    }
   }
 
   /**

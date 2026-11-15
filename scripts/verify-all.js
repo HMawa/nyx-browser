@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把三十一个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把三十二个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
@@ -35,6 +35,7 @@
  * 29. scripts/verify-onboard.js（首次安装引导：四种判定口径、选"先不定"不落盘、"全部默认"一步落盘、非法取值整组拒绝，10 项；纯 Node，不启动 Electron）
  * 30. scripts/verify-onboard-e2e.js（首次引导真机：全新安装弹一次、点默认后落盘并关窗、再启动与升级安装都不弹，7 项）
  * 31. scripts/verify-agent-doc.js（agent 接入说明：端点来自运行时、两种模式边界、会被拦下的四种情况、复制回读，9 项；纯 Node，不启动 Electron）
+ * 32. scripts/verify-themes.js（主题：六套主题与枚举一一对应、新主题令牌齐全、对比度实算、不许有渐变、主题与显示分区，7 项；纯 Node，不启动 Electron）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -255,6 +256,12 @@ const STEPS = [
     label: 'agent 接入说明回归',
     script: 'verify-agent-doc.js',
     items: '9 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '主题回归',
+    script: 'verify-themes.js',
+    items: '7 项',
     timeoutMs: 60000,
   },
 ];

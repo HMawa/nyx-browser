@@ -1761,6 +1761,12 @@
   transition: max-height 0.16s ease, opacity 0.16s ease;
 }
 
+/* 分区里卡片一多，flex 默认会把它们压扁：铺开的那张会被挤成 0 高（点开像没反应）。
+   卡片按内容高度排，超出就让 .sec-scroll 自己滚。 */
+.sec-scroll > .info-card {
+  flex: 0 0 auto;
+}
+
 .info-card.is-folded .info-body {
   max-height: 0;
   opacity: 0;

@@ -25,6 +25,7 @@
 
         <ul class="nav-list" id="nav-list">
           <li><button type="button" class="nav-item active" data-sec="appearance">外观</button></li>
+          <li><button type="button" class="nav-item" data-sec="display">主题与显示</button></li>
           <li><button type="button" class="nav-item" data-sec="startup">启动与主页</button></li>
           <li><button type="button" class="nav-item" data-sec="privacy">隐私与安全</button></li>
           <li><button type="button" class="nav-item" data-sec="network">网络与代理</button></li>
@@ -85,53 +86,93 @@
                   </div>
                 </div>
 
-                <!-- 顶栏按钮小字（清单 B1）：图标认不出来的时候，一行小字比 tooltip 更救急 -->
-                <div class="set-row">
-                  <div class="set-row-label">
-                    <div class="set-row-name">顶栏按钮显示文字标签</div>
-                    <div class="set-row-desc">
-                      下载、工具箱、更多这几个按钮旁边显示一行小字。关掉只剩图标，顶栏更窄。
-                    </div>
-                  </div>
-                  <div class="set-row-ctl">
-                    <label class="set-switch">
-                      <input type="checkbox" id="pref-toolbar-labels" />
-                      <span>显示</span>
-                    </label>
-                  </div>
-                </div>
+                <p class="hint">
+                  主题、动效档位、顶栏按钮要不要显示小字，都收在「主题与显示」那一页——
+                  它们互相关联（换深色/浅色会连带改按钮对比），分开放容易只改一半。
+                </p>
+              </div>
+            </div>
+            </section>
 
-                <div class="set-row">
-                  <div class="set-row-main">
-                    <div class="set-row-title">动效档位</div>
-                    <div class="set-row-desc">
-                      克制（默认）快而干脆；活泼按下会略微回弹。只影响小按钮的过渡。系统开了「减少动效」时一律降到最短。
-                    </div>
-                  </div>
-                  <div class="set-row-ctl">
-                    <select id="pref-motion-level" class="set-select">
-                      <option value="calm" selected>克制</option>
-                      <option value="lively">活泼</option>
-                    </select>
-                  </div>
-                </div>
+            <!-- 主题与显示（清单 D3）：主题 / 动效 / 顶栏小字 / 恢复默认外观 -->
+            <section class="sec-panel" data-sec="display">
+              <div class="sec-head">
+                <h2>主题与显示</h2>
+                <span class="badge" id="display-badge">—</span>
+                <div class="sec-fold-tools" data-fold-tools="display"></div>
+              </div>
+              <div class="sec-scroll">
+                <p class="hint">
+                  只影响外观，不改任何隐私与网络行为。字体大小跟随系统缩放；
+                  这一页暂时没有单独的「字号档位」——那需要先把整站 px 排版改成字级变量，属于独立改造，不在这儿顺手做。
+                </p>
 
-                <div class="set-row">
-                  <div class="set-row-main">
-                    <div class="set-row-title">界面主题</div>
-                    <div class="set-row-desc">
-                      墨夜（默认）/ 极光 / 素纸 / 静谧。只影响外观，不改变任何隐私与网络行为。
+                <section class="info-card">
+                  <div class="info-head">
+                    <h3>主题</h3>
+                    <span class="badge" id="display-theme-badge">—</span>
+                  </div>
+                  <div class="info-body">
+                    <div class="set-row">
+                      <div class="set-row-main">
+                        <div class="set-row-title">界面主题</div>
+                        <div class="set-row-desc">
+                          墨夜（默认）/ 极光 / 素纸 / 静谧 / 奶白 / 海盐。奶白与海盐都是纯色底 + 发丝边框，
+                          没有渐变、没有光斑——换配色就换配色，不加装饰。
+                        </div>
+                      </div>
+                      <div class="set-row-ctl">
+                        <select id="pref-theme" class="set-select">
+                          <option value="ink">墨夜 Ink Night</option>
+                          <option value="aurora">极光 Aurora</option>
+                          <option value="paper">素纸 Paper</option>
+                          <option value="quiet">静谧 Quiet</option>
+                          <option value="cream">奶白 Cream</option>
+                          <option value="sea">海盐 Sea Salt</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
-                  <div class="set-row-ctl">
-                    <select id="pref-theme" class="set-select">
-                      <option value="ink">墨夜 Ink Night</option>
-                      <option value="aurora">极光 Aurora</option>
-                      <option value="paper">素纸 Paper</option>
-                      <option value="quiet">静谧 Quiet</option>
-                    </select>
+                </section>
+
+                <section class="info-card">
+                  <div class="info-head">
+                    <h3>动效与顶栏</h3>
+                    <span class="badge" id="display-motion-badge">—</span>
                   </div>
-                </div>
+                  <div class="info-body">
+                    <div class="set-row">
+                      <div class="set-row-main">
+                        <div class="set-row-title">动效档位</div>
+                        <div class="set-row-desc">
+                          克制（默认）快而干脆；活泼按下会略微回弹。只影响小按钮的过渡。系统开了「减少动效」时一律降到最短。
+                        </div>
+                      </div>
+                      <div class="set-row-ctl">
+                        <select id="pref-motion-level" class="set-select">
+                          <option value="calm" selected>克制</option>
+                          <option value="lively">活泼</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <!-- 顶栏按钮小字（清单 B1）：图标认不出来的时候，一行小字比 tooltip 更救急 -->
+                    <div class="set-row">
+                      <div class="set-row-label">
+                        <div class="set-row-name">顶栏按钮显示文字标签</div>
+                        <div class="set-row-desc">
+                          下载、工具箱、更多这几个按钮旁边显示一行小字。关掉只剩图标，顶栏更窄。
+                        </div>
+                      </div>
+                      <div class="set-row-ctl">
+                        <label class="set-switch">
+                          <input type="checkbox" id="pref-toolbar-labels" />
+                          <span>显示</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </section>
 
                 <div class="sec-actions">
                   <button type="button" class="btn" id="btn-appearance-reset">恢复默认外观</button>
@@ -1097,6 +1138,26 @@
                 </div>
                 <p class="hint" id="agent-sites-current"></p>
                 <p class="hint" id="agent-sites-status" role="status" aria-live="polite"></p>
+              </div>
+            </section>
+
+            <section class="info-card">
+              <div class="info-head">
+                <h3>接入说明</h3>
+                <span class="badge" id="agent-doc-badge">—</span>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  把别的 agent 接进来时，它需要知道端点、鉴权头、能做什么、会被什么拦下来、出错了先看哪。
+                  下面这份说明按<strong>当前真实状态</strong>生成（端口、模式、急停、白名单条数都是现读的），
+                  可以整段粘给对方。里面写死了两条边界：本地接口只监听回环、外部接入模式下审计不完整。
+                </p>
+                <div class="agent-site-tools">
+                  <button class="btn btn-mini" id="btn-agent-doc-copy">复制接入说明</button>
+                  <button class="btn btn-mini" id="btn-agent-doc-save">保存为 .md</button>
+                  <span class="hint" id="agent-doc-size">—</span>
+                </div>
+                <p class="hint" id="agent-doc-status" role="status" aria-live="polite"></p>
               </div>
             </section>
 
