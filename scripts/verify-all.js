@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把二十三个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把二十四个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
@@ -27,6 +27,7 @@
  * 21. scripts/verify-release-gate.js（发版门禁、安装器 e2e 接线、验签挑包、差分命中率实测与过期判定、asar 差分结论、夜间 e2e 注册计划任务与状态卡、计划任务改时间/删任务的界面入口、发版后自动量差分，45 项；纯 Node，不跑安装包）
  * 22. scripts/verify-signing.js（安装包签名、密码存凭据管理器、证书有效期、签名状态进界面与打包接线，35 项；不看签名包时只跑静态守卫）
  * 23. scripts/verify-agent-settings.js（agent 改设置：白名单 / 锁死 / 确认 / 限流 / 多步撤销 / 场景预设 / 改动聚合视图与按时间筛选、CSV 导出 / 动作聚合（按类型与站点、被拦下单独报数）、动作记录也导出 CSV，34 项；纯 Node）
+ * 24. scripts/verify-process-args.js（进程可辨识：命令行身份参数、进程表与 PID、不承诺改映像名，11 项；纯 Node，不启动 Electron）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -200,6 +201,12 @@ const STEPS = [
     /** 依赖解包产物：不存在就跳过（跳过不算失败） */
     requires: path.join(ROOT, 'dist', 'win-unpacked', 'Nyx.exe'),
     skipHint: '请先 npm run dist:dir',
+  },
+  {
+    label: '进程可辨识回归',
+    script: 'verify-process-args.js',
+    items: '11 项',
+    timeoutMs: 60000,
   },
 ];
 

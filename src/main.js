@@ -112,6 +112,8 @@ const {
   summarize: summarizePage,
   summarizeNetwork,
 } = require('./core/page-digest');
+// 清单 A3：进程详情的纯逻辑（命令行参数拼装 + 进程表）
+const { buildProcessRows } = require('./core/process-args');
 const {
   CACHE_SITE_MODES,
   addCustomTemplate,
@@ -10055,6 +10057,54 @@ function registerDigestIpc() {
     } catch (err) {
       diagnostics.error('DIGEST_FAILED', '生成页面摘要失败', { error: err && err.message });
       return { ok: false, code: 'DIGEST_FAILED', error: `没能读取这一页：${err && err.message ? err.message : err}` };
+    }
+  });
+
+  /**
+   * 进程详情（清单 A3）。
+   *
+   * 用户要的是「在系统资源管理器里看到浏览器的进程详情」。能做到的是：
+   * 每个标签视图带 --nyx-kind / --nyx-tab / --nyx-host（任务管理器命令行列可见），
+   * 加上这张 PID 表——PID 与系统里完全一致，可以复制过去对照。
+   * 做不到的是改映像名：Windows 上每个 Electron 进程都叫 Nyx.exe，这版也不假装能改。
+   */
+  ipcMain.handle('nyx:proc:list', async () => {
+    try {
+      const metrics = app.getAppMetrics();
+      const manager = runtime.tabManager;
+      const tabs = manager && Array.isArray(manager.tabs) ? manager.tabs : [];
+      const rows = tabs.map((tab) => {
+        let pid = 0;
+        try {
+          pid = tab && tab.view ? tab.view.webContents.getOSProcessId() : 0;
+        } catch {
+          pid = 0;
+        }
+        return { id: tab.id, pid, url: tab.url, title: tab.title, asleep: Boolean(tab.asleep) };
+      });
+      return buildProcessRows({ metrics, tabs: rows, mainPid: process.pid });
+    } catch (err) {
+      return {
+        ok: false,
+        error: `读不到进程信息：${err && err.message ? err.message : err}`,
+      };
+    }
+  });
+
+  // 复制进程详情：和摘要复制一样写完回读，剪贴板被占时不许假装成功
+  ipcMain.handle('nyx:proc:copy', async (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    const text = typeof input.text === 'string' ? input.text : '';
+    if (!text) return { ok: false, error: '没有可复制的内容' };
+    try {
+      await writeClipboardText(text);
+      const readback = await readClipboardText();
+      if (!readback || !readback.includes(text.split('\n')[0].slice(0, 20))) {
+        return { ok: false, error: '系统剪贴板当前不可用（可能被其它程序占用），进程详情没能复制' };
+      }
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: `复制失败：${err && err.message ? err.message : err}` };
     }
   });
 

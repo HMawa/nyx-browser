@@ -3808,6 +3808,54 @@ async function main() {
       } catch (err) {
         check('夜间 e2e 状态卡端到端检查未中断', false, err && err.message);
       }
+
+      /* ---------- 进程详情（清单 A3）：能看到 PID，并如实说映像名改不了 ---------- */
+      try {
+        // 进入诊断分区后是异步拉取：轮询到表格有行为止（这里必须用设置页的 target，
+        // 外壳页里没有 .nav-item，之前拿 shell 去点会 TypeError）
+        const proc = await settings.eval(`(async () => {
+          const nav = document.querySelector('.nav-item[data-sec="diagnostics"]');
+          if (nav) nav.click();
+          for (let i = 0; i < 24; i += 1) {
+            const rows = document.querySelectorAll('#proc-rows tr');
+            if (rows.length > 0) break;
+            await new Promise((r) => setTimeout(r, 250));
+          }
+          const rows = Array.from(document.querySelectorAll('#proc-rows tr')).map((tr) => ({
+            pid: tr.children[0] ? tr.children[0].textContent.trim() : '',
+            what: tr.children[1] ? tr.children[1].textContent.trim() : '',
+            mem: tr.children[2] ? tr.children[2].textContent.trim() : '',
+          }));
+          const badge = document.getElementById('proc-badge');
+          const hint = document.getElementById('proc-hint');
+          return {
+            hasApi: Boolean(window.nyx.processList),
+            rows,
+            mainIsFirst: rows.length > 0 ? /主进程/.test(rows[0].what) : false,
+            badge: badge ? badge.textContent.trim() : '',
+            badgeClass: badge ? badge.className : '',
+            hintText: hint ? hint.textContent.replace(/\\s+/g, ' ').trim() : '',
+            copyWired: Boolean(document.getElementById('btn-proc-copy')),
+          };
+        })()`);
+        check(
+          '设置 → 诊断能看到进程详情：主进程排第一、PID 都填了，并如实说明映像名改不了（A3）',
+          proc
+            && proc.hasApi === true
+            && Array.isArray(proc.rows)
+            && proc.rows.length > 0
+            && proc.rows.every((row) => /^\d+$/.test(row.pid) && /MB$/.test(row.mem))
+            && proc.mainIsFirst === true
+            && /个进程/.test(proc.badge)
+            && /badge ok/.test(proc.badgeClass)
+            && /映像名一律是 Nyx\.exe/.test(proc.hintText)
+            && /--nyx-tab/.test(proc.hintText)
+            && proc.copyWired === true,
+          JSON.stringify(proc),
+        );
+      } catch (err) {
+        check('进程详情端到端检查未中断', false, err && err.message);
+      }
     }
 
     if (settings) {

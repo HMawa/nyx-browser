@@ -168,6 +168,9 @@ contextBridge.exposeInMainWorld('nyx', {
   // 页面摘要（清单 F）：纯抽取式，默认关；关着时 run 会回一个明确原因
   digestGet: () => ipcRenderer.invoke('nyx:digest:get'),
   digestPanel: (payload) => ipcRenderer.invoke('nyx:digest:panel', payload || {}),
+  // 清单 A3：进程详情（PID 与系统任务管理器一致，可复制对照）
+  processList: () => ipcRenderer.invoke('nyx:proc:list'),
+  processCopy: (payload) => ipcRenderer.invoke('nyx:proc:copy', payload || {}),
   digestSet: (payload) => ipcRenderer.invoke('nyx:digest:set', payload || {}),
   digestRun: (payload) => ipcRenderer.invoke('nyx:digest:run', payload || {}),
   digestCopy: (text) => ipcRenderer.invoke('nyx:digest:copy', { text: String(text || '') }),

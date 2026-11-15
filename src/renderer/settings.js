@@ -606,6 +606,8 @@
       loadDiagnostics();
       // 外壳防护现值（清单 C3）：跟着诊断一起刷新——它是"现状"，不能缓存
       loadSecuritySwitches();
+      // 进程详情（清单 A3）：也是"现状"，每次进来重新量
+      loadProcessList();
     }
 
     // 卡片收起时显示的「当前值」要跟上本分区刚加载的数据（清单 A1）
@@ -713,6 +715,84 @@
     row.appendChild(level);
     row.appendChild(body);
     return row;
+  }
+
+  /**
+   * 进程详情（清单 A3）。
+   *
+   * 一句话原则：**能对上 PID，就不假装改了映像名**。表里的 PID 与任务管理器一致，
+   * 想分辨哪个进程是哪个标签，看「命令行」列里的 --nyx-tab / --nyx-host。
+   */
+  let lastProcessText = '';
+
+  async function loadProcessList() {
+    const badge = byId('proc-badge');
+    const rowsEl = byId('proc-rows');
+    const statusEl = byId('proc-status');
+    if (!rowsEl) return;
+
+    const refresh = byId('btn-proc-refresh');
+    if (refresh && refresh.dataset.wired !== 'true') {
+      refresh.dataset.wired = 'true';
+      refresh.addEventListener('click', () => { loadProcessList(); });
+    }
+    const copy = byId('btn-proc-copy');
+    if (copy && copy.dataset.wired !== 'true') {
+      copy.dataset.wired = 'true';
+      copy.addEventListener('click', async () => {
+        if (!lastProcessText) {
+          if (statusEl) statusEl.textContent = '先刷新一次进程列表再复制。';
+          return;
+        }
+        if (!window.nyx.processCopy) return;
+        const res = await window.nyx.processCopy({ text: lastProcessText });
+        if (statusEl) {
+          statusEl.className = res && res.ok === true ? 'hint' : 'hint is-warn';
+          statusEl.textContent = res && res.ok === true ? '已复制（可直接粘到任务管理器里对照）' : (res && res.error) || '没能复制';
+        }
+      });
+    }
+
+    if (!window.nyx.processList) {
+      if (badge) { badge.textContent = '不可用'; badge.className = 'badge bad'; }
+      if (statusEl) statusEl.textContent = '当前内核不支持读取进程信息。';
+      return;
+    }
+
+    const res = await window.nyx.processList();
+    if (!res || res.ok !== true) {
+      if (badge) { badge.textContent = '读不到'; badge.className = 'badge bad'; }
+      if (statusEl) {
+        statusEl.className = 'hint is-warn';
+        statusEl.textContent = (res && res.error) || '读不到进程信息。';
+      }
+      return;
+    }
+
+    lastProcessText = res.text || '';
+    if (badge) {
+      badge.textContent = `${res.count} 个进程 · ${res.totalMb} MB`;
+      badge.className = 'badge ok';
+    }
+    rowsEl.textContent = '';
+    for (const row of res.rows || []) {
+      const tr = document.createElement('tr');
+      if (row.isMain) tr.className = 'proc-main';
+      const pid = document.createElement('td');
+      pid.className = 'proc-pid';
+      pid.textContent = String(row.pid);
+      const what = document.createElement('td');
+      what.textContent = row.title ? `${row.label}（${row.title}）` : row.label;
+      const mem = document.createElement('td');
+      mem.className = 'proc-mem';
+      mem.textContent = `${row.mb} MB`;
+      tr.append(pid, what, mem);
+      rowsEl.appendChild(tr);
+    }
+    if (statusEl) {
+      statusEl.className = 'hint';
+      statusEl.textContent = res.hint || '';
+    }
   }
 
   async function loadDiagnostics() {

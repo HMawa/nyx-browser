@@ -961,6 +961,32 @@
 
             <section class="info-card">
               <div class="info-head">
+                <h3>进程详情</h3>
+                <span class="badge" id="proc-badge">—</span>
+              </div>
+              <div class="info-body">
+                <p class="hint" id="proc-hint">
+                  映像名一律是 Nyx.exe——Windows 不允许每个进程用不同的名字，这里也不假装能改。
+                  能分辨的是 PID 与命令行：任务管理器「详细信息」里打开「命令行」列，
+                  每个标签进程都会带 <code>--nyx-kind</code> / <code>--nyx-tab</code> / <code>--nyx-host</code>。
+                  下表里的 PID 与系统里完全一致，可以复制过去对照。
+                </p>
+                <div class="sec-actions">
+                  <button type="button" class="btn" id="btn-proc-refresh">刷新</button>
+                  <button type="button" class="btn btn-mini" id="btn-proc-copy">复制详情</button>
+                </div>
+                <table class="proc-table" id="proc-table">
+                  <thead>
+                    <tr><th scope="col">PID</th><th scope="col">是什么</th><th scope="col">内存</th></tr>
+                  </thead>
+                  <tbody id="proc-rows"></tbody>
+                </table>
+                <p class="hint" id="proc-status" role="status" aria-live="polite"></p>
+              </div>
+            </section>
+
+            <section class="info-card">
+              <div class="info-head">
                 <h3>最近错误</h3>
                 <span class="badge" id="diag-count">—</span>
               </div>
@@ -1280,6 +1306,24 @@
           </header>
 
           <div class="sec-scroll">
+            <!-- 使用许可（v1.17.8）：这条边界必须让用户在自己机器上看得到，而不只是躺在仓库某个文件里 -->
+            <section class="info-card">
+              <div class="info-head">
+                <h3>使用许可</h3>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  Nyx 以 <strong>PolyForm Noncommercial License 1.0.0</strong> 授权：源码公开，个人非商业用途可以免费使用、修改与再分发。
+                  <strong>但不允许改一改就拿去收费或商用</strong>——包括换成自己的名字出售、加壳打包卖给客户、做成收费的托管服务，
+                  以及在公司的商业经营中使用（内部办公用同样算商业使用）。需要商用请到项目 Issues 谈一份单独的商业授权。
+                </p>
+                <p class="hint">
+                  安装目录下的 <span class="mono">LICENSE</span> 是许可证全文（首行 <span class="mono">Required Notice</span> 转载时必须保留），
+                  <span class="mono">THIRD-PARTY-NOTICES.md</span> 是随包的第三方组件与各自许可证声明。
+                </p>
+              </div>
+            </section>
+
             <section class="info-card">
               <div class="info-head">
                 <h3>软件更新</h3>

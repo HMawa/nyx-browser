@@ -330,6 +330,49 @@
 }
 
 /* 诊断记录列表（清单 C1）：三列 = 时间 / 级别 / 内容，长文本可换行 */
+/* 进程详情（清单 A3）：PID 用等宽，内存右对齐，主进程加一道细边区分 */
+.proc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 4px 0 6px;
+}
+
+.proc-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-faint);
+  padding: 4px 8px 6px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.proc-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-soft) 55%, transparent);
+  color: var(--text-dim);
+}
+
+.proc-table .proc-pid {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.proc-table .proc-mem {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.proc-table tr.proc-main td {
+  color: var(--text);
+}
+
+.proc-table tr.proc-main td:first-child {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
 .diag-list {
   display: flex;
   flex-direction: column;

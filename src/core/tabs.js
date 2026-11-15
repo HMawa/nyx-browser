@@ -15,6 +15,8 @@ const { WebContentsView } = require('electron');
 // 加载失败的取值说明与诊断页共用同一张表：错误页写"给人看的中文原因"，
 // 诊断日志写 errorCode，两处口径必须一致，否则用户看到的和日志对不上。
 const { describeLoadError } = require('./diagnostics');
+// 清单 A3：给每个视图挂上可辨识的身份参数（任务管理器「命令行」列可见）
+const { buildTabProcessArgs, mergeAdditionalArguments } = require('./process-args');
 // 标签生命周期（清单 G）：休眠判定与文案。判定在纯函数里，执行（释放 / 重建视图）在这边，
 // 两边用同一份判定，避免"判定说该睡、执行说没睡"的分裂。
 const {
@@ -307,6 +309,18 @@ class TabManager {
 
     let view;
     try {
+      // 清单 A3：唤醒时要按「现在这个地址」重写身份参数——休眠期间可能已经改过地址，
+      // 沿用建视图那次的 --nyx-host 会让任务管理器里显示的是旧站点，比没有更糟。
+      const baseArgs = (tab.prefs.additionalArguments || []).filter(
+        (item) => !String(item).startsWith('--nyx-'),
+      );
+      tab.prefs = {
+        ...tab.prefs,
+        additionalArguments: mergeAdditionalArguments(
+          baseArgs,
+          buildTabProcessArgs({ tabId: tab.id, kind: 'tab', url: tab.sleepUrl || tab.url }),
+        ),
+      };
       view = new WebContentsView({ webPreferences: tab.prefs });
     } catch (err) {
       // 重建失败必须说出来，不能留一个点了没反应的标签
@@ -386,7 +400,12 @@ class TabManager {
       preload: TAB_PRELOAD,
       // 模式参数随视图创建注入：preload 必须"在页面脚本之前"就知道自己是
       // 哪种模式，否则加固只能事后补救（补不了已发生的泄漏）。
-      additionalArguments: this.getPreloadArgs(mode),
+      // 清单 A3：再挂上 --nyx-kind / --nyx-tab / --nyx-host，让 Windows 任务管理器的
+      // 「命令行」列能看出这个渲染进程是哪个标签（映像名改不了，参数能加）。
+      additionalArguments: mergeAdditionalArguments(
+        this.getPreloadArgs(mode),
+        buildTabProcessArgs({ tabId: this.seq, kind: 'tab', url: target }),
+      ),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -489,6 +508,12 @@ class TabManager {
       // 与外壳 preload 的要求一致：preload.js 里用到 Node 侧能力，sandbox 必须关
       sandbox: false,
       spellcheck: false,
+      // 清单 A3：应用页（设置等）也带上身份参数，任务管理器里能一眼分辨
+      additionalArguments: buildTabProcessArgs({
+        tabId: this.seq,
+        kind: (options && options.appPage) || 'settings',
+        url: '',
+      }),
     };
     // 登记到外壳防护现值表（清单 C3）：应用页与外壳同一取舍（sandbox 关），导航只放行 file://
     this.onSecurityWindow('app-page', appPreferences);
