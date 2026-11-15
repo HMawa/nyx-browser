@@ -170,6 +170,15 @@ class TabManager {
      */
     this.rightInset = 0;
 
+    /**
+     * 外壳底部临时多让出的高度（px），0 = 正常。
+     *
+     * 顶栏的「更多」菜单朝下铺开，而标签页是叠加在外壳之上的 WebContentsView：
+     * 菜单一旦伸到外壳外面就会被页面盖住（z-index 再高也没用，原生视图永远在 DOM 上层）。
+     * 所以菜单展开时把外壳临时加高，让菜单落在外壳自己的地盘里——和工具箱让出右侧宽度一个道理。
+     */
+    this.shellExtra = 0;
+
     /** @type {Array<{id:number, view:Electron.WebContentsView, url:string, title:string, loading:boolean, canGoBack:boolean, canGoForward:boolean}>} */
     this.tabs = [];
     this.activeId = null;
@@ -826,10 +835,10 @@ class TabManager {
       if (visible) {
         tab.view.setBounds({
           x: 0,
-          y: this.uiHeight,
+          y: this.uiHeight + this.shellExtra,
           // 工具箱抽屉打开时同步让出右侧宽度，页面不会被面板遮挡
           width: Math.max(0, width - this.rightInset),
-          height: Math.max(0, height - this.uiHeight),
+          height: Math.max(0, height - this.uiHeight - this.shellExtra),
         });
       }
     }
@@ -844,6 +853,22 @@ class TabManager {
     if (next === this.rightInset) return;
     this.rightInset = next;
     this.layout();
+  }
+
+  /**
+   * 设置外壳底部临时让出的高度并立即重排（顶栏「更多」菜单展开时用）。
+   *
+   * 只影响标签视图的起点与高度，外壳自己的 CSS 变量由渲染层同步设置——
+   * 主进程不猜界面用了多高，只认渲染层报上来的数字。
+   * @param {number} px 0 表示恢复
+   * @returns {number} 实际生效的额外高度
+   */
+  setShellExtra(px) {
+    const next = Math.max(0, Math.min(Number(px) || 0, 600));
+    if (next === this.shellExtra) return this.shellExtra;
+    this.shellExtra = next;
+    this.layout();
+    return this.shellExtra;
   }
 
   /** 当前标签导航 */

@@ -1609,7 +1609,43 @@ async function exportDigest(format) {
  * 为什么要有这个菜单：常驻按钮每多一个，地址栏就窄一分；而"页面截图 / 页面摘要 /
  * 扩展开关 / 代理中心"这四件事一周用不到几次。主路径留四个（新建、下载、隐私、工具箱），
  * 其余收进这里——但要收得可见：菜单项写全名，不藏图标后面。
+ *
+ * 关于"铺开后被页面盖住"：菜单是外壳 DOM，页面是 WebContentsView，原生视图永远画在
+ * DOM 上层，调 z-index 没用。做法和摘要面板一样——展开时让外壳底部临时加高，
+ * 把菜单装进外壳自己的地盘里，收起时再还回去。
  */
+
+/** 菜单实际占用高度，收起时用来还原；量不到就退到保守值。 */
+const MORE_MENU_FALLBACK_H = 232;
+let moreMenuExtra = 0;
+/** 外壳原本的高度：开局读一次 CSS 变量，别在代码里再抄一份 124。 */
+const SHELL_BASE_H = (() => {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--height-shell');
+  const parsed = Number.parseInt(String(raw).replace('px', ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 124;
+})();
+
+function moreMenuHeight() {
+  if (!els.moreMenu) return MORE_MENU_FALLBACK_H;
+  const rect = els.moreMenu.getBoundingClientRect();
+  const height = Math.ceil(rect.height || 0);
+  return height > 0 ? height + 8 : MORE_MENU_FALLBACK_H;
+}
+
+function applyShellExtra(extra) {
+  const next = Math.max(0, Math.round(Number(extra) || 0));
+  if (next === moreMenuExtra) return;
+  moreMenuExtra = next;
+  // 外壳自己的高度变量先改，主进程那边再改标签视图的起点：两边都到齐才没有抖动。
+  const shell = SHELL_BASE_H + next;
+  document.documentElement.style.setProperty('--height-shell', `${shell}px`);
+  if (window.nyx && typeof window.nyx.shellExtra === 'function') {
+    window.nyx.shellExtra({ extra: next }).catch(() => {
+      /* 界面已经按本地值渲染了；主进程没收到只影响页面让位，不影响菜单本身 */
+    });
+  }
+}
+
 function openMoreMenu() {
   if (!els.moreMenu) return;
   els.moreMenu.hidden = false;
@@ -1617,6 +1653,8 @@ function openMoreMenu() {
     els.btnMore.classList.add('is-open');
     els.btnMore.setAttribute('aria-expanded', 'true');
   }
+  // 先量再让位：菜单高度取决于内容与字号，写死一个数字迟早对不上。
+  applyShellExtra(moreMenuHeight());
 }
 
 function closeMoreMenu() {
@@ -1626,6 +1664,7 @@ function closeMoreMenu() {
     els.btnMore.classList.remove('is-open');
     els.btnMore.setAttribute('aria-expanded', 'false');
   }
+  applyShellExtra(0);
 }
 
 function toggleMoreMenu() {

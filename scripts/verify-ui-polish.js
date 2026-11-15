@@ -3102,25 +3102,33 @@ async function main() {
       const more = document.getElementById('btn-more');
       const menu = document.getElementById('more-menu');
       if (!more || !menu) return { noUi: true };
+      const shellEl = document.querySelector('.shell');
+      const shellH = () => Math.round(shellEl ? shellEl.getBoundingClientRect().height : 0);
       const labels = Array.from(document.querySelectorAll('.tb-label')).map((el) => ({
         text: el.textContent.trim(),
         visible: !el.hidden,
       }));
-      const before = { hidden: menu.hidden, expanded: more.getAttribute('aria-expanded') };
+      const before = { hidden: menu.hidden, expanded: more.getAttribute('aria-expanded'), shellH: shellH() };
 
       more.click();
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 350));
       const opened = {
         hidden: menu.hidden,
         expanded: more.getAttribute('aria-expanded'),
         items: Array.from(menu.querySelectorAll('.more-item')).map((el) => el.textContent.replace(/\\s+/g, ' ').trim()),
         rect: (() => { const r = menu.getBoundingClientRect(); return { top: Math.round(r.top), right: Math.round(r.right), w: Math.round(r.width) }; })(),
         innerWidth: window.innerWidth,
+        // 菜单必须整个落在外壳里：落在外壳外的那截会被标签页的 WebContentsView 盖住
+        menuBottom: Math.round(menu.getBoundingClientRect().bottom),
+        shellBottom: shellEl ? Math.round(shellEl.getBoundingClientRect().bottom) : 0,
+        shellH: shellH(),
+        // 外壳临时加高也要同步到 CSS 变量，否则外壳自己还是 124px 高
+        cssShell: getComputedStyle(document.documentElement).getPropertyValue('--height-shell').trim(),
       };
 
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      await new Promise((r) => setTimeout(r, 250));
-      const closed = { hidden: menu.hidden, expanded: more.getAttribute('aria-expanded') };
+      await new Promise((r) => setTimeout(r, 350));
+      const closed = { hidden: menu.hidden, expanded: more.getAttribute('aria-expanded'), shellH: shellH() };
 
       // 页面摘要的入口只应该有一个：原来那颗 #btn-digest 必须已经不在了
       const legacyDigest = Boolean(document.getElementById('btn-digest'));
@@ -3147,6 +3155,26 @@ async function main() {
         && toolbarFlow.labels.some((item) => item.text === '下载' && item.visible)
         && toolbarFlow.labels.some((item) => item.text === '工具箱' && item.visible),
       JSON.stringify(toolbarFlow),
+    );
+    // 菜单朝下铺开时必须整个落在外壳里：落在外壳外的那截会被标签页原生视图盖住（用户实测反馈）
+    check(
+      '「更多」菜单展开时外壳临时加高、菜单不被页面盖住，收起后高度复原（B1）',
+      toolbarFlow
+        && toolbarFlow.noUi !== true
+        && toolbarFlow.opened.menuBottom <= toolbarFlow.opened.shellBottom
+        && toolbarFlow.opened.shellH > toolbarFlow.before.shellH
+        && toolbarFlow.opened.cssShell === toolbarFlow.opened.shellH + 'px'
+        && Math.abs(toolbarFlow.closed.shellH - toolbarFlow.before.shellH) <= 1,
+      JSON.stringify({
+        before: toolbarFlow && toolbarFlow.before,
+        opened: toolbarFlow && {
+          menuBottom: toolbarFlow.opened.menuBottom,
+          shellBottom: toolbarFlow.opened.shellBottom,
+          shellH: toolbarFlow.opened.shellH,
+          cssShell: toolbarFlow.opened.cssShell,
+        },
+        closed: toolbarFlow && toolbarFlow.closed,
+      }),
     );
 
     /* ---------- 动效档位（清单 B2）：小按钮有边框/悬停/按下，两档可切，减少动效时自动降 ---------- */

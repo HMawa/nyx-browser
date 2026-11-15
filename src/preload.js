@@ -181,6 +181,11 @@ contextBridge.exposeInMainWorld('nyx', {
   // 页面摘要（清单 F）：纯抽取式，默认关；关着时 run 会回一个明确原因
   digestGet: () => ipcRenderer.invoke('nyx:digest:get'),
   digestPanel: (payload) => ipcRenderer.invoke('nyx:digest:panel', payload || {}),
+  /**
+   * 顶栏「更多」菜单展开时让外壳底部临时加高（0 = 恢复）。
+   * 不加高的话菜单会伸到标签视图那块，被原生视图盖住。
+   */
+  shellExtra: (payload) => ipcRenderer.invoke('nyx:shell:extra', payload || {}),
   // 清单 A5：agent 状态面板（三色灯 + 最近动作 + 急停）
   agentPanel: (payload) => ipcRenderer.invoke('nyx:agent:panel', payload || {}),
   // 清单 D1：按当前真实状态生成的接入说明（端点 / 鉴权 / 能做什么 / 会被拦什么 / 出错看哪）

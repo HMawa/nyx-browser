@@ -10477,6 +10477,19 @@ function registerDigestIpc() {
     };
   });
 
+  /**
+   * 顶栏「更多」菜单展开时，临时把外壳底部让出一段高度（清单 B1 的修补）。
+   *
+   * 菜单是外壳 DOM，页面是 WebContentsView——菜单朝下铺开就会伸到外壳之外，
+   * 被页面原生视图盖住。这里不猜菜单多高：渲染层量完自己报上来，主进程只负责改标签视图的起点。
+   * 关掉（extra=0）就恢复原样。
+   */
+  ipcMain.handle('nyx:shell:extra', async (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    const extra = runtime.tabManager ? runtime.tabManager.setShellExtra(input.extra) : 0;
+    return { ok: true, extra, uiHeight: UI_HEIGHT };
+  });
+
   // agent 状态面板（清单 A5）：和摘要面板一样贴右边、同样让标签视图让位。
   // 返回体里带三色灯、最近几条动作、急停状态，界面一次拿全，不用拼三个请求。
   ipcMain.handle('nyx:agent:panel', async (_event, payload) => {
