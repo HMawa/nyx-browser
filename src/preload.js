@@ -47,6 +47,14 @@ contextBridge.exposeInMainWorld('nyx', {
   /** 动效档位解析（清单 B2）：同步返回时长/缓动/按压，系统减少动效时自动降级 */
   motionResolve: (payload) => motionCore.resolveMotion(payload || {}),
 
+  /* ---------------- 首次安装引导（清单 D2） ---------------- */
+
+  /** 引导要问的五件事与默认值 */
+  onboardState: () => ipcRenderer.invoke('nyx:onboard:state'),
+
+  /** 提交引导里的选择；skipAll 为 true 表示「全部默认」，一次落盘并关窗 */
+  onboardFinish: (payload) => ipcRenderer.invoke('nyx:onboard:finish', payload || {}),
+
   /** 写入单项界面偏好；仅接受白名单键与布尔值 */
   setUiPref: (key, value) => ipcRenderer.invoke('nyx:ui:prefs-set', { key, value }),
 

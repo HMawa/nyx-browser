@@ -26,9 +26,12 @@
 | `bm-folder` 收藏到文件夹浮层 | `renderer/bm-folder-preload.js` | 开 | 关 | 开 | 同上 |
 | `downloads` 下载中心 | `preload-downloads.js` | 开 | 关 | 开 | 只有下载相关动作，走窄接口 |
 | `probe` 注入演示临时窗口 | `src/preload.js` | 开 | 关 | **关** | 故意与真实外壳同构，否则"演示通过"说明不了外壳安全 |
+| `onboarding` 首次安装引导窗口 | `src/preload.js` | 开 | 关 | **关** | 复用外壳 preload（要 require 项目内模块），代价由三道限制兜住：只从 `file://` 本地加载、CSP `default-src none`、禁止开新窗口与非 `file://` 导航 |
 
-关沙箱的角色白名单在代码里是 `SANDBOX_OFF_ALLOWED = ['shell', 'app-page', 'probe']`，
-静态守卫断言会检查 `src/main.js` 里 `sandbox: false` 恰好 2 处、`src/core/tabs.js` 里恰好 1 处。
+关沙箱的角色白名单在代码里是 `SANDBOX_OFF_ALLOWED = ['shell', 'app-page', 'probe', 'onboarding']`，
+静态守卫断言会检查 `src/main.js` 里 `sandbox: false` 恰好 3 处、`src/core/tabs.js` 里恰好 1 处。
+新增窗口若也要关沙箱，必须同时改三处：`WINDOW_ROLES` 里声明期望值、这条静态断言的计数、以及上面这张表——
+少改一处，诊断页会当场标红（未登记角色）或回归直接失败。
 
 **注意「没写就算默认」这件事**：Electron 对没写的项会套默认值（`sandbox` 默认关、
 `contextIsolation` 默认开、`nodeIntegration` 默认关）。诊断页对"没写但恰好正确"的项会标
@@ -89,9 +92,9 @@
 
 1. **网页标签里的远端脚本**不在这次演示范围内：演示验证的是"外壳 preload 没把 Node 能力漏给页面"，
    不是"网页本身没漏洞"。远端页面靠沙箱 + CSP + 站点隔离兜底。
-2. **`sandbox: false` 的三个角色**是刻意选择（preload 要 Node 能力）。若将来把 preload 拆成
-   "纯 IPC 转发 + 主进程校验"，这三处可以收紧到 `sandbox: true`；在那之前，防护依赖
-   "页面只加载本地文件 + 导航白名单"。
+2. **`sandbox: false` 的四个角色**（`shell` / `app-page` / `probe` / `onboarding`）是刻意选择
+   （preload 要 Node 能力）。若将来把 preload 拆成"纯 IPC 转发 + 主进程校验"，这四处可以收紧到
+   `sandbox: true`；在那之前，防护依赖"页面只加载本地文件 + 导航白名单"。
 3. **168 个暴露方法本身是风险面**：任何一个方法只要接受"任意路径/任意 URL"，就可能被页面诱导
    做不该做的事。当前高风险 10 项里有几项做了路径/白名单校验（例如诊断包导出、更新源目录），
    但**没有**做逐个方法的权限分级（按"谁在调用、调用时的页面来源"再收一层）。那是比清单 C3

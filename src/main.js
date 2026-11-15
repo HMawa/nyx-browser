@@ -115,6 +115,18 @@ const {
 } = require('./core/page-digest');
 // 清单 A3：进程详情的纯逻辑（命令行参数拼装 + 进程表）
 const { buildProcessRows } = require('./core/process-args');
+const {
+  DEFAULT_CHOICES: DEFAULT_ONBOARD_CHOICES,
+  DENSITY_CHOICES,
+  ONBOARD_MARKER_FILE,
+  ONBOARD_STEPS,
+  START_CHOICES,
+  THEME_CHOICES,
+  normalizeOnboardMarker,
+  planOnboardChoices,
+  planOnboarding,
+  summarizeOnboardChoices,
+} = require('./core/onboarding');
 const { screenshotFilename } = require('./core/toolbar');
 const {
   CACHE_SITE_MODES,
@@ -463,6 +475,7 @@ app.commandLine.appendSwitch('unsafely-treat-insecure-origin-as-secure', 'file:/
 
 const runtime = {
   mainWindow: null,
+  onboardWindow: null,
   tabManager: null,
   tray: null,
   apiServer: null,
@@ -2872,6 +2885,8 @@ function createMainWindow() {
   win.webContents.on('did-finish-load', () => {
     runtime.shellReady = true;
     flushPendingNotices(win);
+    // 首次安装引导（清单 D2）：外壳能显示之后再开，否则弹在空壳上一个字也没有
+    maybeOpenOnboarding();
   });
 
   // UI 外壳自身也套用防泄漏策略
@@ -3589,7 +3604,145 @@ async function switchModeTracked(mode) {
 /* IPC                                                                 */
 /* ------------------------------------------------------------------ */
 
+/* ---------------- 首次安装引导（清单 D2） ----------------
+   判定只看安装器写的「首次安装」标记，不看"有没有配置文件"：
+   老用户升级上来同样没有这个标记，用猜的就会把老用户领进引导。 */
+function onboardMarkerPath() {
+  return userDataFile(ONBOARD_MARKER_FILE);
+}
+
+function readOnboardMarker() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(onboardMarkerPath(), 'utf8'));
+    return normalizeOnboardMarker(raw);
+  } catch (err) {
+    if (err && err.code !== 'ENOENT') {
+      console.warn('[Nyx] 首次安装标记读不懂，按"没有标记"处理：', err.message);
+      diagnostics.warn('ONBOARD_MARKER_READ_FAILED', '首次安装标记读不出来', { code: err.code || '' });
+    }
+    return null;
+  }
+}
+
+function writeOnboardMarker(patch) {
+  const current = readOnboardMarker() || { pending: false, doneAt: 0, skipped: false, installedAt: 0, version: '' };
+  const next = Object.assign({}, current, patch || {});
+  if (next.doneAt && !next.installedAt) next.installedAt = next.doneAt;
+  try {
+    fs.writeFileSync(onboardMarkerPath(), JSON.stringify(Object.assign({ version: app.getVersion() }, next), null, 2));
+    return { ok: true };
+  } catch (err) {
+    console.warn('[Nyx] 首次安装标记写不进去：', err.message);
+    diagnostics.error('ONBOARD_MARKER_SAVE_FAILED', '首次安装标记没能写入磁盘', { code: err.code || '' });
+    return { ok: false, error: err.message };
+  }
+}
+
+function shouldShowOnboarding() {
+  const forced = process.env.NYX_ONBOARD === '1';
+  const plan = planOnboarding({ marker: readOnboardMarker(), force: forced });
+  if (plan.show) console.log(`[Nyx] 首次安装引导：${plan.reason}`);
+  else if (forced) console.warn(`[Nyx] 首次安装引导没弹出来：${plan.reason}`);
+  return plan;
+}
+
+function maybeOpenOnboarding() {
+  if (runtime.onboardWindow && !runtime.onboardWindow.isDestroyed()) return;
+  const plan = shouldShowOnboarding();
+  if (!plan.show) return;
+  openOnboardingWindow();
+}
+
+function openOnboardingWindow() {
+  if (runtime.onboardWindow && !runtime.onboardWindow.isDestroyed()) {
+    runtime.onboardWindow.focus();
+    return runtime.onboardWindow;
+  }
+  const prefs = {
+    preload: path.join(__dirname, 'preload.js'),
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: false,
+    spellcheck: false,
+  };
+  registerSecurityWindow('onboarding', prefs);
+
+  const win = new BrowserWindow({
+    width: 760,
+    height: 620,
+    minWidth: 680,
+    minHeight: 520,
+    show: false,
+    title: '欢迎使用 Nyx',
+    backgroundColor: '#141110',
+    autoHideMenuBar: true,
+    webPreferences: prefs,
+  });
+  runtime.onboardWindow = win;
+
+  // 引导窗口只加载本地页面，不许开新窗口、不许导航
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (event, target) => {
+    if (!target.startsWith('file://')) event.preventDefault();
+  });
+
+  win.once('ready-to-show', () => {
+    if (!win.isDestroyed()) win.show();
+  });
+  win.on('closed', () => {
+    runtime.onboardWindow = null;
+  });
+
+  win.loadFile(path.join(__dirname, 'renderer', 'onboard.html'));
+  return win;
+}
+
 function registerIpc() {
+  /* ---------------- 首次安装引导（清单 D2） ---------------- */  ipcMain.handle('nyx:onboard:state', () => ({
+    ok: true,
+    steps: ONBOARD_STEPS,
+    defaults: DEFAULT_ONBOARD_CHOICES,
+    themes: THEME_CHOICES,
+    densities: DENSITY_CHOICES,
+    startPages: START_CHOICES,
+    current: runtime.uiStore ? runtime.uiStore.get() : {},
+  }));
+
+  ipcMain.handle('nyx:onboard:finish', (_event, input) => {
+    const payload = input && typeof input === 'object' ? input : {};
+    const plan = planOnboardChoices(payload.choices, { defaults: DEFAULT_ONBOARD_CHOICES });
+    if (plan.ok !== true) {
+      diagnostics.warn('ONBOARD_CHOICES_REJECTED', '首次引导里的选择不合法', { error: plan.error });
+      return { ok: false, error: plan.error };
+    }
+    const failed = [];
+    for (const entry of plan.entries) {
+      const res = runtime.uiStore ? runtime.uiStore.set(entry.key, entry.value) : { ok: false, error: '界面偏好还没就绪' };
+      if (!res.ok) failed.push(`${entry.key}：${res.error}`);
+    }
+    const summary = summarizeOnboardChoices({ ok: true, entries: plan.entries, notes: plan.notes });
+    writeOnboardMarker({
+      pending: false,
+      doneAt: Date.now(),
+      skipped: payload.skipAll === true,
+    });
+    diagnostics.info('ONBOARD_FINISHED', payload.skipAll === true ? '首次引导：一键全部默认' : '首次引导：走完设置', {
+      entries: plan.entries.length,
+      skipped: payload.skipAll === true,
+      failed: failed.length,
+    });
+    if (runtime.onboardWindow && !runtime.onboardWindow.isDestroyed()) {
+      runtime.onboardWindow.close();
+      runtime.onboardWindow = null;
+    }
+    if (failed.length) {
+      // 有条目没写进去也要如实说，不能"看起来走完了"
+      return { ok: false, error: `有 ${failed.length} 项没能保存：${failed.join('；')}`, summary, applied: plan.entries.length - failed.length };
+    }
+    if (runtime.mainWindow && !runtime.mainWindow.isDestroyed()) runtime.mainWindow.focus();
+    return { ok: true, summary, applied: plan.entries.length, notes: plan.notes };
+  });
+
   ipcMain.handle('nyx:get-state', () => {
     const snapshot = runtime.tabManager
       ? runtime.tabManager.snapshot()

@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把二十八个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把三十个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
@@ -32,6 +32,8 @@
  * 26. scripts/verify-agent-lamp.js（agent 三色状态灯：只在动作执行时算"正在被驱动"、审计缺口不混进灯、窄面板只给看与急停，11 项；纯 Node，不启动 Electron）
  * 27. scripts/verify-toolbar.js（工具栏：四个主路径固定、「更多」四项固定、小字标签开关、截图落点顺序、四处接线，10 项；纯 Node，不启动 Electron）
  * 28. scripts/verify-motion.js（动效档位：两档时长与缓动同源、减少动效时降级、按住有反馈、不做外发光，8 项；纯 Node，不启动 Electron）
+ * 29. scripts/verify-onboard.js（首次安装引导：四种判定口径、选"先不定"不落盘、"全部默认"一步落盘、非法取值整组拒绝，10 项；纯 Node，不启动 Electron）
+ * 30. scripts/verify-onboard-e2e.js（首次引导真机：全新安装弹一次、点默认后落盘并关窗、再启动与升级安装都不弹，7 项）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -235,6 +237,18 @@ const STEPS = [
     script: 'verify-motion.js',
     items: '8 项',
     timeoutMs: 60000,
+  },
+  {
+    label: '首次引导回归',
+    script: 'verify-onboard.js',
+    items: '10 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '首次引导 e2e',
+    script: 'verify-onboard-e2e.js',
+    items: '7 项',
+    timeoutMs: 240000,
   },
 ];
 

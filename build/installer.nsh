@@ -686,6 +686,19 @@ FunctionEnd
   CreateDirectory "$INSTDIR\updates"
   Delete "$APPDATA\Nyx\updates\*.exe"
 
+  ; 首次安装引导标记（清单 D2）：只有全新安装才置 pending=1。
+  ; 升级 / 覆盖 / 降级一律 pending=0——判定不许靠"有没有配置文件"猜，
+  ; 否则老用户升级上来也会被领进引导。
+  ${If} $nyxMode == "全新安装"
+    FileOpen $0 "$APPDATA\Nyx\onboarding.json" w
+    FileWrite $0 '{"pending":true,"version":"${VERSION}"}'
+    FileClose $0
+  ${Else}
+    FileOpen $0 "$APPDATA\Nyx\onboarding.json" w
+    FileWrite $0 '{"pending":false,"version":"${VERSION}"}'
+    FileClose $0
+  ${EndIf}
+
   ; 兜底：关闭仍在运行的 Nyx（模板在复制文件前已处理过一次）
   Call nyxDetectRunning
   ${If} $nyxRunning == "1"

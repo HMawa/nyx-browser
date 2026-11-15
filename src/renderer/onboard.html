@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ink">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:" />
+    <title>欢迎使用 Nyx</title>
+    <link rel="stylesheet" href="theme-nyx.css" />
+    <link rel="stylesheet" href="settings.css" />
+    <link rel="stylesheet" href="onboard.css" />
+  </head>
+  <body class="onboard-body">
+    <main class="onboard">
+      <header class="onboard-head">
+        <div class="onboard-brand">Nyx</div>
+        <h1>几步就设好，之后随时能改</h1>
+        <p class="onboard-sub">
+          这些都不是"必须选"的。不知道选什么就点「全部默认」，一步进主界面；所有选项之后都能在
+          <strong>设置 → 主题与显示 / 下载 / 隐私与安全 / Agent 访问</strong> 里找到。
+        </p>
+      </header>
+
+      <section class="onboard-steps" id="onboard-steps" aria-label="首次设置"></section>
+
+      <p class="onboard-note" id="onboard-note" role="status" aria-live="polite"></p>
+
+      <footer class="onboard-foot">
+        <button type="button" class="btn" id="btn-onboard-skip">全部默认</button>
+        <button type="button" class="btn btn-primary" id="btn-onboard-done">就这样，开始用</button>
+      </footer>
+    </main>
+
+    <script src="onboard.js"></script>
+  </body>
+</html>

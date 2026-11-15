@@ -1,0 +1,148 @@
+'use strict';
+
+/**
+ * 首次安装引导回归（清单 D2）。
+ *
+ * 这一项的判定最容易做歪成"没有配置文件就弹引导"，所以断言重点全在判定口径上：
+ *   ① 没有标记（开发运行 / 老配置）→ 不弹；
+ *   ② 升级安装写的 pending=false → 不弹；
+ *   ③ 已经走过（doneAt>0）→ 不弹；
+ *   ④ 只有 pending=true 的全新安装 → 弹一次。
+ * 另外还有两条产品口径：选「先不定」的项不许写进偏好；「全部默认」必须一步落盘。
+ */
+
+const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const ROOT = path.resolve(__dirname, '..');
+const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+
+const onboard = require(path.join(ROOT, 'src', 'core', 'onboarding.js'));
+
+const checks = [];
+function check(name, fn) {
+  try {
+    fn();
+    checks.push({ name, pass: true });
+    console.log(`  ✔ ${name}`);
+  } catch (err) {
+    checks.push({ name, pass: false, error: String(err && err.message ? err.message : err) });
+    console.log(`  ✘ ${name}\n      ${String(err && err.message ? err.message : err).split('\n')[0]}`);
+  }
+}
+
+const mainJs = read('src/main.js');
+const preloadJs = read('src/preload.js');
+const html = read('src/renderer/onboard.html');
+const js = read('src/renderer/onboard.js');
+const css = read('src/renderer/onboard.css');
+const nsh = read('build/installer.nsh');
+
+check('1. 没有「首次安装」标记时不弹（开发运行 / 老配置都走这条）', () => {
+  const plan = onboard.planOnboarding({ marker: null });
+  assert.strictEqual(plan.show, false);
+  assert.strictEqual(plan.code, 'NO_MARKER');
+  assert.match(plan.reason, /不弹/);
+});
+
+check('2. 升级安装写的 pending=false 不弹，且原因说的是"升级安装"', () => {
+  const plan = onboard.planOnboarding({ marker: { pending: false, version: '1.17.9' } });
+  assert.strictEqual(plan.show, false);
+  assert.strictEqual(plan.code, 'NOT_FIRST_INSTALL');
+  assert.match(plan.reason, /升级安装|覆盖安装/);
+});
+
+check('3. 走过一次之后（doneAt>0）不再弹第二次', () => {
+  const plan = onboard.planOnboarding({ marker: { pending: false, doneAt: Date.now(), skipped: false } });
+  assert.strictEqual(plan.show, false);
+  assert.strictEqual(plan.code, 'ALREADY_DONE');
+});
+
+check('4. 只有全新安装（pending=true）才弹，且验证旋钮能强制弹一次', () => {
+  const plan = onboard.planOnboarding({ marker: { pending: true, version: '1.17.9' } });
+  assert.strictEqual(plan.show, true);
+  assert.strictEqual(plan.code, 'FIRST_INSTALL');
+  const forced = onboard.planOnboarding({ marker: null, force: true });
+  assert.strictEqual(forced.show, true);
+  assert.strictEqual(forced.code, 'FORCED');
+});
+
+check('5. 标记归一：脏数据当没有标记，别把 doneAt 认成 0 以外的怪值', () => {
+  assert.strictEqual(onboard.normalizeOnboardMarker(null), null);
+  assert.strictEqual(onboard.normalizeOnboardMarker('x'), null);
+  const marker = onboard.normalizeOnboardMarker({ pending: true, doneAt: 'abc', installedAt: -5 });
+  assert.strictEqual(marker.doneAt, 0);
+  assert.strictEqual(marker.installedAt, 0);
+  assert.strictEqual(marker.pending, true);
+});
+
+check('6. 选「先不定」的项一律不写进偏好（不替用户拍板）', () => {
+  const plan = onboard.planOnboardChoices({});
+  assert.strictEqual(plan.ok, true);
+  assert.deepStrictEqual(plan.entries, []);
+  // 只选了主题：其余项不该跟着冒出来
+  const onlyTheme = onboard.planOnboardChoices({ theme: 'paper' });
+  assert.deepStrictEqual(onlyTheme.entries.map((e) => e.key), ['theme']);
+});
+
+check('7. 「全部默认」一步落盘：五组默认值都写，且下载默认是"每次问"', () => {
+  const plan = onboard.planOnboardChoices({ useDefaults: true });
+  assert.strictEqual(plan.ok, true);
+  const map = Object.fromEntries(plan.entries.map((e) => [e.key, e.value]));
+  assert.strictEqual(map.theme, 'ink');
+  assert.strictEqual(map.toolbarLabels, true, '默认应是"完整"（带小字）');
+  assert.strictEqual(map.downloadAsk, true, '默认应每次问');
+  assert.strictEqual(map.privacyLink, 'proxy', '隐私模式默认走代理');
+  assert.strictEqual(map.startPage, 'start');
+  assert.ok(plan.entries.length >= 5);
+});
+
+check('8. 精简档复用 B1 的小字开关；直连必须给出边界提醒；非法取值整组拒绝', () => {
+  const compact = onboard.planOnboardChoices({ density: 'compact' });
+  assert.deepStrictEqual(compact.entries, [{ key: 'toolbarLabels', value: false }]);
+  const direct = onboard.planOnboardChoices({ privacyLink: 'direct' });
+  assert.strictEqual(direct.ok, true);
+  assert.ok(direct.notes.some((n) => /真实 IP|边界/.test(n)), '直连要写明边界');
+  for (const bad of [{ theme: 'neon' }, { density: 'tiny' }, { privacyLink: 'both' }, { startPage: 'x' }]) {
+    const res = onboard.planOnboardChoices(bad);
+    assert.strictEqual(res.ok, false, `${JSON.stringify(bad)} 应被拒绝`);
+    assert.ok(res.error && res.error.length > 4);
+  }
+});
+
+check('9. 主题清单与 ui-store 的白名单一致（否则引导里选完存不进去）', () => {
+  const uiStore = read('src/core/ui-store.js');
+  const enumLine = uiStore.slice(uiStore.indexOf('theme: ['), uiStore.indexOf(']', uiStore.indexOf('theme: [')));
+  for (const theme of onboard.THEME_CHOICES) {
+    assert.ok(enumLine.includes(`'${theme}'`), `ui-store 的 theme 白名单缺 ${theme}`);
+  }
+});
+
+check('10. 接线：只有主进程判定、窗口只在 file:// 加载、标记由安装器写、界面有两条出口', () => {
+  assert.ok(/ONBOARD_MARKER_FILE/.test(mainJs) && /function readOnboardMarker/.test(mainJs), 'main.js 缺标记读取');
+  assert.ok(/function maybeOpenOnboarding/.test(mainJs), 'main.js 缺 maybeOpenOnboarding');
+  assert.ok(/did-finish-load'[\s\S]{0,200}maybeOpenOnboarding\(\)/.test(mainJs), '引导要等外壳能显示之后再开');
+  assert.ok(/ipcMain\.handle\('nyx:onboard:state'/.test(mainJs) && /ipcMain\.handle\('nyx:onboard:finish'/.test(mainJs));
+  assert.ok(/writeOnboardMarker\(\{\s*pending: false,\s*doneAt: Date\.now\(\)/.test(mainJs), '走完要写 doneAt，避免二次弹出');
+  assert.ok(/onboardState: \(\) => ipcRenderer\.invoke\('nyx:onboard:state'\)/.test(preloadJs));
+  assert.ok(/onboardFinish: \(payload\)/.test(preloadJs));
+  // 安装器只在全新安装写 pending=true
+  assert.ok(/onboarding\.json/.test(nsh), 'installer.nsh 没写引导标记');
+  assert.ok(/\$nyxMode == "全新安装"[\s\S]{0,220}"pending":true/.test(nsh), '只有全新安装才置 pending=true');
+  // 界面：两条出口 + 不许有"必须下一步"
+  assert.ok(/id="btn-onboard-skip"[\s\S]{0,80}全部默认/.test(html), '缺「全部默认」按钮');
+  assert.ok(/id="btn-onboard-done"/.test(html), '缺「开始用」按钮');
+  assert.ok(!/下一步|上一步/.test(js), '引导不做成必须走完的向导');
+  assert.ok(/finish\(true\)/.test(js) && /finish\(false\)/.test(js));
+  assert.ok(!/#[0-9a-fA-F]{6}/.test(css), '引导样式不许写死色值');
+});
+
+const failed = checks.filter((item) => !item.pass);
+if (failed.length) {
+  console.log('[首次引导回归] 未通过：');
+  for (const item of failed) console.log(`  - ${item.name}: ${item.error}`);
+  process.exitCode = 1;
+} else {
+  console.log(`[首次引导回归] 通过 ${checks.length}/${checks.length}`);
+}

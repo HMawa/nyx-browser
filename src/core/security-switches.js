@@ -96,6 +96,15 @@ const WINDOW_ROLES = [
     expect: { contextIsolation: true, nodeIntegration: false, sandbox: false },
     why: '为了和被测外壳同构（sandbox:false），否则演示的结论不适用于真实外壳；用完立刻销毁。',
   },
+  {
+    role: 'onboarding',
+    label: '首次安装引导窗口',
+    preload: 'src/preload.js',
+    expect: { contextIsolation: true, nodeIntegration: false, sandbox: false },
+    why:
+      '复用外壳 preload（它要 require 项目内模块，沙箱下拿不到），所以沙箱只能关；' +
+      '代价由三道限制兜住：页面只从 file:// 本地加载、CSP 为 default-src none、禁止开新窗口与非 file:// 导航。',
+  },
 ];
 
 /** 允许关沙箱的角色白名单（其余角色必须 sandbox:true） */

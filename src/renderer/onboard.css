@@ -1,0 +1,145 @@
+/* 首次安装引导（清单 D2）。零新增色值：只读 theme-nyx.css 的令牌。 */
+
+.onboard-body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: var(--bg-app);
+  color: var(--text-main);
+  font: 13px/1.6 var(--font-ui);
+}
+
+.onboard {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 28px 26px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
+.onboard-head .onboard-brand {
+  font-size: 13px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent-soft);
+}
+
+.onboard-head h1 {
+  margin: 6px 0 8px;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.onboard-sub {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-dim);
+}
+
+.onboard-sub strong {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.onboard-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.onboard-card {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-lg);
+  background: var(--bg-tab);
+  padding: 14px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.onboard-card h2 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.onboard-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text-faint);
+}
+
+.onboard-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.onboard-row-label {
+  flex: 0 0 auto;
+}
+
+.onboard-select,
+.onboard-input {
+  flex: 1 1 auto;
+  max-width: 60%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-input);
+  color: var(--text-main);
+  font: inherit;
+  transition: border-color var(--motion-ms, 150ms) var(--motion-ease, ease);
+}
+
+.onboard-select:focus-visible,
+.onboard-input:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+}
+
+.onboard-row-switch .set-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.onboard-note {
+  margin: 0;
+  min-height: 20px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.onboard-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.onboard-foot .btn {
+  min-width: 116px;
+  height: 32px;
+  padding: 0 14px;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboard-select,
+  .onboard-input {
+    transition-duration: 90ms;
+  }
+}

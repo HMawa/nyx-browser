@@ -77,8 +77,8 @@ check('1. 窗口角色表完整：每个角色都有名字、preload 与期望�
   return { ok: unique && complete, detail: { count: roles.length, 角色: roles, 唯一: unique, 完整: complete } };
 });
 
-check('2. 允许关沙箱的角色只有外壳 / 应用页 / 注入演示三个', () => {
-  const expect = ['app-page', 'probe', 'shell'].sort();
+check('2. 允许关沙箱的角色只能是白名单里那四个（外壳 / 应用页 / 注入演示 / 首次引导）', () => {
+  const expect = ['app-page', 'onboarding', 'probe', 'shell'].sort();
   const actual = [...SANDBOX_OFF_ALLOWED].sort();
   return {
     ok: expect.length === actual.length && expect.every((role, i) => role === actual[i]),
@@ -305,10 +305,10 @@ check('17. 静态守卫：窗口创建处必须登记角色，且关沙箱只出
     settingsCard: html.includes('id="security-switches-roles"') && html.includes('id="btn-security-probe"'),
     settingsLogic: settingsJs.includes('loadSecuritySwitches') && settingsJs.includes('runSecurityProbe'),
   };
-  // 关沙箱的地方必须正好是"外壳 + 注入演示"（main.js 两处）与"应用页"（tabs.js 一处）
+  // 关沙箱的地方必须正好是"外壳 + 注入演示 + 首次引导"（main.js 三处）与"应用页"（tabs.js 一处）
   const ok =
-    registerCalls >= 6 &&
-    sandboxOffInMain === 2 &&
+    registerCalls >= 7 &&
+    sandboxOffInMain === 3 &&
     sandboxOffInTabs === 1 &&
     detail.tabsRegister &&
     detail.ipcHandlers &&
