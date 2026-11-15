@@ -1092,6 +1092,26 @@ body.private-mode .shell {
   cursor: pointer;
 }
 
+/* ---- 网络面板「跟随 / 锁定」（清单 A4，v1.17.9） ---- */
+.tb-check .tb-select {
+  flex: 0 0 auto;
+  min-width: 96px;
+}
+
+.tb-follow-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 52%;
+}
+
+.tb-follow-hint.is-locked {
+  color: var(--accent-soft);
+}
+
 .tb-field {
   display: flex;
   align-items: center;

@@ -36,7 +36,8 @@
     paneNet: document.getElementById('pane-net'),
     netPause: document.getElementById('net-pause'),
     netClear: document.getElementById('net-clear'),
-    netFollow: document.getElementById('net-follow'),
+    netFollowMode: document.getElementById('net-follow-mode'),
+    netFollowHint: document.getElementById('net-follow-hint'),
     netTypes: document.getElementById('net-types'),
     netSearch: document.getElementById('net-search'),
     netMeta: document.getElementById('net-meta'),
@@ -144,6 +145,16 @@
     open: false,
     width: WIDTHS[1],
     wcId: null,
+    /**
+     * 网络面板「看谁的数据」（清单 A4，v1.17.9）：
+     * follow = 跟随当前标签（默认）；lock = 钉在 lockedWcId 上，切标签不换数据。
+     * 判定统一走 src/core/toolbox-follow.js 的纯函数，界面不自己再判一遍。
+     */
+    followMode: 'follow',
+    lockedWcId: null,
+    lockedTitle: '',
+    /** 主进程报的当前活动标签，和 wcId 分开记——锁定时两者会不一样 */
+    activeWcId: null,
     records: [],
     byId: new Map(),
     sniffNodes: new Map(),
@@ -682,8 +693,74 @@
 
   /* ============================ 记录装载 ============================ */
 
+  /* ==================== 跟随 / 锁定（清单 A4，v1.17.9） ==================== */
+
+  /** 每个标签在界面侧最多留多少条（与 src/core/toolbox.js 的 MAX_RECORDS 一致） */
+  const RECORD_LIMIT = 500;
+
+  /** 面板现在该看哪个标签的数据 */
+  function currentTargetWcId() {
+    if (tb.followMode === 'lock' && tb.lockedWcId != null) return tb.lockedWcId;
+    return tb.activeWcId != null ? tb.activeWcId : tb.wcId;
+  }
+
+  /** 右下角那句「现在看的是谁」——锁定了必须明说，不然切标签时用户会以为卡住 */
+  function renderFollowHint() {
+    if (!els.netFollowHint) return;
+    if (tb.followMode === 'lock') {
+      els.netFollowHint.textContent = `已锁定：${tb.lockedTitle || '这个标签'}（切标签不会换数据）`;
+      els.netFollowHint.classList.add('is-locked');
+    } else {
+      els.netFollowHint.textContent = '跟随当前标签';
+      els.netFollowHint.classList.remove('is-locked');
+    }
+  }
+
+  /** 切换两种模式：锁定时把当前活动标签钉住，跟随就松手 */
+  async function setFollowMode(mode, options) {
+    const next = mode === 'lock' ? 'lock' : 'follow';
+    if (next === tb.followMode) {
+      if (els.netFollowMode) els.netFollowMode.value = next;
+      renderFollowHint();
+      return;
+    }
+    if (next === 'lock') {
+      const target = tb.activeWcId != null ? tb.activeWcId : tb.wcId;
+      if (target == null) {
+        // 没页面可锁就退回跟随，并且说出来——不许停在"看着像锁住了"的状态里
+        if (els.netFollowMode) els.netFollowMode.value = 'follow';
+        toast('当前没有打开的页面，没得锁，保持跟随。', 'warn');
+        renderFollowHint();
+        return;
+      }
+      tb.lockedWcId = target;
+      const fromState = (options && options.title) || '';
+      tb.lockedTitle = fromState || (await titleOfWcId(target)) || `标签 ${target}`;
+    } else {
+      tb.lockedWcId = null;
+      tb.lockedTitle = '';
+    }
+    tb.followMode = next;
+    if (els.netFollowMode) els.netFollowMode.value = next;
+    renderFollowHint();
+    closeDetail();
+    await loadRecords();
+  }
+
+  /** 从工具箱状态里捞某个 webContents 对应的标签标题（getState 的 tabs 不带 wcId） */
+  async function titleOfWcId(wcId) {
+    try {
+      const state = await nyx.getToolboxState();
+      const tab = ((state && state.tabs) || []).find((item) => item.wcId === wcId);
+      return tab && tab.title ? tab.title : '';
+    } catch (err) {
+      return '';
+    }
+  }
+
   async function loadRecords() {
-    const res = await nyx.listToolboxRecords({ wcId: tb.wcId == null ? undefined : tb.wcId });
+    const target = currentTargetWcId();
+    const res = await nyx.listToolboxRecords({ wcId: target == null ? undefined : target });
     if (!res || res.ok === false) {
       tb.records = [];
       tb.byId.clear();
@@ -711,7 +788,9 @@
   /** 主进程增量推送：合并进本地表并就地更新节点 */
   function onFeed(payload) {
     if (!payload || !Array.isArray(payload.records)) return;
-    if (tb.wcId != null && payload.tabId != null && payload.tabId !== tb.wcId) return;
+    // 筛选按「当前要看的那份数据」算，不是按活动标签：锁定模式下两者不一样
+    const target = currentTargetWcId();
+    if (target != null && payload.tabId != null && payload.tabId !== target) return;
 
     const batch = [];
     for (const rec of payload.records) {
@@ -726,8 +805,8 @@
     }
     if (Number.isFinite(payload.total)) tb.total = payload.total;
     if (Number.isFinite(payload.dropped)) tb.dropped = payload.dropped;
-    if (tb.records.length > 4000) {
-      tb.records.splice(0, tb.records.length - 4000);
+    if (tb.records.length > RECORD_LIMIT) {
+      tb.records.splice(0, tb.records.length - RECORD_LIMIT);
     }
 
     for (const rec of batch) {
@@ -3505,8 +3584,9 @@
     toast('记录已清空');
   });
 
-  els.netFollow.addEventListener('change', () => {
-    if (els.netFollow.checked) refreshActive();
+  els.netFollowMode.addEventListener('change', () => {
+    // 锁定 / 跟随由 setFollowMode 统一处理（含"没页面可锁"的如实回退）
+    setFollowMode(els.netFollowMode.value);
   });
 
   // 抓包列表滚动：新滚进视野的行补站点图标（懒加载，不与渲染绑定）
@@ -3764,9 +3844,31 @@
       tb.sticky = res.sticky;
       syncEnvFromSticky();
     }
+    const live = Array.isArray(res.tabs) ? res.tabs : [];
+    const liveIds = live.map((item) => item.wcId);
+    tb.activeWcId = res.wcId == null ? null : res.wcId;
     if (!tb.open) return;
-    if (res.wcId !== tb.wcId) {
-      tb.wcId = res.wcId == null ? null : res.wcId;
+
+    // 锁定的标签关掉了：如实改回跟随并说一声，不许停在不存在的标签上
+    if (tb.followMode === 'lock' && (tb.lockedWcId == null || !liveIds.includes(tb.lockedWcId))) {
+      const gone = tb.lockedTitle;
+      await setFollowMode('follow');
+      toast(gone ? `锁定的标签「${gone}」已经关掉了，已改回跟随当前标签。` : '锁定的标签已经关掉了，已改回跟随当前标签。', 'warn');
+      return;
+    }
+
+    // 锁定模式下记录的标题跟着标签改名走（页面加载完标题会变）
+    if (tb.followMode === 'lock') {
+      const found = live.find((item) => item.wcId === tb.lockedWcId);
+      if (found && found.title && found.title !== tb.lockedTitle) {
+        tb.lockedTitle = found.title;
+        renderFollowHint();
+      }
+    }
+
+    const target = currentTargetWcId();
+    if (target !== tb.wcId) {
+      tb.wcId = target == null ? null : target;
       closeDetail();
       await loadRecords();
       await refreshStatus();
@@ -3781,7 +3883,7 @@
     if (syncTimer) window.clearTimeout(syncTimer);
     syncTimer = window.setTimeout(() => {
       syncTimer = null;
-      if (tb.open && els.netFollow.checked) refreshActive();
+      if (tb.open) refreshActive();
     }, 220);
   }
 
@@ -3804,6 +3906,8 @@
         nyx.setToolboxOpen({ open: true, width: tb.width });
         nyx.syncToolbox();
         tb.wcId = null;
+        // 锁定模式下要保留锁定的那份数据，不能被"刚打开"重置成当前标签
+        if (tb.followMode !== 'lock') tb.lockedTitle = '';
         loadRecords();
         refreshStatus();
         refreshPageInfo();
@@ -3818,8 +3922,15 @@
     const state = await nyx.getToolboxState();
     if (state && state.ok) {
       tb.wcId = state.wcId == null ? null : state.wcId;
+      tb.activeWcId = tb.wcId;
       tb.sticky = state.sticky || null;
     }
+    // 默认跟随（清单 A4）：不读任何旧状态，绝不偷偷锁在某条标签上
+    tb.followMode = 'follow';
+    tb.lockedWcId = null;
+    tb.lockedTitle = '';
+    if (els.netFollowMode) els.netFollowMode.value = 'follow';
+    renderFollowHint();
 
     const presets = await nyx.getToolboxPresets();
     if (presets && presets.ok) {

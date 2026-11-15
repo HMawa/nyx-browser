@@ -1,11 +1,11 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把二十四个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把二十五个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
- *  2. scripts/verify-ui-polish.js（界面体验，127 项）
+ *  2. scripts/verify-ui-polish.js（界面体验，129 项）
  *  3. scripts/verify-link-guard.js（出站链路守卫，14 项；纯 Node，不启动 Electron）
  *  4. scripts/verify-downloads.js（下载链路，16 项；纯 Node，不启动 Electron）
  *  5. scripts/verify-gpu-policy.js（图形性能策略，14 项；纯 Node，不启动 Electron）
@@ -28,6 +28,7 @@
  * 22. scripts/verify-signing.js（安装包签名、密码存凭据管理器、证书有效期、签名状态进界面与打包接线，35 项；不看签名包时只跑静态守卫）
  * 23. scripts/verify-agent-settings.js（agent 改设置：白名单 / 锁死 / 确认 / 限流 / 多步撤销 / 场景预设 / 改动聚合视图与按时间筛选、CSV 导出 / 动作聚合（按类型与站点、被拦下单独报数）、动作记录也导出 CSV，34 项；纯 Node）
  * 24. scripts/verify-process-args.js（进程可辨识：命令行身份参数、进程表与 PID、不承诺改映像名，11 项；纯 Node，不启动 Electron）
+ * 25. scripts/verify-toolbox-follow.js（网络面板跟随 / 锁定、锁定标签关掉后如实回退、每标签 500 条上限、关闭即释放监听，13 项；纯 Node，不启动 Electron）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -68,7 +69,7 @@ const STEPS = [
   {
     label: '界面体验回归',
     script: 'verify-ui-polish.js',
-    items: '127 项',
+    items: '129 项',
     timeoutMs: 360000,
   },
   {
@@ -206,6 +207,12 @@ const STEPS = [
     label: '进程可辨识回归',
     script: 'verify-process-args.js',
     items: '11 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '网络面板跟随回归',
+    script: 'verify-toolbox-follow.js',
+    items: '13 项',
     timeoutMs: 60000,
   },
 ];

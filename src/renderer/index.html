@@ -152,9 +152,13 @@
         <div class="tb-bar">
           <button class="tb-btn" id="net-pause" title="暂停后不再记录新请求，已有记录保留">暂停</button>
           <button class="tb-btn" id="net-clear" title="清空当前标签的全部记录">清空</button>
-          <label class="tb-check" title="切换标签时自动跟随当前标签的记录">
-            <input type="checkbox" id="net-follow" checked />跟随标签
+          <label class="tb-check" title="跟随：切标签就换数据；锁定：钉在这个标签上，切走也不换">
+            <select class="tb-select" id="net-follow-mode">
+              <option value="follow" selected>跟随当前标签</option>
+              <option value="lock">锁定这个标签</option>
+            </select>
           </label>
+          <span class="tb-meta tb-follow-hint" id="net-follow-hint"></span>
         </div>
         <div class="tb-chips" id="net-types"></div>
         <input class="tb-input" id="net-search" placeholder="过滤：URL / 域名 / 状态码 / 类型" spellcheck="false" />

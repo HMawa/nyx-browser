@@ -7891,6 +7891,16 @@ function registerToolboxIpc() {
       wcId: activeWcId(),
       url: act && !act.isDestroyed() ? act.getURL() : '',
       title: act && !act.isDestroyed() ? act.getTitle() : '',
+      // v1.17.9（清单 A4）：网络面板要能「锁定某个标签」，就必须知道现在有哪些标签、
+      // 各自对应哪个 webContents——只给活动标签的话，锁定后没法判断锁的那个还在不在。
+      tabs: (runtime.tabManager && Array.isArray(runtime.tabManager.tabs) ? runtime.tabManager.tabs : [])
+        .filter((tab) => tab && tab.view && !tab.view.webContents.isDestroyed())
+        .map((tab) => ({
+          id: tab.id,
+          wcId: tab.view.webContents.id,
+          title: tab.title || '新标签页',
+          active: tab.id === runtime.tabManager.activeId,
+        })),
       sticky: runtime.pageTools ? runtime.pageTools.sticky : null,
       // v1.16.0：慢请求阈值统一由主进程持有，抓包面板与设置页读同一份
       slowMs: readToolboxPrefs().slowMs,

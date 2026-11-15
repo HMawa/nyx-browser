@@ -3341,6 +3341,43 @@ async function main() {
       JSON.stringify(digestLayout && digestLayout.side),
     );
 
+    /* ---------- 网络面板「跟随 / 锁定」（清单 A4，v1.17.9） ---------- */
+    const followMode = await shell.eval(`(async () => {
+      const sel = document.getElementById('net-follow-mode');
+      const hint = document.getElementById('net-follow-hint');
+      if (!sel || !hint) return { noUi: true };
+      const initial = { value: sel.value, hint: hint.textContent.trim() };
+
+      // 切到「锁定」：应当钉在当前标签上，并在说明里写明切标签不换数据
+      sel.value = 'lock';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 700));
+      const locked = { value: sel.value, hint: hint.textContent.trim(), lockedClass: hint.classList.contains('is-locked') };
+
+      // 切回跟随：说明回到「跟随当前标签」，锁定样式要摘掉
+      sel.value = 'follow';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 700));
+      const back = { value: sel.value, hint: hint.textContent.trim(), lockedClass: hint.classList.contains('is-locked') };
+
+      return { noUi: false, initial, locked, back };
+    })()`);
+    check(
+      '网络面板默认跟随当前标签，能切成「锁定这个标签」并写明切标签不换数据（A4）',
+      followMode
+        && followMode.noUi !== true
+        && followMode.initial.value === 'follow'
+        && /跟随当前标签/.test(followMode.initial.hint)
+        && followMode.locked.value === 'lock'
+        && /已锁定/.test(followMode.locked.hint)
+        && /不会换数据/.test(followMode.locked.hint)
+        && followMode.locked.lockedClass === true
+        && followMode.back.value === 'follow'
+        && /跟随当前标签/.test(followMode.back.hint)
+        && followMode.back.lockedClass === false,
+      JSON.stringify(followMode),
+    );
+
     /* ---------- 运行时无脚本异常 ---------- */
     const shellErrors = shell.exceptions();
     /* ---------- B3（设置页侧）：卡片 / 未勾确认被拦 / 勾选后可改可回 ---------- */

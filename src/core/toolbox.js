@@ -18,8 +18,13 @@
 
 const PROTOCOL_VERSION = '1.3';
 
-/** 每个标签页保留的请求条数上限（超出丢弃最旧的已完结条目） */
-const MAX_RECORDS = 4000;
+/**
+ * 每个标签页保留的请求条数上限（超出丢弃最旧的已完结条目）。
+ * 清单 A4（v1.17.9）：定成 500 条。原先 4000 条是"够用就行"拍的数，
+ * 但一台机器开十个标签就是四万条对象常驻内存；500 条足够看清一次加载的
+ * 请求序列，超出部分交给「总数 / 丢弃数」两个计数如实交代，不假装全留着。
+ */
+const MAX_RECORDS = 500;
 
 /** 单个请求的 POST 体抓取上限 */
 const MAX_POST_DATA_SIZE = 64 * 1024;
@@ -450,6 +455,10 @@ class Toolbox {
     for (const collector of this.collectors.values()) {
       this.detach(collector);
     }
+    // 清单 A4（v1.17.9）：关闭就是真关闭——detach 之后把采集器与记录一起丢掉。
+    // 只 detach 不清表的话，关掉工具箱后每个标签最多 500 条记录仍然常驻，
+    // "关闭"就只是看不见而已；重开时会按当时的标签重新建采集器。
+    this.collectors.clear();
     return { ok: true };
   }
 
