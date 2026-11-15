@@ -31,6 +31,16 @@ const userData = path.join(workDir, 'userdata');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * 单次 CDP 调用的等待上限（毫秒）。
+ *
+ * 15 秒在本机够用，但机器忙起来（可用物理内存掉到 3 GB 上下、一屏里同时跑
+ * 好几个 Electron）时，渲染进程启动会明显变慢，`Runtime.enable` /
+ * `Runtime.evaluate` 光是排队就要十几秒 —— 那时红的是环境，不是功能。
+ * 这里只放大等待时间，断言与阈值一律不动：慢机器上等久一点，快机器上一样快。
+ */
+const CDP_CALL_TIMEOUT_MS = 60000;
+
 /* ---------------- 预置数据 ---------------- */
 
 /**
@@ -101,7 +111,7 @@ class Cdp {
         if (!this.pending.has(id)) return;
         this.pending.delete(id);
         reject(new Error(`CDP 调用超时：${method}`));
-      }, 15000);
+      }, CDP_CALL_TIMEOUT_MS);
     });
   }
 

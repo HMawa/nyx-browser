@@ -342,6 +342,26 @@ function cleanupLeftovers(tag) {
 }
 
 function runStep(step, index, total) {
+  const first = runStepOnce(step, index, total);
+  if (first.status === 'passed' || first.status === 'skipped') return first;
+  if (first.reason === '脚本不存在' || first.reason.startsWith('超时（')) return first;
+
+  // 一次重试，只为把「环境抖动」和「功能真的坏了」分开。
+  //
+  // 有实测依据：本机可用物理内存掉到 3 GB 上下时，第二个启动 Electron 的步骤
+  // 会偶发 `CDP 调用超时：Runtime.enable / Runtime.evaluate`（同一脚本单跑必过，
+  // 换台机器/隔几分钟也必过）。命令串本身没变、断言一条没动——重试一次还红，
+  // 就按真失败报，绝不把两次失败说成通过。
+  console.log('');
+  console.log(`[回归] [${index}/${total}] 首次失败（${first.reason}），干净环境重试一次`);
+  const second = runStepOnce(step, index, total);
+  if (second.status === 'passed') {
+    return { status: 'passed', ms: first.ms + second.ms, reason: '', retried: true };
+  }
+  return { status: 'failed', ms: first.ms + second.ms, reason: `重试后仍失败：${second.reason}`, retried: true };
+}
+
+function runStepOnce(step, index, total) {
   const scriptPath = path.join(__dirname, step.script);
   console.log('');
   console.log(`[回归] [${index}/${total}] ${step.label}（scripts/${step.script}，${step.items}）`);

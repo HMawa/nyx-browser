@@ -21,6 +21,12 @@ const userData = path.join(workDir, 'userdata');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * 单次 CDP 调用的等待上限（毫秒）。慢机器上 15 秒不够启动渲染进程，
+ * 会把「环境忙」报成「功能坏」。只放大等待，断言与阈值不动。
+ */
+const CDP_CALL_TIMEOUT_MS = 60000;
+
 class Cdp {
   constructor(wsUrl) {
     this.wsUrl = wsUrl;
@@ -62,7 +68,7 @@ class Cdp {
         if (!this.pending.has(id)) return;
         this.pending.delete(id);
         reject(new Error(`CDP 调用超时：${method}`));
-      }, 15000);
+      }, CDP_CALL_TIMEOUT_MS);
     });
   }
 
