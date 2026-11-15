@@ -64,7 +64,10 @@ function buildClickScript(selector, index) {
     return {
       ok: true,
       tag: el.tagName,
-      text: (el.innerText || el.value || el.getAttribute('aria-label') || '').trim().slice(0, 120),
+      // 安全审计 P1-1：密码框的文字不回显（点击结果里也不许带出用户输过的密码）
+      text: (el.tagName === 'INPUT' && String(el.type || '').toLowerCase() === 'password'
+        ? (el.getAttribute('aria-label') || '')
+        : (el.innerText || el.value || el.getAttribute('aria-label') || '')).trim().slice(0, 120),
     };
   })()`;
 }

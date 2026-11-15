@@ -122,13 +122,13 @@ const STEPS = [
   {
     label: '动作通道回归',
     script: 'verify-agent-dispatch.js',
-    items: '20 项',
+    items: '21 项',
     timeoutMs: 60000,
   },
   {
     label: '页面读取回归',
     script: 'verify-page-reader.js',
-    items: '19 项',
+    items: '21 项',
     timeoutMs: 60000,
   },
   {

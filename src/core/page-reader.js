@@ -155,13 +155,22 @@ function buildReadPageScript(options) {
       const rect = el.getBoundingClientRect();
       const tag = el.tagName.toLowerCase();
       const isFormField = tag === 'input' || tag === 'textarea' || tag === 'select';
+      const inputType = tag === 'input' ? String(el.type || 'text').toLowerCase() : '';
+      // 安全审计 P1-1：密码框的**值一律不回显**。
+      // 以前 readPage 把 input[type=password] 的当前内容原样写进结果里，
+      // 等于 agent 读一次页面就把用户输过的密码抄进了上下文与审计日志。
+      // 现在只给"有没有填"这个事实（hasValue），值永远为空串。
+      const isSecret = inputType === 'password';
+      const rawValue = isFormField ? String(el.value == null ? '' : el.value) : '';
       elements.push({
         id: idOf(el),
         role: roleOf(el),
         name: nameOf(el),
         tag,
-        inputType: tag === 'input' ? String(el.type || 'text').toLowerCase() : '',
-        value: isFormField ? String(el.value == null ? '' : el.value).slice(0, 60) : '',
+        inputType,
+        value: isSecret ? '' : rawValue.slice(0, 60),
+        hasValue: isFormField ? rawValue.length > 0 : false,
+        masked: isSecret,
         disabled: Boolean(el.disabled) || (el.getAttribute && el.getAttribute('aria-disabled') === 'true'),
         inViewport: rect.bottom > 0 && rect.top < viewport.height,
       });
@@ -295,16 +304,23 @@ function summarizeReadPage(raw, limits) {
     return { ok: false, error: raw.error || '读取页面失败' };
   }
   const list = Array.isArray(raw.elements) ? raw.elements : [];
-  const elements = list.slice(0, lim.maxElements).map((item) => ({
-    id: String(item && item.id ? item.id : ''),
-    role: String(item && item.role ? item.role : 'generic'),
-    name: normalizeName(item && item.name, lim.maxNameLen),
-    tag: String(item && item.tag ? item.tag : ''),
-    inputType: String(item && item.inputType ? item.inputType : ''),
-    value: String(item && item.value ? item.value : '').slice(0, 60),
-    disabled: Boolean(item && item.disabled),
-    inViewport: Boolean(item && item.inViewport),
-  }));
+  const elements = list.slice(0, lim.maxElements).map((item) => {
+    const inputType = String(item && item.inputType ? item.inputType : '');
+    // 密码框双重保险：即使页面脚本传回了值（老版本 / 被测脚本改过），这里也一律抹掉
+    const masked = inputType === 'password';
+    return {
+      id: String(item && item.id ? item.id : ''),
+      role: String(item && item.role ? item.role : 'generic'),
+      name: normalizeName(item && item.name, lim.maxNameLen),
+      tag: String(item && item.tag ? item.tag : ''),
+      inputType,
+      value: masked ? '' : String(item && item.value ? item.value : '').slice(0, 60),
+      hasValue: Boolean(item && item.hasValue),
+      masked,
+      disabled: Boolean(item && item.disabled),
+      inViewport: Boolean(item && item.inViewport),
+    };
+  });
   const viewport = raw.viewport && typeof raw.viewport === 'object'
     ? { width: Number(raw.viewport.width) || 0, height: Number(raw.viewport.height) || 0 }
     : { width: 0, height: 0 };

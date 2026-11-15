@@ -139,6 +139,31 @@ function main() {
   const twiceB = reader.summarizeReadPage(rawPage).elements.map((el) => el.id).join(',');
   check('同一份页面读两次，元素 id 序列完全一致', twiceA === twiceB && twiceA === 'eaaa111,ebbb222', twiceA);
 
+  // 安全审计 P1-1：密码框的值不许回显
+  const secretPage = reader.summarizeReadPage({
+    ok: true,
+    url: 'https://bank.test/login',
+    title: '登录',
+    text: '请登录',
+    viewport: { width: 800, height: 600 },
+    elements: [
+      { id: 'eu', role: 'textbox', name: '账号', tag: 'input', inputType: 'text', value: 'alice', hasValue: true },
+      { id: 'ep', role: 'textbox', name: '密码', tag: 'input', inputType: 'password', value: 'P@ssw0rd!', hasValue: true },
+    ],
+  });
+  const secretField = secretPage.elements.find((el) => el.inputType === 'password');
+  check(
+    '密码框的值一律抹成空串，只给「有没有填」这个事实（不在结果里抄密码）',
+    secretField && secretField.value === '' && secretField.hasValue === true && secretField.masked === true,
+    JSON.stringify(secretField),
+  );
+  check(
+    '密码框的值在整份读取结果里彻底不出现（连 JSON 里都不许有）',
+    !JSON.stringify(secretPage).includes('P@ssw0rd'),
+    JSON.stringify(secretPage).slice(0, 120),
+  );
+
+
   const capped = reader.summarizeReadPage(
     Object.assign({}, rawPage, {
       elements: new Array(50).fill(0).map((_, i) => ({ id: `e${i}`, role: 'button', name: `B${i}`, tag: 'button', inViewport: true })),
