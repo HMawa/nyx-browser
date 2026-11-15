@@ -167,6 +167,7 @@ contextBridge.exposeInMainWorld('nyx', {
   agentSettingsAuditExport: (payload) => ipcRenderer.invoke('nyx:agent:settings-audit-export', payload || {}),
   // 页面摘要（清单 F）：纯抽取式，默认关；关着时 run 会回一个明确原因
   digestGet: () => ipcRenderer.invoke('nyx:digest:get'),
+  digestPanel: (payload) => ipcRenderer.invoke('nyx:digest:panel', payload || {}),
   digestSet: (payload) => ipcRenderer.invoke('nyx:digest:set', payload || {}),
   digestRun: (payload) => ipcRenderer.invoke('nyx:digest:run', payload || {}),
   digestCopy: (text) => ipcRenderer.invoke('nyx:digest:copy', { text: String(text || '') }),

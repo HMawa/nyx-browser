@@ -1294,10 +1294,39 @@ function renderDigest(payload) {
   }
 }
 
+/**
+ * 让摘要面板与工具箱并排（清单 A2）。
+ *
+ * 面板贴右边，工具箱也贴右边。以前只把工具箱的宽度告诉标签层，摘要一展开
+ * 就被标签页压住；现在展开/收起都跟主进程说一声，由它把标签视图的右侧
+ * 收进去（工具箱 + 摘要各占一份），面板再按工具箱宽度往左让位。
+ */
+async function syncDigestLayout(open) {
+  if (!window.nyx.digestPanel) return null;
+  try {
+    const res = await window.nyx.digestPanel({ open: !!open });
+    if (els.digestPanel && res && res.open) {
+      const shift = res.toolboxOpen ? Number(res.toolboxWidth) || 0 : 0;
+      els.digestPanel.style.right = shift
+        ? `${(Number(res.gap) || 14) + shift + 8}px`
+        : '';
+      els.digestPanel.classList.toggle('is-beside-toolbox', Boolean(shift));
+    } else if (els.digestPanel) {
+      els.digestPanel.style.right = '';
+      els.digestPanel.classList.remove('is-beside-toolbox');
+    }
+    return res || null;
+  } catch (err) {
+    setDigestStatus(`摘要面板布局没同步上：${String(err && err.message ? err.message : err)}`, 'warn');
+    return null;
+  }
+}
+
 function openDigestPanel() {
   if (!els.digestPanel) return;
   els.digestPanel.hidden = false;
   setDigestStatus('', '');
+  syncDigestLayout(true);
   if (!window.nyx.digestGet) {
     setDigestStatus('当前内核不支持页面摘要。', 'warn');
     return;
@@ -1311,6 +1340,7 @@ function openDigestPanel() {
 
 function closeDigestPanel() {
   if (els.digestPanel) els.digestPanel.hidden = true;
+  syncDigestLayout(false);
 }
 
 async function runDigest() {
@@ -1401,6 +1431,10 @@ if (els.btnDigest) {
   });
 }
 if (els.digestClose) els.digestClose.addEventListener('click', closeDigestPanel);
+// 工具箱开合/换宽度时，摘要面板跟着挪（清单 A2：两边都贴右边，必须并排避让）
+window.addEventListener('nyx:toolbox-layout', () => {
+  if (els.digestPanel && !els.digestPanel.hidden) syncDigestLayout(true);
+});
 if (els.digestRun) els.digestRun.addEventListener('click', () => { runDigest(); });
 if (els.digestCopy) els.digestCopy.addEventListener('click', () => { copyDigest(); });
 if (els.digestExport) els.digestExport.addEventListener('click', () => { exportDigest('md'); });

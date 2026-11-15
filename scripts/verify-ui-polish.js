@@ -3271,6 +3271,76 @@ async function main() {
       JSON.stringify(netBanner),
     );
 
+    /* ---------- 摘要面板不被压住（清单 A2）：右侧让开，和工具箱并排 ---------- */
+    // 为什么不是断言 z-index：标签页与工具箱都是 WebContentsView，永远盖在外壳 DOM 上，
+    // 调 z-index 只能骗自己。真正的修法是「展开就让标签视图把右边那块宽度让出来」，
+    // 所以这里直接量主进程回的 inset 与面板的几何位置。
+    const digestLayout = await shell.eval(`(async () => {
+      if (!window.nyx.digestPanel) return { noApi: true };
+      const panel = document.getElementById('digest-panel');
+
+      // 1) 只开摘要：右侧只让出摘要那份宽度
+      const onlyDigest = await window.nyx.digestPanel({ open: true });
+      panel.hidden = false;
+      await new Promise((r) => setTimeout(r, 200));
+      const rect = panel.getBoundingClientRect();
+      const alone = {
+        open: onlyDigest && onlyDigest.open,
+        inset: onlyDigest && onlyDigest.inset,
+        width: onlyDigest && onlyDigest.width,
+        toolboxOpen: onlyDigest && onlyDigest.toolboxOpen,
+        rightGap: Math.round(window.innerWidth - rect.right),
+        height: Math.round(rect.height),
+        bottomGap: Math.round(window.innerHeight - rect.bottom),
+      };
+
+      // 2) 工具箱也开着：摘要必须往左让位，两块不重叠
+      await window.nyx.setToolboxOpen({ open: true, width: 460 });
+      window.dispatchEvent(new CustomEvent('nyx:toolbox-layout', { detail: { open: true, width: 460 } }));
+      const both = await window.nyx.digestPanel({ open: true });
+      await new Promise((r) => setTimeout(r, 250));
+      const rect2 = panel.getBoundingClientRect();
+      const side = {
+        inset: both && both.inset,
+        toolboxWidth: both && both.toolboxWidth,
+        rightGap: Math.round(window.innerWidth - rect2.right),
+        clearOfToolbox: rect2.right <= window.innerWidth - 460,
+        movedLeft: rect2.right < rect.right,
+      };
+
+      // 复原：收起工具箱与摘要，别把状态留给后面的断言
+      await window.nyx.setToolboxOpen({ open: false });
+      await window.nyx.digestPanel({ open: false });
+      panel.hidden = true;
+      const restored = await window.nyx.digestPanel({ open: true });
+      await window.nyx.digestPanel({ open: false });
+      return { alone, side, restoredInset: restored && restored.inset };
+    })()`);
+    check(
+      '摘要展开时标签页右侧让出宽度，面板完整可见（不再被页面压住）（A2）',
+      digestLayout
+        && !digestLayout.noApi
+        && digestLayout.alone.open === true
+        && digestLayout.alone.inset === digestLayout.alone.width
+        && digestLayout.alone.width >= 380
+        && digestLayout.alone.height > 200
+        && digestLayout.alone.rightGap >= 10
+        && digestLayout.alone.rightGap <= 24
+        && digestLayout.alone.bottomGap >= 8,
+      JSON.stringify(digestLayout && digestLayout.alone),
+    );
+    check(
+      '工具箱也开着时，摘要往左让位、两块不重叠（A2）',
+      digestLayout
+        && !digestLayout.noApi
+        && digestLayout.side.inset === digestLayout.alone.width + 460
+        && digestLayout.side.toolboxWidth === 460
+        && digestLayout.side.clearOfToolbox === true
+        && digestLayout.side.movedLeft === true
+        && digestLayout.side.rightGap > 460,
+      JSON.stringify(digestLayout && digestLayout.side),
+    );
+
     /* ---------- 运行时无脚本异常 ---------- */
     const shellErrors = shell.exceptions();
     /* ---------- B3（设置页侧）：卡片 / 未勾确认被拦 / 勾选后可改可回 ---------- */

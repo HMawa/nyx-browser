@@ -539,6 +539,22 @@
     });
   }
 
+  /**
+   * 通知同页的摘要面板：工具箱的宽度/开合变了（清单 A2）。
+   *
+   * 摘要面板与工具箱都贴右边，面板得知道工具箱占了多少才知道自己往左让多少。
+   * 用自定义事件而不是直接调 renderer.js 的函数：两个脚本同页但互不依赖。
+   */
+  function notifyToolboxLayout() {
+    try {
+      window.dispatchEvent(new CustomEvent('nyx:toolbox-layout', {
+        detail: { open: Boolean(tb.open), width: tb.open ? tb.width : 0 },
+      }));
+    } catch {
+      /* 事件派发失败不影响工具箱本身 */
+    }
+  }
+
   async function openToolbox() {
     tb.open = true;
     els.root.hidden = false;
@@ -547,6 +563,7 @@
     applyWidth(tb.width);
 
     await nyx.setToolboxOpen({ open: true, width: tb.width });
+    notifyToolboxLayout();
     await nyx.syncToolbox();
     // 每次打开都对齐当前激活标签：否则 wcId 停留在初始标签，视频/抓包作用错对象
     tb.wcId = null;
@@ -566,6 +583,7 @@
     tb.mouse = Object.assign({}, tb.mouse, { running: false });
     renderMouseInfo();
     await nyx.setToolboxOpen({ open: false });
+    notifyToolboxLayout();
     toast('工具箱已收起，采集与视频接管已中止');
   }
 
@@ -573,7 +591,10 @@
     const idx = WIDTHS.indexOf(tb.width);
     const next = WIDTHS[(idx + 1) % WIDTHS.length];
     applyWidth(next);
-    if (tb.open) nyx.setToolboxOpen({ open: true, width: next });
+    if (tb.open) {
+      nyx.setToolboxOpen({ open: true, width: next });
+      notifyToolboxLayout();
+    }
     toast(`面板宽度 ${next}px`);
   }
 

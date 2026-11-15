@@ -574,6 +574,8 @@ const runtime = {
   toolboxOpen: false,
   /** 抽屉宽度（px），与渲染层 TOOLBOX_WIDTHS 保持一致 */
   toolboxWidth: 460,
+  /** 摘要面板是否展开（清单 A2）：展开时标签视图同样要让出右侧宽度 */
+  digestOpen: false,
 };
 
 /**
@@ -2226,12 +2228,37 @@ function initToolbox() {
  * 抽屉宽度由界面决定（界面按档位给像素值），主进程只负责转交给标签层；
  * 采集随抽屉开关一起启停，关掉工具箱就彻底卸掉 CDP 通道，不留后台开销。
  */
+/**
+ * 摘要面板占掉的右侧宽度（px）。
+ * = 面板本体 380（src/renderer/style.css 里 .digest-panel 的 width）+ 右边距 14
+ * + 8 的呼吸位——算少了就会贴着页面边框，看起来像被裁掉一块。
+ */
+const DIGEST_PANEL_W = 402;
+/** 摘要面板与窗口边缘的间距（px）：与 .digest-panel 的 right 值一致 */
+const DIGEST_PANEL_GAP = 14;
+
+/**
+ * 右侧被界面占掉的宽度（清单 A2）。
+ *
+ * 摘要面板与工具箱都贴右边，以前只把工具箱算进去：摘要一展开就被标签页压住，
+ * 用户看到的是「摘要被遮」。现在两边各自占的宽度都从这里算，标签视图一起让开，
+ * 页面对应的那块区域跟着变窄——不遮，也不叠。
+ */
+function applyRightInsets() {
+  if (!runtime.tabManager) return 0;
+  const toolbox = runtime.toolboxOpen ? runtime.toolboxWidth : 0;
+  const digest = runtime.digestOpen ? DIGEST_PANEL_W : 0;
+  const total = toolbox + digest;
+  runtime.tabManager.setRightInset(total);
+  return total;
+}
+
 async function setToolboxOpen(open, width) {
   runtime.toolboxOpen = !!open;
   if (width) runtime.toolboxWidth = Math.max(320, Math.min(Number(width) || 460, 1400));
 
   if (runtime.tabManager) {
-    runtime.tabManager.setRightInset(runtime.toolboxOpen ? runtime.toolboxWidth : 0);
+    applyRightInsets();
   }
 
   // 收起工具箱等于退出接管：先停掉鼠标保活并还原页面上的倍速/进度改写，再卸通道
@@ -10029,6 +10056,28 @@ function registerDigestIpc() {
       diagnostics.error('DIGEST_FAILED', '生成页面摘要失败', { error: err && err.message });
       return { ok: false, code: 'DIGEST_FAILED', error: `没能读取这一页：${err && err.message ? err.message : err}` };
     }
+  });
+
+  /**
+   * 摘要面板的开与关（清单 A2）。
+   *
+   * 摘要面板是外壳 DOM，标签页是 WebContentsView——只调 z-index 没用，
+   * 视图永远盖在外壳上面。所以面板一展开，就让标签视图把右侧那块宽度让出来：
+   * 页面变窄一点，面板完整可见；工具箱也开着时两边各占一份宽度，互不重叠。
+   */
+  ipcMain.handle('nyx:digest:panel', async (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    runtime.digestOpen = input.open === true;
+    const inset = applyRightInsets();
+    return {
+      ok: true,
+      open: runtime.digestOpen,
+      width: runtime.digestOpen ? DIGEST_PANEL_W : 0,
+      gap: DIGEST_PANEL_GAP,
+      toolboxOpen: runtime.toolboxOpen,
+      toolboxWidth: runtime.toolboxOpen ? runtime.toolboxWidth : 0,
+      inset,
+    };
   });
 
   // 复制走主进程：写完回读校对，和失败页「复制详情」保持一致（剪贴板被占用时不许假装成功）
