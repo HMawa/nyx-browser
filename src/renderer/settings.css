@@ -13,34 +13,41 @@
   flex: 1;
   min-height: 0;
   display: flex;
+  /* 结构图在右、内容在左：DOM 顺序仍是"导航在前、内容在后"（读屏器顺序更自然），
+     用 row-reverse 把导航翻到右边，这样内容区依旧紧贴窗口左侧、随窗口变宽优先变宽。 */
+  flex-direction: row-reverse;
 }
 
 .settings-nav {
-  width: 40%;
-  min-width: 288px;
-  max-width: 460px;
+  width: 34%;
+  min-width: 268px;
+  max-width: 380px;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 14px 10px;
-  border-right: 1px solid var(--border);
+  padding: 12px 10px 14px;
+  border-right: 0;
+  border-left: 1px solid var(--border);
   background: var(--bg-panel);
 }
 
-/* ============ 设置结构图（思维导图，v1.17.11 从头重构） ============ */
-/* 左栏不再是"一列按钮"，而是一张图：中心 → 四个用途分组 → 每个分区一个可点节点。
-   节点位置由 settings.js 按容器尺寸算出来，连线是 SVG 三次贝塞尔；
-   窄窗口横向滚动，绝不把节点压扁或藏起来。 */
+/* ============ 设置结构图（思维导图，v1.17.12 竖排占满整列） ============ */
+/* 右栏是一张"竖着长的树"：根在上，四个分组依次往下，每个分组下面摊开它的分区。
+   全部走文档流（不绝对定位），所以节点永远不会叠在一起、也不会被裁掉；
+   容器量出高度后由 settings.js 调 --mm-gap 让整张图正好填满一列，多余空间平均分给行距。 */
 .mindmap {
   position: relative;
   flex: 1 1 auto;
-  min-height: 300px;
+  min-height: 0;
   margin: 2px 2px 0;
+  padding: 10px 8px;
   border: 1px solid var(--border-soft);
   border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--bg-deep) 55%, var(--bg-panel));
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  --mm-gap: 8px;
 }
 
 .mindmap-links {
@@ -64,13 +71,16 @@
 
 .mindmap-stage {
   position: relative;
-  min-width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--mm-gap);
   min-height: 100%;
 }
 
 .mindmap-root {
-  position: absolute;
-  padding: 6px 12px;
+  align-self: center;
+  padding: 6px 14px;
   border: 1px solid var(--accent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -80,9 +90,22 @@
   white-space: nowrap;
 }
 
+.mindmap-tree {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mm-gap);
+}
+
+.mindmap-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 10px;
+}
+
 .mindmap-group {
-  position: absolute;
-  padding: 4px 9px;
+  align-self: flex-start;
+  padding: 3px 10px;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--bg-panel);
@@ -92,9 +115,15 @@
   white-space: nowrap;
 }
 
+.mindmap-leaves {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: 8px;
+}
+
 .mindmap-node {
-  position: absolute;
-  padding: 5px 10px;
+  padding: 4px 10px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   background: var(--bg-input);
@@ -131,15 +160,21 @@
 }
 
 @media (max-width: 900px) {
+  .settings-frame {
+    /* 窄窗口：图在上、内容在下，谁也别挤谁 */
+    flex-direction: column-reverse;
+  }
+
   .settings-nav {
     width: 100%;
     max-width: none;
-    border-right: 0;
+    max-height: 46vh;
+    border-left: 0;
     border-bottom: 1px solid var(--border);
   }
 
   .mindmap {
-    min-height: 220px;
+    min-height: 200px;
   }
 }
 
@@ -1901,6 +1936,12 @@
   text-overflow: ellipsis;
 }
 
+/* 但只在收起态显示：展开时卡片自己就把当前值写在控件旁边了，
+   再在标题右边重复一遍就成了"经代理 经代理"这种两套数据，看着像出错。 */
+.info-card:not(.is-folded) .info-head .fold-value {
+  display: none;
+}
+
 .info-head .fold-caret {
   flex: 0 0 auto;
   font-size: 11px;
@@ -1947,6 +1988,23 @@
   right: 16px;
   display: flex;
   gap: 6px;
+}
+
+/* 宽窗口下卡片住在两列网格里，半列宽度会让「标题 + 一长串当前值 + 按钮」挤在一行：
+   标题被压到只剩一个字的宽度，就变成竖排一列字。这里给标题一个下限，动作区允许换行。 */
+.sec-scroll .info-head {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.sec-scroll .info-head > h3,
+.sec-scroll .info-head > .info-title {
+  flex: 1 1 auto;
+  min-width: 7em;
+}
+
+.sec-scroll .info-head-actions {
+  flex: 0 0 auto;
 }
 
 @media (prefers-reduced-motion: reduce) {

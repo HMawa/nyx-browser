@@ -1160,6 +1160,143 @@ async function main() {
           mindmapFlow && JSON.stringify(mindmapFlow),
         );
 
+        // 先把设置标签切到前台：这一页被别的标签盖住时，CSS 过渡会冻在起始帧（opacity 0），
+        // 量出来的"看不见"是量法的问题——真实用户在看着这一页。
+        await shell.eval("window.nyx.openSettings({ section: 'appearance' })");
+        await sleep(900);
+
+        const settingsNavFlow = await settings.eval(`(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const main = document.querySelector('.settings-main');
+          const nav = document.querySelector('.settings-nav');
+          const map = document.querySelector('.mindmap');
+          const panels = Array.from(document.querySelectorAll('.sec-panel'));
+          const nodes = Array.from(document.querySelectorAll('.mindmap-node'));
+
+          const navBox = nav.getBoundingClientRect();
+          const mainBox = main.getBoundingClientRect();
+          const mapBox = map.getBoundingClientRect();
+          const navPanelBox = document.querySelector('.settings-nav').getBoundingClientRect();
+
+          // 1) 结构图在右、整列占满（窄窗口会按媒体查询落到下方，那种情况不要求"在右"）
+          const wide = window.innerWidth > 900;
+          const navOnRight = navBox.left > mainBox.left + 10;
+          const fillRatio = navPanelBox.height ? mapBox.height / navPanelBox.height : 0;
+
+          // 2) 每个分区面板都必须直接挂在内容区里（否则"点节点右侧不动"）
+          const stray = panels.filter((p) => p.parentElement !== main).map((p) => p.dataset.sec);
+
+          // 3) 逐个点过去：只有点中的那个分区是激活的，且里面卡片真的看得见
+          //    每次都按 data-sec 重新取节点：图可能在窗口变化时重排过，
+          //    拿着开头的旧引用去点会点在一个已经不在文档里的按钮上（这不是产品缺陷，别测出假红）
+          const walk = [];
+          for (const sec of nodes.map((n) => n.dataset.sec)) {
+            const node = document.querySelector('.mindmap-node[data-sec="' + sec + '"]');
+            if (!node) {
+              walk.push({ sec, active: false, cards: 0, visible: 0, actives: ['(节点不见了)'] });
+              continue;
+            }
+            node.click();
+            let actives = [];
+            let activeOk = false;
+            for (let i = 0; i < 3 && !activeOk; i += 1) {
+              await wait(100);
+              const panelNow = document.querySelector('.sec-panel[data-sec="' + sec + '"]');
+              actives = Array.from(document.querySelectorAll('.sec-panel.active')).map((p) => p.dataset.sec);
+              activeOk = actives.length === 1 && panelNow !== null && actives[0] === sec;
+            }
+            const panel = document.querySelector('.sec-panel[data-sec="' + sec + '"]');
+            const cards = panel ? Array.from(panel.querySelectorAll('.info-card')) : [];
+            // 注意：这里只看"排到了、没被 display 藏起来"，不看 opacity。
+            // opacity 归 .fx-reveal 的渐显过渡管，而这一页在后台时浏览器会把过渡冻在起始帧，
+            // 量它只会量到测量方式的问题（真实用户看着这一页时卡片是亮的）。
+            let visible = 0;
+            for (let i = 0; i < 3; i += 1) {
+              visible = cards.filter((c) => {
+                const box = c.getBoundingClientRect();
+                return box.height > 20 && getComputedStyle(c).display !== 'none';
+              }).length;
+              if (visible > 0 || !panel) break;
+              await wait(100);
+            }
+            const first = cards[0] || null;
+            const diag = panel
+              ? {
+                  panelH: Math.round(panel.getBoundingClientRect().height),
+                  panelDisplay: getComputedStyle(panel).display,
+                  cardH: first ? Math.round(first.getBoundingClientRect().height) : -1,
+                  cardOpacity: first ? getComputedStyle(first).opacity : '',
+                  cardCls: first ? first.className : '',
+                }
+              : null;
+            walk.push({
+              sec,
+              active: activeOk,
+              cards: cards.length,
+              visible,
+              actives,
+              diag,
+            });
+          }
+
+          // 4) 两张关键卡片的归属：它们曾经掉到面板外面，对任何分区都永远可见
+          const titlesOf = (sec) => {
+            const panel = panels.find((p) => p.dataset.sec === sec);
+            return panel
+              ? Array.from(panel.querySelectorAll('.info-card')).map((c) => (c.querySelector('h3, .info-title')?.textContent || '').trim())
+              : [];
+          };
+          const appearanceTitles = titlesOf('appearance');
+          const privacyTitles = titlesOf('privacy');
+
+          // 5) 收起态右侧那个"当前值"不许和徽标重复（否则显示成「经代理 经代理」）
+          const dupValues = Array.from(document.querySelectorAll('.info-card')).filter((card) => {
+            const value = card.querySelector('.fold-value');
+            const badge = card.querySelector('.info-head .badge');
+            if (!value || !badge || value.hidden) return false;
+            return value.textContent.trim() && value.textContent.trim() === badge.textContent.trim();
+          }).length;
+
+          return {
+            ok: true,
+            wide,
+            navOnRight,
+            fillRatio: Math.round(fillRatio * 100) / 100,
+            panels: panels.length,
+            stray,
+            walked: walk.length,
+            badWalk: walk
+              .filter((w) => !w.active || w.visible === 0)
+              .map((w) => w.sec + (w.active ? '/' + w.cards + '卡/' + w.visible + '见' : '/未激活:' + (w.actives || []).join('+'))),
+            detail: walk.filter((w) => !w.active || w.visible === 0).map((w) => w.sec + ':' + JSON.stringify(w.diag)),
+            appearanceCards: appearanceTitles.length,
+            appearanceHasSleep: appearanceTitles.some((t) => t.includes('标签休眠')),
+            privacyHasPasswords: privacyTitles.some((t) => t.includes('密码与表单记忆')),
+            dupValues,
+            sheets: Array.from(document.styleSheets).map((s) => String(s.href || 'inline').split('/').pop()),
+            fxIn: document.querySelectorAll('.fx-reveal.fx-in').length,
+            fxAll: document.querySelectorAll('.fx-reveal').length,
+          };
+        })()`);
+        check(
+          '设置页改版：结构图搬到右侧整列、十个分区都在内容区里、点哪个换哪个且卡片真看得见（改版）',
+          Boolean(
+            settingsNavFlow &&
+              settingsNavFlow.ok &&
+              (settingsNavFlow.navOnRight === true || settingsNavFlow.wide === false) &&
+              (settingsNavFlow.fillRatio >= 0.7 || settingsNavFlow.wide === false) &&
+              settingsNavFlow.stray.length === 0 &&
+              settingsNavFlow.panels === 10 &&
+              settingsNavFlow.walked === 10 &&
+              settingsNavFlow.badWalk.length === 0 &&
+              settingsNavFlow.appearanceCards >= 6 &&
+              settingsNavFlow.appearanceHasSleep === true &&
+              settingsNavFlow.privacyHasPasswords === true &&
+              settingsNavFlow.dupValues === 0,
+          ),
+          settingsNavFlow && JSON.stringify(settingsNavFlow),
+        );
+
         const scrollFlow = await settings.eval(`(async () => {
           const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 

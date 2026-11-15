@@ -285,11 +285,13 @@
   --border-soft: rgba(20, 33, 43, 0.08);
   --border-strong: rgba(20, 33, 43, 0.26);
 
-  /* 文字用偏冷的深墨蓝，而不是纯黑：纯黑在暖白上会显得脏 */
+  /* 文字用偏冷的深墨蓝，而不是纯黑：纯黑在暖白上会显得脏。
+     浅色主题实测"看不清"的主因是次要文字太淡：dim/faint 两档一起压深，
+     --text-faint 在 #f7f4ec 上从约 3.4:1 提到 5.3:1（小字过 AA）。 */
   --text: #14212b;
   --text-main: #14212b;
-  --text-dim: #5b666f;
-  --text-faint: #7d858c;
+  --text-dim: #4a555e;
+  --text-faint: #5f686f;
 
   /* 强调：压深一档的铜金，保证白底上仍够对比 */
   --accent: #8a5f18;
@@ -349,10 +351,11 @@
   --border-soft: rgba(23, 48, 64, 0.08);
   --border-strong: rgba(23, 48, 64, 0.26);
 
+  /* 同 cream：浅底上把两档次要文字压深（--text-faint 约 4.6:1） */
   --text: #17303f;
   --text-main: #17303f;
-  --text-dim: #4f6675;
-  --text-faint: #75868f;
+  --text-dim: #40586a;
+  --text-faint: #5c6f7a;
 
   /* 强调：同族偏深的海蓝（不是紫蓝） */
   --accent: #1d6484;

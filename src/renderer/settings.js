@@ -12,6 +12,9 @@
 (function () {
   const SEC_LABELS = {
     appearance: '外观',
+    // 「主题与显示」这一页一直打不开就是这个原因：面板和导航项都在，但这里漏了它，
+    // activate() 第一行 `if (!SEC_LABELS[section]) return;` 直接把它退回去了。
+    display: '主题与显示',
     startup: '启动与主页',
     privacy: '隐私与安全',
     network: '网络与代理',
@@ -374,7 +377,7 @@
     const reduce =
       typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    if (value) value.textContent = describeCardValue(card);
+    if (value) setFoldValue(card);
     if (head) head.setAttribute('aria-expanded', folded ? 'false' : 'true');
 
     if (!body || !animate || reduce) {
@@ -408,12 +411,26 @@
     }
   }
 
+  /**
+   * 写卡片头右侧那个「当前值」。
+   * 有些卡片头本来就有个状态徽标（比如「经代理」「已开启」），再写一遍同样的字就变成
+   * 「经代理 经代理」——像两套数据打架。同字就不再显示，换字才显示。
+   */
+  function setFoldValue(card) {
+    const value = card.querySelector('.fold-value');
+    if (!value) return;
+    const text = describeCardValue(card);
+    value.textContent = text;
+    const head = card.querySelector('.info-head');
+    const badgeText = (head?.querySelector('.badge')?.textContent || '').trim();
+    value.hidden = Boolean(badgeText) && badgeText === String(text || '').trim();
+  }
+
   /** 刷新一批卡片显示的当前值（控件改完之后调用，别让收起态显示旧值） */
   function refreshFoldValues(root) {
     const scope = root || document;
     for (const card of scope.querySelectorAll('.info-card[data-fold-id]')) {
-      const value = card.querySelector('.fold-value');
-      if (value) value.textContent = describeCardValue(card);
+      setFoldValue(card);
     }
   }
 
@@ -464,6 +481,46 @@
         card.querySelector('table, .agent-site-list, .kv-grid, .template-list, .proc-table, pre'),
       );
       card.classList.toggle('card-wide', wide);
+    }
+  }
+
+  /** 取某个分区的面板元素 */
+  function panelOf(section) {
+    return panels.find((panel) => panel.dataset.sec === section) || null;
+  }
+
+  /**
+   * 兜底点亮卡片：滚动渐显是 fx.js 用 IntersectionObserver 做的，
+   * 但面板从 display:none 变可见时它不一定重新算交集——卡片就一直是 opacity:0，
+   * 界面上表现为"这一页明明是空的"。这里直接把可见卡片补上 fx-in。
+   * 同时清掉"展开态"卡片上写死的 max-height：那个值是在面板不可见时量的（0 或偏小），
+   * 留着它就会把正文裁掉一半——卡片铺开着却只露出前几行。
+   * @param {Element|null} root
+   */
+  function revealCards(root) {
+    if (!root || !root.querySelectorAll) return;
+    // 这一页在后台时，CSS 过渡会被浏览器冻在起始帧（opacity 0），连兜底计时器也被节流
+    // （后台标签的 setTimeout 能延到一分钟）。那种情况下动画本来也没人看得见，
+    // 直接给终值最稳：切回来时内容是亮的。
+    const hiddenNow = document.hidden === true;
+    for (const card of root.querySelectorAll('.fx-reveal:not(.fx-in)')) {
+      card.classList.add('fx-in');
+      if (hiddenNow) {
+        card.style.setProperty('opacity', '1', 'important');
+        card.style.setProperty('transform', 'none', 'important');
+        continue;
+      }
+      // 兜底：面板刚从 display:none 变可见时，过渡也可能停在起始帧。
+      // 渐显只是装饰，内容不许看不见——确认一次还没亮就直接定死。
+      setTimeout(() => {
+        if (Number(getComputedStyle(card).opacity) === 0) {
+          card.style.setProperty('opacity', '1', 'important');
+          card.style.setProperty('transform', 'none', 'important');
+        }
+      }, 400);
+    }
+    for (const body of root.querySelectorAll('.info-card:not(.is-folded) .info-body')) {
+      if (body.style.maxHeight) body.style.maxHeight = '';
     }
   }
 
@@ -566,6 +623,7 @@
   };
 
   let mindmapBuilt = false;
+  let mindmapKey = '';
   let mindmapResizeTimer = null;
 
   function collectMindmapData() {
@@ -603,32 +661,48 @@
   }
 
   /**
-   * 画结构图：中心 → 分组 → 分区。
-   * 位置全部由容器的实测尺寸算出来（不写死像素），窗口一变就重算，所以不会出现
-   * 「节点叠在一起」或「连线指错地方」这种一眼假的东西。
+   * 画结构图：根在上 → 四个分组依次往下 → 每个分组下面摊开它的分区。
+   * 全部走文档流（不是绝对定位），所以节点不会互相压住、也不会被容器裁掉；
+   * 竖向排布正好吃满"右侧整列、上下占满"的版面。
    */
   function buildMindmap() {
     const stage = byId('mindmap-stage');
     const svg = byId('mindmap-links');
     const root = byId('mindmap-root');
-    if (!stage || !svg || !root) return;
+    const box = byId('mindmap');
+    if (!stage || !svg || !root || !box) return;
     const data = collectMindmapData();
     if (!data) return;
 
-    for (const old of stage.querySelectorAll('.mindmap-group, .mindmap-node')) old.remove();
+    // 分区表没变就别重建 DOM：重建会把节点换成新元素——用户点到一半、或者先拿到节点
+    // 引用再点（验收脚本正是这么点的），就会点在一个已经不在文档里的按钮上，什么也不发生。
+    const key = data.map((group) => group.label + ':' + group.items.map((item) => item.sec).join(',')).join('|');
+    if (mindmapBuilt && key === mindmapKey) {
+      layoutMindmap();
+      return;
+    }
+    mindmapKey = key;
+
+    for (const old of stage.querySelectorAll('.mindmap-tree')) old.remove();
     svg.innerHTML = '';
 
-    // 第一遍：只把节点放上舞台，拿到各自真实宽度
-    const rootLabel = (root.textContent || 'Nyx 设置').trim();
-    root.textContent = rootLabel;
-    const planned = [];
+    const tree = document.createElement('div');
+    tree.className = 'mindmap-tree';
+    stage.appendChild(tree);
+
+    const blocks = [];
     for (const group of data) {
+      const block = document.createElement('div');
+      block.className = 'mindmap-block';
+
       const groupEl = document.createElement('div');
       groupEl.className = 'mindmap-group';
       groupEl.textContent = group.label || '未命名分组';
-      stage.appendChild(groupEl);
+      block.appendChild(groupEl);
 
-      const leaves = [];
+      const leaves = document.createElement('div');
+      leaves.className = 'mindmap-leaves';
+      const nodes = [];
       for (const item of group.items) {
         const node = document.createElement('button');
         node.type = 'button';
@@ -639,90 +713,111 @@
         node.addEventListener('click', () => {
           if (item.source) item.source.click();
         });
-        stage.appendChild(node);
-        leaves.push({ el: node, item });
+        leaves.appendChild(node);
+        nodes.push({ el: node, item });
       }
-      planned.push({ groupEl, leaves });
+      block.appendChild(leaves);
+      tree.appendChild(block);
+      blocks.push({ groupEl, nodes });
     }
 
-    const rootW = Math.ceil(root.getBoundingClientRect().width) || 96;
-    const groupX = MINDMAP.pad + rootW + MINDMAP.colGap;
+    layoutMindmap();
+  }
 
-    // 先按内容算总高度，再决定中心点
-    let contentH = MINDMAP.pad * 2;
-    for (const block of planned) {
-      const leavesH = block.leaves.length * MINDMAP.rowH + (block.leaves.length - 1) * MINDMAP.rowGap;
-      contentH += leavesH + 14;
-    }
-    const stageH = Math.max(MINDMAP.minHeight, contentH);
-    stage.style.height = `${stageH}px`;
+  /**
+   * 只重排现有节点：拉开行距填满一列，再按实测矩形重画连线。
+   * 不碰节点元素本身——节点保留下来，点击、焦点、键盘顺序都不会因为窗口变化而丢。
+   */
+  function layoutMindmap() {
+    const svg = byId('mindmap-links');
+    const box = byId('mindmap');
+    const root = byId('mindmap-root');
+    if (!svg || !box || !root) return;
 
-    const centerY = stageH / 2;
-    const rootH = Math.ceil(root.getBoundingClientRect().height) || 28;
-    root.style.left = `${MINDMAP.pad}px`;
-    root.style.top = `${Math.round(centerY - rootH / 2)}px`;
+    fitMindmap();
 
-    let cursorY = MINDMAP.pad;
-    let maxRight = groupX;
+    // 连线：根 → 分组、分组 → 分区，全部按实测矩形画（窗口一变就重画，不会指错地方）
+    const blocks = Array.from(box.querySelectorAll('.mindmap-block')).map((block) => ({
+      groupEl: block.querySelector('.mindmap-group'),
+      nodes: Array.from(block.querySelectorAll('.mindmap-node')).map((el) => ({
+        el,
+        item: { sec: el.dataset.sec || '' },
+      })),
+    }));
 
-    for (const block of planned) {
-      const leavesH = block.leaves.length * MINDMAP.rowH + (block.leaves.length - 1) * MINDMAP.rowGap;
-      const blockTop = cursorY;
-      const groupCenterY = blockTop + leavesH / 2;
-      const groupW = Math.ceil(block.groupEl.getBoundingClientRect().width) || 88;
-      const groupH = Math.ceil(block.groupEl.getBoundingClientRect().height) || 24;
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
 
-      block.groupEl.style.left = `${groupX}px`;
-      block.groupEl.style.top = `${Math.round(groupCenterY - groupH / 2)}px`;
-      maxRight = Math.max(maxRight, groupX + groupW);
+    const boxRect = box.getBoundingClientRect();
+    const rel = (rect) => ({
+      left: rect.left - boxRect.left + box.scrollLeft,
+      top: rect.top - boxRect.top + box.scrollTop,
+      width: rect.width,
+      height: rect.height,
+    });
+    const rootBox = rel(root.getBoundingClientRect());
+    const rootX = rootBox.left + rootBox.width / 2;
 
-      const leafX = groupX + groupW + MINDMAP.colGap;
-      block.leaves.forEach((leaf, index) => {
-        const leafTop = blockTop + index * (MINDMAP.rowH + MINDMAP.rowGap);
-        leaf.el.style.left = `${leafX}px`;
-        leaf.el.style.top = `${leafTop}px`;
-        leaf.el.style.height = `${MINDMAP.rowH}px`;
-        const leafW = Math.ceil(leaf.el.getBoundingClientRect().width) || 96;
-        maxRight = Math.max(maxRight, leafX + leafW);
+    for (const block of blocks) {
+      const groupBox = block.groupEl ? rel(block.groupEl.getBoundingClientRect()) : null;
+      if (!groupBox) continue;
+      const groupX = groupBox.left + groupBox.width / 2;
 
-        // 分组 → 分区
+      const path0 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path0.setAttribute('d', elbow(rootX, rootBox.top + rootBox.height, groupX, groupBox.top));
+      svg.appendChild(path0);
+
+      for (const node of block.nodes) {
+        const nodeBox = rel(node.el.getBoundingClientRect());
         const path1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path1.setAttribute(
           'd',
-          cubic(
-            groupX + groupW,
-            groupCenterY,
-            leafX,
-            leafTop + MINDMAP.rowH / 2,
-          ),
+          elbow(groupX, groupBox.top + groupBox.height, nodeBox.left + 10, nodeBox.top),
         );
         // 注意：这里用 data-target 而不是 data-sec —— 连线是 SVG 元素，没有 click()，
         // 而验收脚本与界面其它地方会用 [data-sec="x"] 找"能点的那个"，SVG 混进去会拿到它。
-        path1.dataset.target = leaf.item.sec;
+        path1.dataset.target = node.item.sec;
         svg.appendChild(path1);
-      });
-
-      // 中心 → 分组
-      const path0 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path0.setAttribute('d', cubic(MINDMAP.pad + rootW, centerY, groupX, groupCenterY));
-      svg.appendChild(path0);
-
-      cursorY = blockTop + leavesH + 14;
+      }
     }
 
-    stage.style.width = `${Math.ceil(maxRight + MINDMAP.pad)}px`;
-    svg.setAttribute('viewBox', `0 0 ${Math.ceil(maxRight + MINDMAP.pad)} ${stageH}`);
+    svg.setAttribute('viewBox', `0 0 ${Math.ceil(boxRect.width)} ${Math.ceil(box.scrollHeight)}`);
 
-    const nav = byId('mindmap');
-    if (nav) nav.setAttribute('data-nodes', String(planned.reduce((sum, block) => sum + block.leaves.length, 0)));
+    const nodes = blocks.reduce((sum, block) => sum + block.nodes.length, 0);
+    box.setAttribute('data-nodes', String(nodes));
     mindmapBuilt = true;
     syncMindmapActive(activeSection);
   }
 
-  /** 三次贝塞尔：从左节点右边缘连到右节点左边缘，中途保持水平切线 */
-  function cubic(x1, y1, x2, y2) {
-    const mid = x1 + (x2 - x1) / 2;
-    return `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`;
+  /**
+   * 让整张图正好填满一列：内容不够高就把行距拉大（上下占满），
+   * 内容太高就把行距压到最小；压到底还放不下时容器自己出现滚动条，绝不裁掉节点。
+   */
+  function fitMindmap() {
+    const box = byId('mindmap');
+    const stage = byId('mindmap-stage');
+    if (!box || !stage) return;
+    const avail = box.clientHeight;
+    if (avail <= 0) return;
+
+    let gap = 8;
+    box.style.setProperty('--mm-gap', `${gap}px`);
+    let need = stage.scrollHeight;
+    while (need > avail - 6 && gap > 2) {
+      gap -= 1;
+      box.style.setProperty('--mm-gap', `${gap}px`);
+      need = stage.scrollHeight;
+    }
+    while (need < avail - 6 && gap < 26) {
+      gap += 1;
+      box.style.setProperty('--mm-gap', `${gap}px`);
+      need = stage.scrollHeight;
+    }
+  }
+
+  /** 折线：先竖到两点的中间高度，再横过去，最后竖下来——竖排树就用这种走线 */
+  function elbow(x1, y1, x2, y2) {
+    const mid = y1 + (y2 - y1) / 2;
+    return `M ${x1} ${y1} V ${mid} H ${x2} V ${y2}`;
   }
 
   function setupMindmap() {
@@ -768,6 +863,10 @@
     // 卡片宽度跟随分区内容（表格类整行、表单类两列）；面板刚变可见才量得准
     markWideCards();
     setTimeout(() => markWideCards(), 400);
+
+    // 兜底：滚动渐显靠 IntersectionObserver，面板从 display:none 变可见时它不一定重算，
+    // 结果就是"分区里明明有卡片却一片空白"。这里直接把当前分区的卡片点亮，内容不许看不见。
+    revealCards(panelOf(section));
 
     setStatus(`已进入「${SEC_LABELS[section]}」`);
 
@@ -4558,11 +4657,72 @@ async function loadFootprint() {
     }
   }
 
+  /**
+   * 卡片该住哪一页。
+   * 历史原因（v1.12～1.17.10 几次插入新分区）：「外观」那 5 张卡片掉到了面板外面，
+   * 于是它们对任何分区都永远可见；「隐私与安全」的 4 张卡片也落在滚动区之外。
+   * 标记结构的问题要改标记（已记在台账），但在那之前界面不能是坏的——
+   * 这里按卡片标题把住错页的卡片搬回去，只搬这 9 张，别的卡片一概不碰。
+   */
+  const CARD_HOME = {
+    地址栏置顶: 'appearance',
+    抓包慢请求阈值: 'appearance',
+    图形性能: 'appearance',
+    硬件加速: 'appearance',
+    标签休眠: 'appearance',
+    离线阅读缓存: 'privacy',
+    加固状态: 'privacy',
+    站点授权决策轨迹: 'privacy',
+    密码与表单记忆: 'privacy',
+  };
+
+  /**
+   * 把卡片搬回它该在的那一页（放进该页的 .sec-scroll 里）。
+   * 只处理 CARD_HOME 里点名的标题，返回搬动张数。
+   */
+  function normalizeCards() {
+    let moved = 0;
+    const cards = Array.from(document.querySelectorAll('.info-card'));
+    for (const card of cards) {
+      const title = (card.querySelector('.info-title, h3, h2')?.textContent || '').trim();
+      const home = Object.keys(CARD_HOME).find((key) => title.includes(key));
+      if (!home) continue;
+      const host = document.querySelector(`.sec-panel[data-sec="${CARD_HOME[home]}"] .sec-scroll`);
+      if (!host || card.parentElement === host) continue;
+      host.appendChild(card);
+      moved += 1;
+    }
+    return moved;
+  }
+
+  /**
+   * 把跑丢的分区面板收回内容区（真 bug 兜底）：
+   * 只要有一个 `.sec-panel` 不在 `main.settings-main` 里，它就是 `body` 的直接子节点，
+   * 于是"点结构图上的节点，右侧不动"——面板在自己的位置上显示，而不是在内容区里换。
+   * 这里按文档顺序统一搬进来，一处修好所有分区；顺序不变，事件绑定不受影响。
+   */
+  function normalizePanels() {
+    const main = document.querySelector('.settings-main');
+    if (!main) return 0;
+    const all = Array.from(document.querySelectorAll('.sec-panel'));
+    let moved = 0;
+    for (const panel of all) {
+      if (panel.parentElement !== main) {
+        main.appendChild(panel);
+        moved += 1;
+      }
+    }
+    moved += normalizeCards();
+    return moved;
+  }
+
   async function init() {
     bindScrollMemory();
     // 折叠只依赖界面偏好，所以先把偏好等到手、立刻增强卡片，再让另外两件慢慢来。
     // （硬件探测在部分驱动/远程会话下会挂住；把它排在折叠前面就等于"一颗钉子钉住整页"。）
     await settleInit('界面偏好', 8000, loadUiPrefs);
+    const moved = normalizePanels();
+    if (moved) console.warn(`[Nyx] 有 ${moved} 个分区面板不在内容区里，已收回去。`);
     setupCardFolding();
     // 结构图：入口先画出来，用户一进来就能点（不依赖任何网络/硬件信息）
     setupMindmap();
