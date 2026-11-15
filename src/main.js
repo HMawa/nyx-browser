@@ -130,6 +130,11 @@ const {
 } = require('./core/onboarding');
 const { screenshotFilename } = require('./core/toolbar');
 const {
+  decideShellNavigation,
+  decideShellWindowOpen,
+  describeAttachBlock,
+} = require('./core/shell-guard');
+const {
   CACHE_SITE_MODES,
   addCustomTemplate,
   applySiteTemplate,
@@ -2879,7 +2884,8 @@ function createMainWindow() {
     webPreferences: shellPrefs,
   });
 
-  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  const shellUrl = pathToFileURL(path.join(__dirname, 'renderer', 'index.html')).href;
+  win.loadURL(shellUrl);
   win.once('ready-to-show', () => win.show());
 
   // 外壳页面就绪：从此提示可以直接推送，同时把加载期间攒下的提示一次补发
@@ -2895,8 +2901,44 @@ function createMainWindow() {
 
   // UI 外壳中的弹窗一律交给标签系统处理
   win.webContents.setWindowOpenHandler(({ url }) => {
+    const verdict = decideShellWindowOpen({ url });
+    if (!verdict.allow) {
+      diagnostics.warn('SHELL_WINDOW_OPEN_BLOCKED', verdict.reason, {
+        code: verdict.code,
+        url: redactUrlForLog(url),
+      });
+      notifyNotice({ level: 'warn', title: '这个链接没有打开', message: verdict.reason });
+      return { action: 'deny' };
+    }
     openInNewTab(url);
     return { action: 'deny' };
+  });
+
+  // 安全审计 P0-1：外壳页面暴露了整份 window.nyx（读 Cookie、读历史、改信任名单、
+  // 执行脚本……），所以它只允许待在自己那份文档上。判定在 src/core/shell-guard.js，
+  // 这里只做三件事：拒绝、记日志、给用户看得见的提示。
+  const blockShellNav = (source) => (event, target) => {
+    const verdict = decideShellNavigation({ targetUrl: target, shellUrl });
+    if (verdict.allow) return;
+    event.preventDefault();
+    console.warn(`[Nyx] 外壳导航被拦下（${verdict.code}）：`, target);
+    diagnostics.warn('SHELL_NAV_BLOCKED', verdict.reason, {
+      code: verdict.code,
+      source,
+      url: redactUrlForLog(target),
+    });
+    notifyNotice({
+      level: 'warn',
+      title: '外壳想跳转到别处，已被拦下',
+      message: verdict.reason,
+    });
+  };
+  win.webContents.on('will-navigate', blockShellNav('will-navigate'));
+  win.webContents.on('will-redirect', blockShellNav('will-redirect'));
+  win.webContents.on('will-attach-webview', (event) => {
+    const verdict = describeAttachBlock();
+    event.preventDefault();
+    diagnostics.warn('SHELL_WEBVIEW_BLOCKED', verdict.reason, { code: verdict.code });
   });
 
   win.on('resize', () => {

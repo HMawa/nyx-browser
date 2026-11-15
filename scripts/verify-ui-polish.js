@@ -3678,6 +3678,31 @@ async function main() {
       JSON.stringify(agentDoc),
     );
 
+    /* ---------- 外壳导航守卫（安全审计 P0-1） ---------- */
+    // 审计里的实测攻击：在外壳里把自己导航到远程页，那个页面就拿到了整份 window.nyx。
+    // 这里真做一次同样的动作，断言外壳仍然停在自己那份文档上。
+    const shellNav = await (async () => {
+      const before = await shell.eval('location.href');
+      await shell.eval(
+        `(() => { try { location.href = 'http://127.0.0.1:${PORT}/b-page?evil=1'; } catch (e) {} return 1; })()`
+      );
+      await sleep(900);
+      const after = await shell.eval('location.href');
+      const hasApi = await shell.eval('typeof window.nyx === "object" && window.nyx !== null');
+      const notices = await shell.eval(
+        `Array.from(document.querySelectorAll('.notice')).map((el) => el.textContent || '').join(' | ')`
+      );
+      return { before, after, hasApi, notices };
+    })();
+    check(
+      '外壳被导航到网络地址时停在原地，并给出可见提示（P0-1）',
+      /^file:\/\/.*\/index\.html/.test(String(shellNav.after || ''))
+        && shellNav.after === shellNav.before
+        && shellNav.hasApi === true
+        && /拦下|不允许/.test(String(shellNav.notices || '')),
+      JSON.stringify(shellNav),
+    );
+
     /* ---------- 运行时无脚本异常 ---------- */
     const shellErrors = shell.exceptions();
     /* ---------- B3（设置页侧）：卡片 / 未勾确认被拦 / 勾选后可改可回 ---------- */
