@@ -23,7 +23,17 @@
           <span class="badge" id="nav-version">—</span>
         </div>
 
-        <ul class="nav-list" id="nav-list">
+        <nav class="mindmap" id="mindmap" aria-label="设置结构图">
+          <!-- 结构图：中心是「Nyx 设置」，四条分支是用途分组，末端是可以点的设置分区 -->
+          <svg class="mindmap-links" id="mindmap-links" aria-hidden="true" focusable="false"></svg>
+          <div class="mindmap-stage" id="mindmap-stage">
+            <div class="mindmap-root" id="mindmap-root" aria-hidden="true">Nyx 设置</div>
+            <!-- 分组节点与分区节点由 settings.js 按下面的 #nav-list 生成，位置随窗口宽度重算 -->
+          </div>
+        </nav>
+
+        <!-- 结构数据源：导图按这份列表生成，读屏器与验收脚本也读它（视觉上不出现） -->
+        <ul class="nav-list nav-list-source" id="nav-list" hidden>
           <!-- 十个分区平铺会看不出层次，按用途分成四组；组标题只是分组线，不可点 -->
           <li class="nav-group">
             <span class="nav-group-label">外观与显示</span>
@@ -50,7 +60,7 @@
         </ul>
 
         <p class="nav-note">
-          设置项即时生效；代理与内核状态在「网络与代理」分区内管理，扩展插件在「扩展插件」分区内管理。
+          点结构图上的任意一个分区就能切换；窗口窄的时候图会横向滚动，不会把节点挤没。
         </p>
       </aside>
 

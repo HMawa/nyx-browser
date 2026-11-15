@@ -1069,6 +1069,97 @@ async function main() {
           layoutFlow && JSON.stringify(layoutFlow),
         );
 
+        /* ---------- 设置结构图：中心 → 分组 → 分区，点节点能直接切 ---------- */
+        // 用户要的是「设置页面做成思维导图一样的」。这里量的是四件事：
+        // 图存在且有节点、节点数与原导航一致、连线数对得上、点节点真能切分区。
+        const mindmapFlow = await settings.eval(`(async () => {
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const map = document.getElementById('mindmap');
+          const stage = document.getElementById('mindmap-stage');
+          const svg = document.getElementById('mindmap-links');
+          if (!map || !stage || !svg) return { ok: false, why: 'no-mindmap' };
+
+          // 图是在 init 里画的；字体与宽度变化后还会再画一次，等它稳下来
+          for (let i = 0; i < 24; i += 1) {
+            if (stage.querySelectorAll('.mindmap-node').length > 0) break;
+            await wait(250);
+          }
+
+          const nodes = Array.from(stage.querySelectorAll('.mindmap-node'));
+          const navItems = Array.from(document.querySelectorAll('.nav-list .nav-item'));
+          const paths = Array.from(svg.querySelectorAll('path'));
+          const groups = Array.from(stage.querySelectorAll('.mindmap-group'));
+          const root = document.getElementById('mindmap-root');
+          const rootBox = root ? root.getBoundingClientRect() : null;
+          const mapBox = map.getBoundingClientRect();
+
+          // 节点不许叠在一起，也不许跑到图外面去（会看起来像"画歪了"）
+          let overlapped = 0;
+          let outside = 0;
+          for (let i = 0; i < nodes.length; i += 1) {
+            const a = nodes[i].getBoundingClientRect();
+            if (a.width === 0 || a.height === 0) outside += 1;
+            for (let j = i + 1; j < nodes.length; j += 1) {
+              const b = nodes[j].getBoundingClientRect();
+              const hit = a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1;
+              if (hit) overlapped += 1;
+            }
+          }
+          for (const node of nodes) {
+            const b = node.getBoundingClientRect();
+            if (b.right > mapBox.right + 2 && map.scrollWidth <= map.clientWidth) outside += 1;
+          }
+
+          // 点「隐私与安全」的节点：分区要真的切过去，节点要亮起来
+          const target = nodes.find((n) => n.dataset.sec === 'privacy');
+          let clicked = null;
+          if (target) {
+            target.click();
+            await wait(400);
+            const panel = document.querySelector('.sec-panel[data-sec="privacy"]');
+            clicked = {
+              panelActive: Boolean(panel && panel.classList.contains('active')),
+              nodeActive: target.classList.contains('is-active'),
+              ariaCurrent: target.getAttribute('aria-current'),
+              activeLinks: paths.filter((p) => p.classList.contains('is-active')).length,
+            };
+          }
+
+          return {
+            ok: true,
+            dataNodes: Number(map.getAttribute('data-nodes') || 0),
+            nodes: nodes.length,
+            navItems: navItems.length,
+            groups: groups.length,
+            paths: paths.length,
+            hasRoot: Boolean(rootBox && rootBox.width > 20),
+            overlapped,
+            outside,
+            clicked,
+          };
+        })()`);
+        check(
+          '设置页是一张结构图：中心 → 分组 → 每个分区一个可点节点，点一下真能切（结构图）',
+          Boolean(
+            mindmapFlow &&
+              mindmapFlow.ok &&
+              mindmapFlow.dataNodes > 0 &&
+              mindmapFlow.nodes === mindmapFlow.navItems &&
+              mindmapFlow.nodes >= 10 &&
+              mindmapFlow.groups === 4 &&
+              mindmapFlow.paths === mindmapFlow.groups + mindmapFlow.nodes &&
+              mindmapFlow.hasRoot === true &&
+              mindmapFlow.overlapped === 0 &&
+              mindmapFlow.outside === 0 &&
+              mindmapFlow.clicked &&
+              mindmapFlow.clicked.panelActive === true &&
+              mindmapFlow.clicked.nodeActive === true &&
+              mindmapFlow.clicked.ariaCurrent === 'true' &&
+              mindmapFlow.clicked.activeLinks >= 1,
+          ),
+          mindmapFlow && JSON.stringify(mindmapFlow),
+        );
+
         const scrollFlow = await settings.eval(`(async () => {
           const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 

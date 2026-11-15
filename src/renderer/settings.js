@@ -554,6 +554,194 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* 设置结构图（思维导图，v1.17.11 从头重构）                            */
+  /* ------------------------------------------------------------------ */
+
+  const MINDMAP = {
+    pad: 12,
+    colGap: 44,
+    rowH: 30,
+    rowGap: 6,
+    minHeight: 260,
+  };
+
+  let mindmapBuilt = false;
+  let mindmapResizeTimer = null;
+
+  function collectMindmapData() {
+    const list = byId('nav-list');
+    if (!list) return null;
+    const groups = [];
+    for (const group of list.querySelectorAll('.nav-group')) {
+      const labelEl = group.querySelector('.nav-group-label');
+      const label = (labelEl && labelEl.textContent ? labelEl.textContent : '').trim();
+      const items = [];
+      for (const item of group.querySelectorAll('.nav-item')) {
+        items.push({
+          sec: item.dataset.sec || '',
+          label: (item.textContent || '').trim(),
+          source: item,
+        });
+      }
+      if (items.length) groups.push({ label, items });
+    }
+    return groups.length ? groups : null;
+  }
+
+  /** 让结构图上的高亮跟着当前分区走（唯一权威仍是 .nav-item.active） */
+  function syncMindmapActive(section) {
+    const stage = byId('mindmap-stage');
+    if (!stage) return;
+    for (const node of stage.querySelectorAll('.mindmap-node')) {
+      const on = node.dataset.sec === section;
+      node.classList.toggle('is-active', on);
+      node.setAttribute('aria-current', on ? 'true' : 'false');
+    }
+    for (const path of byId('mindmap-links') ? byId('mindmap-links').querySelectorAll('path[data-target]') : []) {
+      path.classList.toggle('is-active', path.dataset.target === section);
+    }
+  }
+
+  /**
+   * 画结构图：中心 → 分组 → 分区。
+   * 位置全部由容器的实测尺寸算出来（不写死像素），窗口一变就重算，所以不会出现
+   * 「节点叠在一起」或「连线指错地方」这种一眼假的东西。
+   */
+  function buildMindmap() {
+    const stage = byId('mindmap-stage');
+    const svg = byId('mindmap-links');
+    const root = byId('mindmap-root');
+    if (!stage || !svg || !root) return;
+    const data = collectMindmapData();
+    if (!data) return;
+
+    for (const old of stage.querySelectorAll('.mindmap-group, .mindmap-node')) old.remove();
+    svg.innerHTML = '';
+
+    // 第一遍：只把节点放上舞台，拿到各自真实宽度
+    const rootLabel = (root.textContent || 'Nyx 设置').trim();
+    root.textContent = rootLabel;
+    const planned = [];
+    for (const group of data) {
+      const groupEl = document.createElement('div');
+      groupEl.className = 'mindmap-group';
+      groupEl.textContent = group.label || '未命名分组';
+      stage.appendChild(groupEl);
+
+      const leaves = [];
+      for (const item of group.items) {
+        const node = document.createElement('button');
+        node.type = 'button';
+        node.className = 'mindmap-node';
+        node.dataset.sec = item.sec;
+        node.textContent = item.label;
+        // 点节点 == 点原来的导航按钮：走同一条路径，不另开一套激活逻辑
+        node.addEventListener('click', () => {
+          if (item.source) item.source.click();
+        });
+        stage.appendChild(node);
+        leaves.push({ el: node, item });
+      }
+      planned.push({ groupEl, leaves });
+    }
+
+    const rootW = Math.ceil(root.getBoundingClientRect().width) || 96;
+    const groupX = MINDMAP.pad + rootW + MINDMAP.colGap;
+
+    // 先按内容算总高度，再决定中心点
+    let contentH = MINDMAP.pad * 2;
+    for (const block of planned) {
+      const leavesH = block.leaves.length * MINDMAP.rowH + (block.leaves.length - 1) * MINDMAP.rowGap;
+      contentH += leavesH + 14;
+    }
+    const stageH = Math.max(MINDMAP.minHeight, contentH);
+    stage.style.height = `${stageH}px`;
+
+    const centerY = stageH / 2;
+    const rootH = Math.ceil(root.getBoundingClientRect().height) || 28;
+    root.style.left = `${MINDMAP.pad}px`;
+    root.style.top = `${Math.round(centerY - rootH / 2)}px`;
+
+    let cursorY = MINDMAP.pad;
+    let maxRight = groupX;
+
+    for (const block of planned) {
+      const leavesH = block.leaves.length * MINDMAP.rowH + (block.leaves.length - 1) * MINDMAP.rowGap;
+      const blockTop = cursorY;
+      const groupCenterY = blockTop + leavesH / 2;
+      const groupW = Math.ceil(block.groupEl.getBoundingClientRect().width) || 88;
+      const groupH = Math.ceil(block.groupEl.getBoundingClientRect().height) || 24;
+
+      block.groupEl.style.left = `${groupX}px`;
+      block.groupEl.style.top = `${Math.round(groupCenterY - groupH / 2)}px`;
+      maxRight = Math.max(maxRight, groupX + groupW);
+
+      const leafX = groupX + groupW + MINDMAP.colGap;
+      block.leaves.forEach((leaf, index) => {
+        const leafTop = blockTop + index * (MINDMAP.rowH + MINDMAP.rowGap);
+        leaf.el.style.left = `${leafX}px`;
+        leaf.el.style.top = `${leafTop}px`;
+        leaf.el.style.height = `${MINDMAP.rowH}px`;
+        const leafW = Math.ceil(leaf.el.getBoundingClientRect().width) || 96;
+        maxRight = Math.max(maxRight, leafX + leafW);
+
+        // 分组 → 分区
+        const path1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path1.setAttribute(
+          'd',
+          cubic(
+            groupX + groupW,
+            groupCenterY,
+            leafX,
+            leafTop + MINDMAP.rowH / 2,
+          ),
+        );
+        // 注意：这里用 data-target 而不是 data-sec —— 连线是 SVG 元素，没有 click()，
+        // 而验收脚本与界面其它地方会用 [data-sec="x"] 找"能点的那个"，SVG 混进去会拿到它。
+        path1.dataset.target = leaf.item.sec;
+        svg.appendChild(path1);
+      });
+
+      // 中心 → 分组
+      const path0 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path0.setAttribute('d', cubic(MINDMAP.pad + rootW, centerY, groupX, groupCenterY));
+      svg.appendChild(path0);
+
+      cursorY = blockTop + leavesH + 14;
+    }
+
+    stage.style.width = `${Math.ceil(maxRight + MINDMAP.pad)}px`;
+    svg.setAttribute('viewBox', `0 0 ${Math.ceil(maxRight + MINDMAP.pad)} ${stageH}`);
+
+    const nav = byId('mindmap');
+    if (nav) nav.setAttribute('data-nodes', String(planned.reduce((sum, block) => sum + block.leaves.length, 0)));
+    mindmapBuilt = true;
+    syncMindmapActive(activeSection);
+  }
+
+  /** 三次贝塞尔：从左节点右边缘连到右节点左边缘，中途保持水平切线 */
+  function cubic(x1, y1, x2, y2) {
+    const mid = x1 + (x2 - x1) / 2;
+    return `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`;
+  }
+
+  function setupMindmap() {
+    if (!byId('mindmap-stage')) return;
+    buildMindmap();
+    window.addEventListener('resize', () => {
+      if (mindmapResizeTimer) clearTimeout(mindmapResizeTimer);
+      mindmapResizeTimer = setTimeout(() => {
+        mindmapResizeTimer = null;
+        buildMindmap();
+      }, 180);
+    });
+    // 字体加载完 / 面板变宽之后宽度会变，再画一次，免得连线差几个像素
+    setTimeout(() => {
+      if (mindmapBuilt) buildMindmap();
+    }, 500);
+  }
+
+  /* ------------------------------------------------------------------ */
   /* 分区导航                                                            */
   /* ------------------------------------------------------------------ */
 
@@ -570,6 +758,9 @@
       panel.classList.toggle('active', panel.dataset.sec === section);
     }
     activeSection = section;
+
+    // 结构图上的高亮跟着走（图只是入口，状态还是 .nav-item.active 说了算）
+    syncMindmapActive(section);
 
     // 面板此刻才由 display:none 变可见，只能在这里恢复一次位置
     restoreScroll(section);
@@ -4373,6 +4564,8 @@ async function loadFootprint() {
     // （硬件探测在部分驱动/远程会话下会挂住；把它排在折叠前面就等于"一颗钉子钉住整页"。）
     await settleInit('界面偏好', 8000, loadUiPrefs);
     setupCardFolding();
+    // 结构图：入口先画出来，用户一进来就能点（不依赖任何网络/硬件信息）
+    setupMindmap();
     // 这两件不影响折叠，失败也只是少了版本号/硬件信息，放在后台各自跑
     settleInit('应用信息', 8000, loadAppInfo);
     settleInit('硬件信息', 8000, loadHardware);

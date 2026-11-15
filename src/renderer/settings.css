@@ -16,7 +16,9 @@
 }
 
 .settings-nav {
-  width: 208px;
+  width: 40%;
+  min-width: 288px;
+  max-width: 460px;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
@@ -25,6 +27,122 @@
   border-right: 1px solid var(--border);
   background: var(--bg-panel);
 }
+
+/* ============ 设置结构图（思维导图，v1.17.11 从头重构） ============ */
+/* 左栏不再是"一列按钮"，而是一张图：中心 → 四个用途分组 → 每个分区一个可点节点。
+   节点位置由 settings.js 按容器尺寸算出来，连线是 SVG 三次贝塞尔；
+   窄窗口横向滚动，绝不把节点压扁或藏起来。 */
+.mindmap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 300px;
+  margin: 2px 2px 0;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--bg-deep) 55%, var(--bg-panel));
+  overflow: auto;
+}
+
+.mindmap-links {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.mindmap-links path {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 1.2;
+}
+
+.mindmap-links path.is-active {
+  stroke: var(--accent);
+  stroke-width: 1.6;
+}
+
+.mindmap-stage {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+.mindmap-root {
+  position: absolute;
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.mindmap-group {
+  position: absolute;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.mindmap-node {
+  position: absolute;
+  padding: 5px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--motion-ms, 150ms) ease, border-color var(--motion-ms, 150ms) ease,
+    background var(--motion-ms, 150ms) ease;
+}
+
+.mindmap-node:hover {
+  border-color: var(--accent-soft);
+  color: var(--text);
+}
+
+.mindmap-node.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.mindmap-node:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+}
+
+/* 数据源列表：只给读屏器与验收脚本看，视觉上不出现 */
+.nav-list-source {
+  display: none !important;
+}
+
+@media (max-width: 900px) {
+  .settings-nav {
+    width: 100%;
+    max-width: none;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .mindmap {
+    min-height: 220px;
+  }
+}
+
 
 .settings-brand {
   display: flex;
