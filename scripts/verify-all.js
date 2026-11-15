@@ -39,6 +39,7 @@
  * 33. scripts/verify-shell-guard.js（外壳导航守卫：只许停在自己那份文档、网络地址与伪协议全拦、弹窗只放行 http(s)、不许内嵌 webview、接线与提示，11 项；纯 Node，不启动 Electron）
  * 34. scripts/verify-update-policy.js（更新通道准入：只许 https、本地目录必须显式确认、版本必须单调、缺 sha256 一律拒绝，10 项；纯 Node，不启动 Electron）
  * 35. scripts/verify-update-signature.js（更新签名：清单 Ed25519 签名往返、改任一受保护字段即失效、安装包六种验签结果、私钥不入库，17 项；纯 Node，不启动 Electron）
+ * 36. scripts/verify-privacy-surface.js（隐私指纹面：加固脚本放进假页面世界真跑一遍核对 UA/语言/时区/Canvas/WebGL、CDP 四步顺序、接线与失败可见，28 项；纯 Node，不启动 Electron）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -283,6 +284,12 @@ const STEPS = [
     label: '更新签名回归',
     script: 'verify-update-signature.js',
     items: '17 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '隐私指纹面回归',
+    script: 'verify-privacy-surface.js',
+    items: '28 项',
     timeoutMs: 60000,
   },
 ];

@@ -59,6 +59,7 @@ const {
 
 const sessions = require('./core/sessions');
 const { PrivacyHardening } = require('./core/privacy-hardening');
+const { buildCdpSteps, describeSurfaceFailure, shouldAttachSurface } = require('./core/privacy-surface');
 const { Vault } = require('./core/vault');
 const { ProxyService } = require('./core/proxy-service');
 const { TabManager, normalizeInput } = require('./core/tabs');
@@ -1689,6 +1690,65 @@ async function applyPrivacyHardening() {
 }
 
 /**
+ * 给一个标签装配「隐私指纹面」（安全审计 P0-3）。
+ *
+ * 审计的结论是：原来那 11 个 guard 写在 preload 的隔离世界里，页面主世界一行都看不到，
+ * 于是「请求头说 Chrome/156、页面说自己 Electron/45」——头与 JS 互相矛盾，比不伪装更假。
+ *
+ * 这里补上真正生效的三层（缺一层都算没修好）：
+ *   1. `wc.setUserAgent()`：请求头与 `navigator.userAgent` 同源；
+ *   2. CDP `Emulation.*`：UA 的 platform/acceptLanguage、时区、语言一起对齐；
+ *   3. CDP `Page.addScriptToEvaluateOnNewDocument`：Canvas/WebGL/Audio/硬件并发这些
+ *      只能靠 JS 改的，注入到**主世界**，且在页面脚本之前执行。
+ *
+ * 任何一层失败都必须让用户看见（红线 2）：不静默降级成"半加固"，
+ * 并在标签上记 `privacyIncomplete` 供后续排障。
+ */
+function attachPrivacySurface(tab) {
+  if (!tab || !tab.view) return { ok: false, error: '标签还没准备好' };
+  if (!shouldAttachSurface(sessions.getMode())) return { ok: true, skipped: true };
+
+  const profile = runtime.hardening ? runtime.hardening.profile : null;
+  const wc = tab.view.webContents;
+  const fail = (message) => {
+    tab.privacyIncomplete = true;
+    console.warn(`[Nyx] 隐私指纹面装配失败：${message}`);
+    diagnostics.error('PRIVACY_SURFACE_FAILED', message, { tabId: tab.id });
+    notifyNotice({ level: 'error', code: 'PRIVACY_SURFACE_FAILED', title: '隐私模式加固没做完', message });
+    return { ok: false, error: message };
+  };
+
+  if (!profile) {
+    return fail(
+      '隐私模式没有可用的指纹画像（profile 为空）：这一页看到的会是本机真实标识，建议退出隐私模式后重新进入。',
+    );
+  }
+
+  // 1) UA：这一步最关键——它决定请求头与 navigator.userAgent 是否同源
+  try {
+    wc.setUserAgent(profile.ua, profile.acceptLanguage);
+  } catch (err) {
+    return fail(describeSurfaceFailure('setUserAgent', err));
+  }
+
+  // 2) + 3) CDP：身份对齐 + 主世界补丁（在导航之前下发）
+  try {
+    if (!wc.debugger.isAttached()) wc.debugger.attach('1.3');
+    for (const step of buildCdpSteps(profile)) {
+      const sent = wc.debugger.sendCommand(step.method, step.params);
+      if (sent && typeof sent.catch === 'function') {
+        sent.catch((err) => fail(describeSurfaceFailure('send', err)));
+      }
+    }
+  } catch (err) {
+    return fail(describeSurfaceFailure('attach', err));
+  }
+
+  tab.privacyIncomplete = false;
+  return { ok: true };
+}
+
+/**
  * 离开隐私模式：复位 profile，并把预加载参数退回"无伪装"基线。
  *
  * 复位是必须的——否则下次进入隐私模式会复用上一次的出口时区与会话种子，
@@ -3023,6 +3083,9 @@ function createMainWindow() {
           console.warn('[Nyx] 工具箱粘性设置应用失败：', err.message);
         });
       }
+      // 安全审计 P0-3：隐私模式下把 UA 与指纹补丁真正下发给**主世界**。
+      // 必须在 loadURL 之前（标签创建回调就在 loadURL 之前），否则页面脚本先跑一步就白做。
+      attachPrivacySurface(tab);
       // 历史记录：导航提交（主框架）即记账，页面标题就绪后再修正标题
       hookHistoryRecording(tab);
     },
