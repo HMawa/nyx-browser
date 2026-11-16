@@ -32,7 +32,7 @@
  * 26. scripts/verify-agent-lamp.js（agent 三色状态灯：只在动作执行时算"正在被驱动"、审计缺口不混进灯、窄面板只给看与急停，11 项；纯 Node，不启动 Electron）
  * 27. scripts/verify-toolbar.js（工具栏：四个主路径固定、「更多」四项固定、小字标签开关、截图落点顺序、四处接线，10 项；纯 Node，不启动 Electron）
  * 28. scripts/verify-motion.js（动效档位：两档时长与缓动同源、减少动效时降级、按住有反馈、不做外发光，8 项；纯 Node，不启动 Electron）
- * 29. scripts/verify-onboard.js（首次安装引导：四种判定口径、选"先不定"不落盘、"全部默认"一步落盘、非法取值整组拒绝，10 项；纯 Node，不启动 Electron）
+ * 29. scripts/verify-onboard.js（首次安装引导：四种判定口径、选"先不定"不落盘、"全部默认"一步落盘、非法取值整组拒绝、空白页不是 about:blank，12 项；纯 Node，不启动 Electron）
  * 30. scripts/verify-onboard-e2e.js（首次引导真机：全新安装弹一次、点默认后落盘并关窗、再启动与升级安装都不弹，7 项）
  * 31. scripts/verify-agent-doc.js（agent 接入说明：端点来自运行时、两种模式边界、会被拦下的四种情况、复制回读，9 项；纯 Node，不启动 Electron）
  * 32. scripts/verify-themes.js（主题：六套主题与枚举一一对应、新主题令牌齐全、对比度实算、不许有渐变、主题与显示分区，7 项；纯 Node，不启动 Electron）
@@ -46,7 +46,7 @@
  * 40. scripts/verify-permissions.js（站点设备授权白名单：设备项拆分、来源只收 http(s)、三档授权、隐私模式封死、撤销/清空与接线，22 项；纯 Node，不启动 Electron）
  * 41. scripts/verify-switch-cache.js（模式切换缓存：代理可达 30 秒、出口取不到 60 秒内复用、时钟回拨不认、计时文案点名最慢一步，以及主进程真的接上了，21 项；纯 Node，不启动 Electron）
  * 42. scripts/verify-tab-park.js（标签停靠：切模式不再销毁标签、视图摘下但不关页面、恢复按原顺序挂回、超出 12 个降级成只记地址并当面告知，12 项；纯 Node，不启动 Electron）
- * 43. scripts/verify-transition.js（切换动画：牛奶桶素材有效、页面无外联、时长与格子有上下限、减少动效降级、透明子窗口不抢焦点不开沙箱口子、开关默认开且可关，18 项；纯 Node，不启动 Electron）
+ * 43. scripts/verify-transition.js（切换动画：牛奶桶素材有效、页面无外联、进入＝从中心向外的黑色扩散、两套动画各 1 秒且时长与格子有上下限、减少动效降级、透明子窗口不抢焦点不开沙箱口子、开关默认开且可关，20 项；纯 Node，不启动 Electron）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -254,7 +254,7 @@ const STEPS = [
   {
     label: '首次引导回归',
     script: 'verify-onboard.js',
-    items: '10 项',
+    items: '12 项',
     timeoutMs: 60000,
   },
   {
@@ -338,7 +338,7 @@ const STEPS = [
   {
     label: '切换动画回归',
     script: 'verify-transition.js',
-    items: '18 项',
+    items: '20 项',
     timeoutMs: 60000,
   },
 ];

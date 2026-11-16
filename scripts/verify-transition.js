@@ -60,8 +60,16 @@ check(
 );
 
 /* ③ 脚本：参数、时长上下限、格子大小上下限、减少动效 */
-check('两种动画都实现：进入＝像素扩散，退出＝牛奶桶', /drawInfection/.test(pageJs) && /#bucket/.test(pageCss) && /playExit/.test(pageJs));
-check('时长被夹在 120–1500ms（别让谁传个 0 或 60000 把窗口挂住）', /Math\.max\(120, Math\.min\(1500/.test(pageJs));
+check('两种动画都实现：进入＝从中心向外扩散，退出＝牛奶桶', /drawSpread/.test(pageJs) && /#bucket/.test(pageCss) && /playExit/.test(pageJs));
+check(
+  '进入动画从同一个中心点向外扩散（按到中心的距离排序，噪声只占极小比例）',
+  /const cx = cols \/ 2/.test(pageJs) && /dist \* 0\.96 \+ next\(\) \* 0\.04/.test(pageJs) && /cells\.sort\(\(a, b\) => a\.at - b\.at\)/.test(pageJs),
+);
+check(
+  '两套动画都是 1 秒，且时长被夹在 120–6000ms（别让谁传个 0 或 60000 把窗口挂住）',
+  /TRANSITION_ENTER_MS = 1000/.test(mainSource) && /TRANSITION_EXIT_MS = 1000/.test(mainSource) && /Math\.max\(120, Math\.min\(6000/.test(pageJs),
+);
+check('进入动画以黑为主：四档色值全是纯黑到深灰，不出现彩色', /const RINGS = \['#000000', '#040506', '#08090a', '#0d0f11'\]/.test(pageJs));
 check('格子大小被夹在 8–24px（报告里的口径）', /Math\.max\(8, Math\.min\(24/.test(pageJs));
 check('系统开了「减少动效」就只做一次淡变，不做扩散与弹跳', /prefers-reduced-motion/.test(pageCss) && /reducedBySystem/.test(pageJs) && /if \(reduced\)/.test(pageJs));
 

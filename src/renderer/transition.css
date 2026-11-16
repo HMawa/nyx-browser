@@ -1,6 +1,6 @@
 /* 模式切换动画窗口的样式。
    这个窗口只画一次动画、不接受输入，所以这里不引主题令牌：
-   它盖在整屏之上，用固定深色（与墨夜同值）才不会在浅色主题下露出边缘光。 */
+   它盖在整屏之上，用纯黑才不会在浅色主题下露出边缘光。 */
 html,
 body {
   margin: 0;
@@ -17,14 +17,17 @@ body {
   position: fixed;
   inset: 0;
   display: block;
+  /* 透明：扩散时还没覆盖到的区域要能看见下面的页面，才看得出"黑色从中间往外走"。
+     整块铺黑会让整屏一开始就是黑的，等于没有动画。 */
+  background: transparent;
 }
 
 #enter {
   position: fixed;
   inset: 0;
-  background: #07090a;
+  background: #000000;
   opacity: 0;
-  transition: opacity 120ms linear;
+  transition: opacity 200ms linear;
 }
 
 #exit {
@@ -33,27 +36,32 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(7, 9, 10, 0);
+  background: rgba(0, 0, 0, 0);
   opacity: 0;
-  transition: background 180ms ease, opacity 120ms linear;
+  transition: background 420ms ease, opacity 200ms linear;
 }
 
 #exit.on {
   opacity: 1;
-  background: rgba(7, 9, 10, 0.92);
+  background: rgba(0, 0, 0, 0.94);
+}
+
+/* 末尾白闪：桶和整层一起被"牛奶"吃掉 */
+#exit.flash {
+  background: rgba(255, 255, 255, 0.96);
 }
 
 #bucket {
   width: 34vmin;
   height: 34vmin;
   image-rendering: pixelated;
-  transform: scale(0.6) rotate(-8deg);
-  transition: transform 180ms cubic-bezier(0.2, 0.9, 0.2, 1);
-  filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.55));
+  transform: scale(0.5) rotate(-10deg);
+  transition: transform 420ms cubic-bezier(0.18, 0.9, 0.22, 1);
+  filter: drop-shadow(0 18px 40px rgba(0, 0, 0, 0.6));
 }
 
 #bucket.pop {
-  transform: scale(1) rotate(0deg);
+  transform: scale(1.08) rotate(0deg);
 }
 
 /* 系统开了「减少动效」：一律只做最短的一次淡出，不做扩散与弹跳 */

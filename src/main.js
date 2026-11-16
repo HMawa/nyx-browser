@@ -352,6 +352,8 @@ const AGENT_STOP_SHORTCUT = process.env.NYX_AGENT_STOP_SHORTCUT || 'CommandOrCon
  */
 const START_PAGE_PATH = path.join(__dirname, 'renderer', 'start.html');
 const HOME_URL = process.env.NYX_HOME_URL || pathToFileURL(START_PAGE_PATH).href;
+/** 启动方式选「空白页」时打开的那张安静空页（不用 about:blank，见 startupTargets 的注释） */
+const BLANK_PAGE_URL = pathToFileURL(path.join(__dirname, 'renderer', 'blank.html')).href;
 /** 托盘图标 */
 const TRAY_ICON = path.join(__dirname, 'assets', 'tray.png');
 /** 代理可达性探测超时（ms），可用环境变量 NYX_PROXY_PROBE_TIMEOUT 覆盖 */
@@ -3662,9 +3664,14 @@ function currentSnapshot() {
 let transitionWindow = null;
 let transitionTimer = null;
 
-/** 进 / 出两个动画的时长（毫秒）：扩散稍长，牛奶桶稍短 */
-const TRANSITION_ENTER_MS = 820;
-const TRANSITION_EXIT_MS = 620;
+/**
+ * 进 / 出两个动画的时长（毫秒）。
+ * 用户要求「延长到 5 秒」：两个都按 5000 走；上限仍要卡住，
+ * 否则一旦传进来一个荒谬的数字，窗口会挂很久。
+ */
+const TRANSITION_ENTER_MS = 1000;
+const TRANSITION_EXIT_MS = 1000;
+const TRANSITION_MAX_MS = 6000;
 
 function modeTransitionEnabled() {
   if (!runtime.uiStore) return true;
@@ -6913,9 +6920,16 @@ function openFromStartPage(input) {
   return opened;
 }
 
-/** 启动时要打开的地址列表（存储未就绪时回落为单个新标签页） */
+/**
+ * 启动时要打开的地址列表（存储未就绪时回落为单个新标签页）。
+ *
+ * 「空白页」不再用 `about:blank`：那玩意儿在深色窗口里就是一整块黑，
+ * 用户分不清是空白页还是浏览器崩了（实测反馈）。换成一张安静的本地空白页，
+ * 上面写清"这是你选的启动方式、去哪儿改"。
+ */
 function startupTargets() {
-  return runtime.startupStore ? runtime.startupStore.startupTargets(HOME_URL) : [HOME_URL];
+  const list = runtime.startupStore ? runtime.startupStore.startupTargets(HOME_URL) : [HOME_URL];
+  return list.map((url) => (url === 'about:blank' ? BLANK_PAGE_URL : url));
 }
 
 /** 按地址栏规则规范化地址，供设置中心回显「实际会打开什么」 */

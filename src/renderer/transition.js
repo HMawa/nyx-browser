@@ -1,8 +1,12 @@
 /**
- * 模式切换动画：进隐私模式＝像素感染，回普通模式＝牛奶桶。
+ * 模式切换动画：进隐私模式＝黑色从中心向四周扩散，回普通模式＝牛奶桶。
  *
  * 参数从查询串来（kind / duration / bucket / reduced），由主进程按用户偏好与
  * 系统「减少动效」算好再传进来——这里不做任何决策，只负责画。
+ *
+ * 两处口径（用户明确要的）：
+ * 1. 进入动画是从**同一个中心点**向外一圈一圈长满，不是满屏随机闪烁；
+ * 2. 颜色以**黑**为主，只在最外圈给一点点深灰，不能在屏幕上读出别的色调。
  */
 'use strict';
 
@@ -13,21 +17,22 @@ const reducedBySystem =
   typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const reduced = params.get('reduced') === '1' || reducedBySystem;
 const requested = Number(params.get('duration')) || 0;
-const duration = Math.max(120, Math.min(1500, requested || (reduced ? 150 : 820)));
+const duration = Math.max(120, Math.min(6000, requested || (reduced ? 150 : 5000)));
 
 const stage = document.getElementById('stage');
 const enterLayer = document.getElementById('enter');
 const exitLayer = document.getElementById('exit');
 const bucket = document.getElementById('bucket');
 
-/** 与墨夜同一套深色：切换画面不该在浅色主题下露出别的颜色 */
-const COLORS = ['#07090a', '#0d2a1c', '#2a2412', '#2a0f12'];
+/** 以黑为主：最内圈纯黑，往外只走到深灰，不出现彩色 */
+const RINGS = ['#000000', '#040506', '#08090a', '#0d0f11'];
 
 /**
- * 像素感染：格子（8–24px）从中心往外按噪声场依次点亮。
+ * 从中心向外的扩散：每个格子按「到中心的距离」决定它什么时候亮，
+ * 只叠极小的一点噪声，让边缘不至于像用圆规画的。
  * 用固定种子的伪随机，保证同样的窗口尺寸画出同样的图案，便于对比两张截图。
  */
-function drawInfection() {
+function drawSpread() {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const width = window.innerWidth;
   const height = window.innerHeight;
@@ -63,47 +68,63 @@ function drawInfection() {
       cells.push({
         x,
         y,
-        at: dist * 0.82 + next() * 0.18,
-        color: COLORS[Math.floor(next() * COLORS.length)],
+        // 距离占绝对主导：同一圈同时亮；噪声只占 4%，不会破坏"从中心扩散"的观感
+        at: dist * 0.96 + next() * 0.04,
+        color: RINGS[Math.min(RINGS.length - 1, Math.floor(dist * RINGS.length))],
       });
     }
   }
   cells.sort((a, b) => a.at - b.at);
 
   if (reduced) {
-    // 减少动效：直接把整屏铺成底色，再淡入一次，不做扩散
-    ctx.fillStyle = COLORS[0];
-    ctx.fillRect(0, 0, width, height);
+    // 减少动效：不扫，直接铺满黑，再淡一次
     enterLayer.style.opacity = '1';
     return;
   }
 
   const started = performance.now();
+  const trail = Math.max(6, Math.ceil(cells.length * 0.012));
   const step = (now) => {
     const t = Math.min(1, (now - started) / duration);
-    const shown = Math.floor(cells.length * t);
+    // 缓出：前段推进快、末段收得慢，3 秒也不至于"开头就满是黑"
+    const eased = 1 - Math.pow(1 - t, 2);
+    const shown = Math.min(cells.length, Math.ceil(cells.length * eased));
+
+    // 每帧整屏重画：先把整块擦成透明（这样还没覆盖到的地方能看见下面的页面，
+    // 才看得出"黑色从中间往四周扩散"），再画已覆盖的格子，最后给前沿补一条浅灰。
+    // （只"增量画新增格子"会让每一帧的前沿灰都留在屏上，累计几十帧后整屏都是灰的）
+    ctx.clearRect(0, 0, width, height);
     for (let i = 0; i < shown; i += 1) {
       const item = cells[i];
-      ctx.fillStyle = item.color;
+      ctx.fillStyle = i >= shown - trail ? '#2b3035' : item.color;
       ctx.fillRect(item.x * cell, item.y * cell, cell, cell);
     }
+
     if (t < 1) requestAnimationFrame(step);
-    else enterLayer.style.opacity = '1';
+    else {
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, width, height);
+      enterLayer.style.opacity = '1';
+    }
   };
   requestAnimationFrame(step);
 }
 
-/** 退出：牛奶桶弹出来、白闪一下，然后整层消失（由主进程按 duration 收窗口） */
+/** 退出：牛奶桶弹出来、停一会儿、末尾白闪整层消失（由主进程按 duration 收窗口） */
 function playExit() {
   if (bucketUrl) bucket.src = bucketUrl;
   exitLayer.classList.add('on');
   if (!reduced) {
     requestAnimationFrame(() => bucket.classList.add('pop'));
+    // 5 秒里大部分时间留给"桶停在那儿"，最后 900ms 才白闪淡出
+    const flashAt = Math.max(200, duration - 900);
     setTimeout(() => {
-      stage.style.transition = 'opacity 120ms linear';
+      exitLayer.classList.add('flash');
+    }, flashAt);
+    setTimeout(() => {
+      stage.style.transition = 'opacity 320ms linear';
       stage.style.opacity = '0';
-      exitLayer.style.background = 'rgba(255, 255, 255, 0.92)';
-    }, Math.max(120, duration - 220));
+    }, flashAt + 220);
     return;
   }
   // 减少动效：不弹桶，直接白闪一下
@@ -113,4 +134,4 @@ function playExit() {
 }
 
 if (kind === 'exit') playExit();
-else drawInfection();
+else drawSpread();

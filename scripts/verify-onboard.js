@@ -119,6 +119,25 @@ check('9. 主题清单与 ui-store 的白名单一致（否则引导里选完存
   }
 });
 
+check('11. 启动方式选「空白页」时打开的是一张真页面，不是 about:blank（否则看着像浏览器坏了）', () => {
+  const blank = read('src/renderer/blank.html');
+  assert.ok(/BLANK_PAGE_URL/.test(mainJs), 'main.js 缺 BLANK_PAGE_URL');
+  assert.ok(
+    /url === 'about:blank' \? BLANK_PAGE_URL : url/.test(mainJs),
+    'startupTargets 没把 about:blank 换成空白页',
+  );
+  assert.ok(/空白页/.test(blank), '空白页上一个字都没有');
+  assert.ok(/启动与主页/.test(blank), '空白页要告诉用户去哪儿改启动方式');
+  assert.ok(!/https?:\/\//.test(blank), '空白页不许引用任何网络资源');
+  assert.ok(!/<script/i.test(blank), '空白页不该有脚本');
+});
+
+check('12. 启动方式的白名单仍是 blank / newTab / custom，默认不是 blank', () => {
+  const store = require(path.join(ROOT, 'src', 'core', 'startup-store.js'));
+  assert.deepStrictEqual(store.STARTUP_MODES, ['blank', 'newTab', 'custom']);
+  assert.strictEqual(store.STARTUP_DEFAULTS.startupMode, 'newTab');
+});
+
 check('10. 接线：只有主进程判定、窗口只在 file:// 加载、标记由安装器写、界面有两条出口', () => {
   assert.ok(/ONBOARD_MARKER_FILE/.test(mainJs) && /function readOnboardMarker/.test(mainJs), 'main.js 缺标记读取');
   assert.ok(/function maybeOpenOnboarding/.test(mainJs), 'main.js 缺 maybeOpenOnboarding');

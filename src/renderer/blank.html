@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'"
+    />
+    <title>空白页</title>
+    <style>
+      /* 空白页：不是"什么都没有"，是一张安静的、看得出这是浏览器的空页。
+         纯黑什么都不给，用户会以为浏览器坏了（这是实测反馈过的问题）。 */
+      :root {
+        color-scheme: dark;
+        --bg: #0c0a09;
+        --text: #efe7d8;
+        --dim: #9a9084;
+        --faint: #6b635a;
+        --accent: #c8a45c;
+      }
+
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--bg);
+      }
+
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: system-ui, 'Microsoft YaHei', sans-serif;
+        color: var(--text);
+        user-select: none;
+      }
+
+      main {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        transform: translateY(-6vh);
+      }
+
+      .mark {
+        width: 54px;
+        height: 54px;
+        border-radius: 16px;
+        display: grid;
+        place-items: center;
+        font-size: 24px;
+        font-weight: 700;
+        color: #1a1512;
+        background: linear-gradient(160deg, var(--accent), #a8863f);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+      }
+
+      h1 {
+        margin: 6px 0 0;
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+
+      p {
+        margin: 0;
+        font-size: 12px;
+        color: var(--dim);
+      }
+
+      kbd {
+        font-family: ui-monospace, Consolas, monospace;
+        font-size: 11px;
+        padding: 1px 5px;
+        border-radius: 4px;
+        border: 1px solid rgba(239, 231, 216, 0.16);
+        color: var(--faint);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="mark" aria-hidden="true">N</div>
+      <h1>空白页</h1>
+      <p>这是你在设置里选的启动方式；想换成起始页，在「设置 → 启动与主页」改。</p>
+      <p><kbd>Ctrl</kbd> + <kbd>L</kbd> 输入网址　·　<kbd>Ctrl</kbd> + <kbd>T</kbd> 开新标签</p>
+    </main>
+  </body>
+</html>
