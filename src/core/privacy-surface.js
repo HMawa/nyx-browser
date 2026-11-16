@@ -212,6 +212,80 @@ function buildHardeningScript(profile) {
     }
   } catch (err) { /* 没有 WebGL 就算了 */ }
 
+  // ---- WebGL 扩展列表：只报"标准浏览器都有的那几个" ----
+  // 不改的话，扩展列表本身就是一张驱动指纹（缺哪几个、多哪几个都很独特）。
+  // 做法是取标准清单与真实支持的交集：既不会报出不存在的扩展（那是新指纹），
+  // 也不会把真实驱动的私有扩展漏出去。
+  try {
+    const CANON_EXT = [
+      'ANGLE_instanced_arrays', 'EXT_blend_minmax', 'EXT_color_buffer_half_float',
+      'EXT_disjoint_timer_query', 'EXT_float_blend', 'EXT_frag_depth', 'EXT_shader_texture_lod',
+      'EXT_texture_compression_bptc', 'EXT_texture_compression_rgtc', 'EXT_texture_filter_anisotropic',
+      'EXT_sRGB', 'OES_element_index_uint', 'OES_fbo_render_sample', 'OES_standard_derivatives',
+      'OES_texture_float', 'OES_texture_float_linear', 'OES_texture_half_float',
+      'OES_texture_half_float_linear', 'OES_vertex_array_object', 'WEBGL_color_buffer_float',
+      'WEBGL_compressed_texture_s3tc', 'WEBGL_compressed_texture_s3tc_srgb',
+      'WEBGL_debug_renderer_info', 'WEBGL_debug_shaders', 'WEBGL_depth_texture',
+      'WEBGL_draw_buffers', 'WEBGL_lose_context', 'WEBGL_multi_draw',
+    ];
+    const patchExtensions = (Proto) => {
+      if (typeof Proto === 'undefined') return;
+      const origList = Proto.prototype.getSupportedExtensions;
+      const origGet = Proto.prototype.getExtension;
+      Proto.prototype.getSupportedExtensions = function getSupportedExtensions() {
+        const real = origList.call(this) || [];
+        return CANON_EXT.filter((name) => real.indexOf(name) >= 0);
+      };
+      Proto.prototype.getExtension = function getExtension(name) {
+        if (CANON_EXT.indexOf(String(name)) < 0) return null;
+        return origGet.call(this, name);
+      };
+    };
+    patchExtensions(typeof WebGLRenderingContext !== 'undefined' ? WebGLRenderingContext : undefined);
+    patchExtensions(typeof WebGL2RenderingContext !== 'undefined' ? WebGL2RenderingContext : undefined);
+  } catch (err) { /* 没有 WebGL 就算了 */ }
+
+  // ---- WebGPU：适配器信息同样是一张显卡指纹，报成与 WebGL 同一块卡 ----
+  try {
+    const gpu = navigator.gpu;
+    if (gpu && typeof gpu.requestAdapter === 'function') {
+      const origRequest = gpu.requestAdapter.bind(gpu);
+      gpu.requestAdapter = function requestAdapter(...args) {
+        return origRequest(...args).then((adapter) => {
+          if (!adapter) return adapter;
+          try {
+            // Chromium 110+ 的 adapter.info 是只读快照；能覆盖就覆盖，不行就算了
+            const info = { vendor: 'intel', architecture: 'gen-12lp', device: '', description: '' };
+            Object.defineProperty(adapter, 'info', { get: () => info, configurable: true });
+          } catch (err) { /* 只读就算了 */ }
+          return adapter;
+        });
+      };
+    }
+  } catch (err) { /* 没有 WebGPU 就算了 */ }
+
+  // ---- 字体度量：把宽度统一到 0.5px 网格 ----
+  // 真实 Chrome 报的是带小数的精确宽度，而"这一串字体名量出来差 0.03px"就是常见的
+  // 指纹来源。对齐到 0.5px 后，字形相近的字体彼此塌陷成同一档，排版看不出区别。
+  try {
+    const origMeasure = CanvasRenderingContext2D.prototype.measureText;
+    CanvasRenderingContext2D.prototype.measureText = function measureText(text) {
+      const metrics = origMeasure.call(this, text);
+      try {
+        const rounded = Math.round(metrics.width * 2) / 2;
+        return new Proxy(metrics, {
+          get(target, prop) {
+            if (prop === 'width') return rounded;
+            const value = target[prop];
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        });
+      } catch (err) {
+        return metrics;
+      }
+    };
+  } catch (err) { /* 没有 Canvas 2D 就算了 */ }
+
   // ---- Audio：频域数据加一点噪声，避免 AudioContext 指纹 ----
   try {
     const origFloat = AnalyserNode.prototype.getFloatFrequencyData;

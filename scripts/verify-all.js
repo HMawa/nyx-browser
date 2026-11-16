@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把四十二个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把四十三个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
@@ -39,13 +39,14 @@
  * 33. scripts/verify-shell-guard.js（外壳导航守卫：只许停在自己那份文档、网络地址与伪协议全拦、弹窗只放行 http(s)、不许内嵌 webview、接线与提示，13 项；纯 Node，不启动 Electron）
  * 34. scripts/verify-update-policy.js（更新通道准入：只许 https、本地目录必须显式确认、版本必须单调、缺 sha256 一律拒绝，10 项；纯 Node，不启动 Electron）
  * 35. scripts/verify-update-signature.js（更新签名：清单 Ed25519 签名往返、改任一受保护字段即失效、安装包六种验签结果、私钥不入库，17 项；纯 Node，不启动 Electron）
- * 36. scripts/verify-privacy-surface.js（隐私指纹面：加固脚本放进假页面世界真跑一遍核对 UA/语言/时区/Canvas/WebGL、CDP 五步顺序、userAgentMetadata、两个平台分开、完整版本号、语言去 q、Worker 版脚本与 Target.setAutoAttach 接管、文档就绪补打与接线可见，51 项；纯 Node，不启动 Electron）
+ * 36. scripts/verify-privacy-surface.js（隐私指纹面：加固脚本放进假页面世界真跑一遍核对 UA/语言/时区/Canvas/WebGL、显卡与字体统一上报值、CDP 五步顺序、userAgentMetadata、两个平台分开、完整版本号、语言去 q、Worker 版脚本与 Target.setAutoAttach 接管、文档就绪补打与接线可见，55 项；纯 Node，不启动 Electron）
  * 37. scripts/verify-ipc-guard.js（IPC 发送方校验：只认同项目 renderer 下的 html、子框架与网络地址全拒、三个注册口都被包上、页面上下文通道单独列，10 项；纯 Node，不启动 Electron）
  * 38. scripts/verify-http-api-auth.js（本地接口鉴权：只认请求头 token、查询串不再接受、无 token 的 health 不泄露版本，7 项；纯 Node，不启动 Electron）
  * 39. scripts/verify-audit-p2.js（安全审计 P2 批次：隐私模式 agent 内容边界、state 只读豁免、截图重试、密码框 name 抹除、limits 传参、设置只读不确认、MCP 参数转发，14 项；纯 Node，不启动 Electron）
  * 40. scripts/verify-permissions.js（站点设备授权白名单：设备项拆分、来源只收 http(s)、三档授权、隐私模式封死、撤销/清空与接线，22 项；纯 Node，不启动 Electron）
  * 41. scripts/verify-switch-cache.js（模式切换缓存：代理可达 30 秒、出口取不到 60 秒内复用、时钟回拨不认、计时文案点名最慢一步，以及主进程真的接上了，21 项；纯 Node，不启动 Electron）
  * 42. scripts/verify-tab-park.js（标签停靠：切模式不再销毁标签、视图摘下但不关页面、恢复按原顺序挂回、超出 12 个降级成只记地址并当面告知，12 项；纯 Node，不启动 Electron）
+ * 43. scripts/verify-transition.js（切换动画：牛奶桶素材有效、页面无外联、时长与格子有上下限、减少动效降级、透明子窗口不抢焦点不开沙箱口子、开关默认开且可关，18 项；纯 Node，不启动 Electron）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -295,7 +296,7 @@ const STEPS = [
   {
     label: '隐私指纹面回归',
     script: 'verify-privacy-surface.js',
-    items: '51 项',
+    items: '55 项',
     timeoutMs: 60000,
   },
   {
@@ -332,6 +333,12 @@ const STEPS = [
     label: '标签停靠回归',
     script: 'verify-tab-park.js',
     items: '12 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '切换动画回归',
+    script: 'verify-transition.js',
+    items: '18 项',
     timeoutMs: 60000,
   },
 ];

@@ -99,8 +99,36 @@ class WebGLRenderingContext {
     if (param === 37446) return 'ANGLE (NVIDIA GeForce RTX 4070)';
     return 'real';
   }
+  // 真实驱动会报一串带厂商私有名的扩展：这里故意混一个私有的，用来验证补丁会把它挡掉
+  getSupportedExtensions() {
+    return ['WEBGL_debug_renderer_info', 'OES_standard_derivatives', 'EXT_nvidia_private_thing'];
+  }
+  getExtension(name) {
+    if (name === 'EXT_nvidia_private_thing') return { private: true };
+    return { name };
+  }
 }
 globalThis.WebGLRenderingContext = WebGLRenderingContext;
+
+// measureText：真实环境报的是带小数的精确宽度（12.34），补丁应把它对齐到 0.5px 网格
+globalThis.TextMetrics = class TextMetrics {};
+CanvasRenderingContext2D.prototype.measureText = function measureText() {
+  return { width: 12.34, actualBoundingBoxAscent: 8 };
+};
+
+// WebGPU：适配器信息也是一张显卡指纹。
+// 这里用一个"同步 thenable"代替真 Promise，好在纯同步的校验脚本里看结果
+// （补丁本身照旧走 .then 链，形态没被改动）。
+globalThis.navigator.gpu = {
+  requestAdapter() {
+    const adapter = { info: { vendor: 'nvidia', architecture: 'ampere' } };
+    return {
+      then(onFulfilled) {
+        return onFulfilled(adapter);
+      },
+    };
+  },
+};
 
 class AnalyserNode {
   getFloatFrequencyData(array) { array.fill(0); }
@@ -180,6 +208,32 @@ check(
 );
 const gl = makePageWorld(script).eval('(params) => WebGLRenderingContext.prototype.getParameter(params)');
 check('WebGL vendor/renderer 不再是真实型号', gl(37445).includes('Google Inc') && gl(37446).includes('ANGLE'), `${gl(37445)} / ${gl(37446)}`);
+
+/* ④-2 显卡与字体：统一上报值，而不是"如实声明不防"（用户口径：模拟一个正常浏览器） */
+const glWorld = makePageWorld(script);
+const glExtensions = glWorld.eval('WebGLRenderingContext.prototype.getSupportedExtensions.call(new WebGLRenderingContext())');
+check(
+  'WebGL 扩展列表只剩标准那几个（私有扩展会被挡掉）',
+  Array.isArray(glExtensions) &&
+    glExtensions.indexOf('EXT_nvidia_private_thing') < 0 &&
+    glExtensions.indexOf('WEBGL_debug_renderer_info') >= 0 &&
+    glExtensions.indexOf('OES_standard_derivatives') >= 0,
+  glExtensions,
+);
+check(
+  'WebGL 里问私有扩展会拿到 null（不承认自己有）',
+  glWorld.eval("WebGLRenderingContext.prototype.getExtension.call(new WebGLRenderingContext(), 'EXT_nvidia_private_thing')") === null,
+);
+check(
+  '字体度量对齐到 0.5px 网格（12.34 → 12.5）',
+  glWorld.eval('CanvasRenderingContext2D.prototype.measureText.call(new CanvasRenderingContext2D(), "abc").width') === 12.5,
+  glWorld.eval('CanvasRenderingContext2D.prototype.measureText.call(new CanvasRenderingContext2D(), "abc").width'),
+);
+const gpuVendor = makePageWorld(script).eval(`(() => {
+  const adapter = navigator.gpu.requestAdapter();
+  return adapter && adapter.info ? adapter.info.vendor + '/' + adapter.info.architecture : '';
+})()`);
+check('WebGPU 适配器信息与 WebGL 报同一块卡（不再是真实厂商）', String(gpuVendor).startsWith('intel/'), gpuVendor);
 
 /* ⑤ 幂等：跑两次不会重复包一层 */
 const twice = makePageWorld(`${script}\n${script}`);
