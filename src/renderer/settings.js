@@ -655,9 +655,6 @@
       node.classList.toggle('is-active', on);
       node.setAttribute('aria-current', on ? 'true' : 'false');
     }
-    for (const path of byId('mindmap-links') ? byId('mindmap-links').querySelectorAll('path[data-target]') : []) {
-      path.classList.toggle('is-active', path.dataset.target === section);
-    }
   }
 
   /**
@@ -667,10 +664,9 @@
    */
   function buildMindmap() {
     const stage = byId('mindmap-stage');
-    const svg = byId('mindmap-links');
     const root = byId('mindmap-root');
     const box = byId('mindmap');
-    if (!stage || !svg || !root || !box) return;
+    if (!stage || !root || !box) return;
     const data = collectMindmapData();
     if (!data) return;
 
@@ -684,7 +680,6 @@
     mindmapKey = key;
 
     for (const old of stage.querySelectorAll('.mindmap-tree')) old.remove();
-    svg.innerHTML = '';
 
     const tree = document.createElement('div');
     tree.className = 'mindmap-tree';
@@ -725,64 +720,18 @@
   }
 
   /**
-   * 只重排现有节点：拉开行距填满一列，再按实测矩形重画连线。
+   * 只重排现有节点：拉开行距把这一列填满。
    * 不碰节点元素本身——节点保留下来，点击、焦点、键盘顺序都不会因为窗口变化而丢。
+   * 层级用 CSS 的竖脊（.mindmap-block 的左边框）表达，不再画 SVG 折线：
+   * 分区是一行一个、左边缘对齐的，从分组中心拉出去的折线只会横穿按钮。
    */
   function layoutMindmap() {
-    const svg = byId('mindmap-links');
     const box = byId('mindmap');
-    const root = byId('mindmap-root');
-    if (!svg || !box || !root) return;
+    if (!box) return;
 
     fitMindmap();
 
-    // 连线：根 → 分组、分组 → 分区，全部按实测矩形画（窗口一变就重画，不会指错地方）
-    const blocks = Array.from(box.querySelectorAll('.mindmap-block')).map((block) => ({
-      groupEl: block.querySelector('.mindmap-group'),
-      nodes: Array.from(block.querySelectorAll('.mindmap-node')).map((el) => ({
-        el,
-        item: { sec: el.dataset.sec || '' },
-      })),
-    }));
-
-    while (svg.firstChild) svg.removeChild(svg.firstChild);
-
-    const boxRect = box.getBoundingClientRect();
-    const rel = (rect) => ({
-      left: rect.left - boxRect.left + box.scrollLeft,
-      top: rect.top - boxRect.top + box.scrollTop,
-      width: rect.width,
-      height: rect.height,
-    });
-    const rootBox = rel(root.getBoundingClientRect());
-    const rootX = rootBox.left + rootBox.width / 2;
-
-    for (const block of blocks) {
-      const groupBox = block.groupEl ? rel(block.groupEl.getBoundingClientRect()) : null;
-      if (!groupBox) continue;
-      const groupX = groupBox.left + groupBox.width / 2;
-
-      const path0 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path0.setAttribute('d', elbow(rootX, rootBox.top + rootBox.height, groupX, groupBox.top));
-      svg.appendChild(path0);
-
-      for (const node of block.nodes) {
-        const nodeBox = rel(node.el.getBoundingClientRect());
-        const path1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path1.setAttribute(
-          'd',
-          elbow(groupX, groupBox.top + groupBox.height, nodeBox.left + 10, nodeBox.top),
-        );
-        // 注意：这里用 data-target 而不是 data-sec —— 连线是 SVG 元素，没有 click()，
-        // 而验收脚本与界面其它地方会用 [data-sec="x"] 找"能点的那个"，SVG 混进去会拿到它。
-        path1.dataset.target = node.item.sec;
-        svg.appendChild(path1);
-      }
-    }
-
-    svg.setAttribute('viewBox', `0 0 ${Math.ceil(boxRect.width)} ${Math.ceil(box.scrollHeight)}`);
-
-    const nodes = blocks.reduce((sum, block) => sum + block.nodes.length, 0);
+    const nodes = box.querySelectorAll('.mindmap-node').length;
     box.setAttribute('data-nodes', String(nodes));
     mindmapBuilt = true;
     syncMindmapActive(activeSection);
@@ -812,17 +761,31 @@
       box.style.setProperty('--mm-gap', `${gap}px`);
       need = stage.scrollHeight;
     }
-  }
-
-  /** 折线：先竖到两点的中间高度，再横过去，最后竖下来——竖排树就用这种走线 */
-  function elbow(x1, y1, x2, y2) {
-    const mid = y1 + (y2 - y1) / 2;
-    return `M ${x1} ${y1} V ${mid} H ${x2} V ${y2}`;
+    // 上面是"先压小、再拉大"，拉大那一步可能一步踩过头（差几像素变成要滚动）。
+    // 多走一步回去，宁可底下空一行，也不要在右边挂一条滚动条。
+    while (need > avail - 2 && gap > 2) {
+      gap -= 1;
+      box.style.setProperty('--mm-gap', `${gap}px`);
+      need = stage.scrollHeight;
+    }
   }
 
   function setupMindmap() {
-    if (!byId('mindmap-stage')) return;
+    const stage = byId('mindmap-stage');
+    if (!stage) return;
     buildMindmap();
+    // 键盘：在结构图里按 ↑ ↓ 就能挨个分区走一遍、回车进去。
+    // 鼠标用户看到的是一串按钮，键盘用户看到的是一串"能连着按的选项"，这是同一件事。
+    stage.addEventListener('keydown', (event) => {
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      const nodes = Array.from(stage.querySelectorAll('.mindmap-node'));
+      if (!nodes.length) return;
+      const at = nodes.indexOf(document.activeElement);
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      const next = nodes[(at + step + nodes.length) % nodes.length] || nodes[0];
+      event.preventDefault();
+      next.focus();
+    });
     window.addEventListener('resize', () => {
       if (mindmapResizeTimer) clearTimeout(mindmapResizeTimer);
       mindmapResizeTimer = setTimeout(() => {

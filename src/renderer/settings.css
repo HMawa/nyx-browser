@@ -13,22 +13,22 @@
   flex: 1;
   min-height: 0;
   display: flex;
-  /* 结构图在右、内容在左：DOM 顺序仍是"导航在前、内容在后"（读屏器顺序更自然），
-     用 row-reverse 把导航翻到右边，这样内容区依旧紧贴窗口左侧、随窗口变宽优先变宽。 */
-  flex-direction: row-reverse;
+  /* 结构图固定在左边、内容在右边：跟绝大多数桌面软件的设置页一致（左边选类别、
+     右边看内容），也跟 DOM 顺序一致，读屏器和 Tab 键都是先导航后内容。 */
+  flex-direction: row;
 }
 
 .settings-nav {
-  width: 34%;
-  min-width: 268px;
-  max-width: 380px;
+  width: 300px;
+  min-width: 260px;
+  max-width: 320px;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 12px 10px 14px;
-  border-right: 0;
-  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  border-left: 0;
   background: var(--bg-panel);
 }
 
@@ -50,25 +50,6 @@
   --mm-gap: 8px;
 }
 
-.mindmap-links {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-.mindmap-links path {
-  fill: none;
-  stroke: var(--border-strong);
-  stroke-width: 1.2;
-}
-
-.mindmap-links path.is-active {
-  stroke: var(--accent);
-  stroke-width: 1.6;
-}
-
 .mindmap-stage {
   position: relative;
   display: flex;
@@ -80,7 +61,7 @@
 
 .mindmap-root {
   align-self: center;
-  padding: 6px 14px;
+  padding: 4px 12px;
   border: 1px solid var(--accent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -99,13 +80,17 @@
 .mindmap-block {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding-left: 10px;
+  gap: 2px;
+  /* 层级用一根竖脊表示（左边框），像抽屉菜单那样一眼能看出"这些分区属于上面那个分组"。
+     比画折线稳：不用算坐标，窗口怎么变都对得齐。 */
+  border-left: 1px solid var(--border-soft);
+  padding-left: 9px;
+  margin-left: 2px;
 }
 
 .mindmap-group {
   align-self: flex-start;
-  padding: 3px 10px;
+  padding: 2px 8px;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--bg-panel);
@@ -116,20 +101,26 @@
 }
 
 .mindmap-leaves {
+  /* 每个分区一行、左边缘对齐：一行里塞两个会把长短不齐的按钮凑成锯齿边，
+     看着乱也点不准。一列到底最直观——从上往下读一遍就见过全部分区。 */
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
   gap: 6px;
   padding-left: 8px;
 }
 
 .mindmap-node {
-  padding: 4px 10px;
+  display: block;
+  width: 100%;
+  padding: 4px 9px;
   border: 1px solid var(--border-soft);
-  border-radius: 999px;
+  border-radius: var(--r-sm);
   background: var(--bg-input);
   color: var(--text-dim);
   font: inherit;
   font-size: 12px;
+  line-height: 1.35;
   text-align: left;
   white-space: nowrap;
   cursor: pointer;
@@ -159,17 +150,26 @@
   display: none !important;
 }
 
+/* 宽窗口下那句说明收进 title 气泡：左边这一列要给 10 个分区腾出高度，
+   多两行小字就得让它滚动，反而更难找。窄窗口（图横在上面）时再显示出来。 */
+@media (min-width: 901px) {
+  .nav-note {
+    display: none;
+  }
+}
+
 @media (max-width: 900px) {
   .settings-frame {
     /* 窄窗口：图在上、内容在下，谁也别挤谁 */
-    flex-direction: column-reverse;
+    flex-direction: column;
   }
 
   .settings-nav {
     width: 100%;
+    min-width: 0;
     max-width: none;
     max-height: 46vh;
-    border-left: 0;
+    border-right: 0;
     border-bottom: 1px solid var(--border);
   }
 
@@ -234,9 +234,9 @@
 }
 
 .nav-note {
-  padding: 6px 10px;
-  font-size: 11px;
-  line-height: 1.5;
+  padding: 4px 8px;
+  font-size: 10.5px;
+  line-height: 1.45;
   color: var(--text-dim);
   border-top: 1px solid var(--border-soft);
 }
@@ -289,28 +289,19 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  /* 一屏铺到底太乱：宽窗口下改成两列卡片，窄窗口自动落回一列。
-     列宽用 auto-fill 而不是定值，窗口从 640 拉到 1600 都不会出现半张卡。 */
+  /* 一律从上到下排成一列，左边缘对齐：不再左右分栏。
+     分栏会让人不知道该先看哪块，配置项本来就是一条一条读的。 */
   padding: 16px 18px 22px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-  align-content: start;
-  /* 卡片按自己的内容高度排，不要被行高拉伸：卡片是 flex 列且 overflow:hidden，
-     一旦被拉伸到"行高"，正文会溢出卡片被裁掉（表现出来就是"点开没反应"）。 */
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   gap: 14px;
 }
 
-/* 卡片以外的直接子元素（提示行、状态行、站点名单块等）一律整行，
-   不然它们会被塞进半列里挤成两三个字一行。 */
+/* 卡片以外的直接子元素（提示行、状态行、站点名单块等）也走同一条流，
+   左右各留一点缩进跟卡片正文对齐。 */
 .sec-scroll > *:not(.info-card) {
-  grid-column: 1 / -1;
-}
-
-/* 带表格 / 长名单的卡片必须整行：两列会把它压到看不清列。
-   settings.js 的 markWideCards() 会给这些卡片补 .card-wide（按内容判断，不写死 id）。 */
-.sec-scroll > .info-card.card-wide {
-  grid-column: 1 / -1;
+  width: 100%;
 }
 
 .sec-head {

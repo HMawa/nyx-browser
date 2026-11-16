@@ -1014,9 +1014,9 @@ async function main() {
             `收起 ${foldFlow.afterCloseAll.folded}/${foldFlow.afterCloseAll.total}，空值 ${JSON.stringify(foldFlow.afterCloseAll.emptyIds)}，未收起 ${JSON.stringify(foldFlow.afterCloseAll.notFoldedIds)}，落盘 ${foldFlow.savedKeys} 条 ${JSON.stringify(foldFlow.savedSample)}`,
         );
 
-        /* ---------- 设置页重排版：导航分组 + 两列网格 + 表格类整卡 ---------- */
-        // 用户反馈「设置页面极度混乱」，重排版做的是：导航分四组、宽窗口两列、
-        // 表格/长名单卡片整行。这里量的是**运行时**结果，不是源码里有几条 CSS。
+        /* ---------- 设置页排版：导航分组 + 卡片一列到底、左边缘对齐 ---------- */
+        // 用户先说「设置页面极度混乱」（→ 导航分四组），后又说「布局太丑要整齐对正、
+        // 不要左一块右一块」（→ 取消两列，改成一列从上到下）。这里量的是**运行时**结果。
         const layoutFlow = await settings.eval(`(async () => {
           const wait = (ms) => new Promise((r) => setTimeout(r, ms));
           document.querySelector('.nav-item[data-sec="privacy"]').click();
@@ -1025,59 +1025,53 @@ async function main() {
           const panel = document.querySelector('.sec-panel[data-sec="privacy"]');
           const box = panel.querySelector('.sec-scroll');
           const cs = getComputedStyle(box);
-          const cols = String(cs.gridTemplateColumns || '').split(' ').filter(Boolean).length;
           const inner = Math.round(
             box.clientWidth - parseFloat(cs.paddingLeft || '0') - parseFloat(cs.paddingRight || '0'),
           );
           const cards = Array.from(box.querySelectorAll(':scope > .info-card'));
           const probe = cards.map((c) => ({
             id: c.dataset.foldId || '',
-            wide: c.classList.contains('card-wide'),
+            left: Math.round(c.getBoundingClientRect().left),
             w: Math.round(c.getBoundingClientRect().width),
           }));
-          const wide = probe.filter((c) => c.wide);
-          const narrow = probe.filter((c) => !c.wide);
           const groups = Array.from(document.querySelectorAll('.nav-group-label')).map((g) =>
             String(g.textContent || '').trim(),
           );
+          const lefts = Array.from(new Set(probe.map((c) => c.left)));
 
           return {
             display: cs.display,
-            cols,
+            dir: cs.flexDirection,
             inner,
             groups,
             cards: probe.length,
-            wideCount: wide.length,
-            narrowCount: narrow.length,
-            // 整行卡片必须和容器内容宽一致；两列里的卡片必须窄于容器
-            wideFullRow: wide.every((c) => Math.abs(c.w - inner) <= 4),
-            narrowHalfRow: narrow.length === 0 || narrow.every((c) => c.w < inner - 20),
-            sampleWide: wide.slice(0, 3),
+            // 一列到底：所有卡片左边缘同一个 x、宽度等于容器内容宽
+            sameLeft: lefts.length === 1,
+            fullWidth: probe.every((c) => Math.abs(c.w - inner) <= 4),
+            sample: probe.slice(0, 3),
           };
         })()`);
         check(
-          '设置页重排版：导航分成四组、宽窗口两列、表格类卡片整行（重排版）',
+          '设置页排版：导航分成四组、卡片一列到底且左边缘对齐（重排版）',
           layoutFlow &&
-            layoutFlow.display === 'grid' &&
-            layoutFlow.cols >= 2 &&
+            layoutFlow.display === 'flex' &&
+            layoutFlow.dir === 'column' &&
             layoutFlow.groups.length === 4 &&
             layoutFlow.groups.includes('隐私与网络') &&
             layoutFlow.cards >= 3 &&
-            layoutFlow.wideCount >= 1 &&
-            layoutFlow.wideFullRow === true &&
-            layoutFlow.narrowHalfRow === true,
+            layoutFlow.sameLeft === true &&
+            layoutFlow.fullWidth === true,
           layoutFlow && JSON.stringify(layoutFlow),
         );
 
         /* ---------- 设置结构图：中心 → 分组 → 分区，点节点能直接切 ---------- */
         // 用户要的是「设置页面做成思维导图一样的」。这里量的是四件事：
-        // 图存在且有节点、节点数与原导航一致、连线数对得上、点节点真能切分区。
+        // 图存在且有节点、节点数与原导航一致、分组都有竖脊、点节点真能切分区。
         const mindmapFlow = await settings.eval(`(async () => {
           const wait = (ms) => new Promise((r) => setTimeout(r, ms));
           const map = document.getElementById('mindmap');
           const stage = document.getElementById('mindmap-stage');
-          const svg = document.getElementById('mindmap-links');
-          if (!map || !stage || !svg) return { ok: false, why: 'no-mindmap' };
+          if (!map || !stage) return { ok: false, why: 'no-mindmap' };
 
           // 图是在 init 里画的；字体与宽度变化后还会再画一次，等它稳下来
           for (let i = 0; i < 24; i += 1) {
@@ -1087,8 +1081,12 @@ async function main() {
 
           const nodes = Array.from(stage.querySelectorAll('.mindmap-node'));
           const navItems = Array.from(document.querySelectorAll('.nav-list .nav-item'));
-          const paths = Array.from(svg.querySelectorAll('path'));
           const groups = Array.from(stage.querySelectorAll('.mindmap-group'));
+          // 层级不再靠 SVG 折线（会横穿按钮）：改看每个分组块是否有一条竖脊（左边框）。
+          // 注意 1px 的边框在缩放后会被算成 0.67px 之类的值，所以只要求"大于半个像素"。
+          const spines = Array.from(stage.querySelectorAll('.mindmap-block')).filter(
+            (block) => parseFloat(getComputedStyle(block).borderLeftWidth) > 0.5
+          ).length;
           const root = document.getElementById('mindmap-root');
           const rootBox = root ? root.getBoundingClientRect() : null;
           const mapBox = map.getBoundingClientRect();
@@ -1121,7 +1119,6 @@ async function main() {
               panelActive: Boolean(panel && panel.classList.contains('active')),
               nodeActive: target.classList.contains('is-active'),
               ariaCurrent: target.getAttribute('aria-current'),
-              activeLinks: paths.filter((p) => p.classList.contains('is-active')).length,
             };
           }
 
@@ -1131,7 +1128,7 @@ async function main() {
             nodes: nodes.length,
             navItems: navItems.length,
             groups: groups.length,
-            paths: paths.length,
+            spines,
             hasRoot: Boolean(rootBox && rootBox.width > 20),
             overlapped,
             outside,
@@ -1147,15 +1144,14 @@ async function main() {
               mindmapFlow.nodes === mindmapFlow.navItems &&
               mindmapFlow.nodes >= 10 &&
               mindmapFlow.groups === 4 &&
-              mindmapFlow.paths === mindmapFlow.groups + mindmapFlow.nodes &&
+              mindmapFlow.spines === mindmapFlow.groups &&
               mindmapFlow.hasRoot === true &&
               mindmapFlow.overlapped === 0 &&
               mindmapFlow.outside === 0 &&
               mindmapFlow.clicked &&
               mindmapFlow.clicked.panelActive === true &&
               mindmapFlow.clicked.nodeActive === true &&
-              mindmapFlow.clicked.ariaCurrent === 'true' &&
-              mindmapFlow.clicked.activeLinks >= 1,
+              mindmapFlow.clicked.ariaCurrent === 'true',
           ),
           mindmapFlow && JSON.stringify(mindmapFlow),
         );
@@ -1178,9 +1174,9 @@ async function main() {
           const mapBox = map.getBoundingClientRect();
           const navPanelBox = document.querySelector('.settings-nav').getBoundingClientRect();
 
-          // 1) 结构图在右、整列占满（窄窗口会按媒体查询落到下方，那种情况不要求"在右"）
+          // 1) 结构图固定在左边、整列占满（窄窗口会按媒体查询落到上方，那种情况不要求"在左"）
           const wide = window.innerWidth > 900;
-          const navOnRight = navBox.left > mainBox.left + 10;
+          const navOnLeft = navBox.left + 10 < mainBox.left;
           const fillRatio = navPanelBox.height ? mapBox.height / navPanelBox.height : 0;
 
           // 2) 每个分区面板都必须直接挂在内容区里（否则"点节点右侧不动"）
@@ -1260,7 +1256,7 @@ async function main() {
           return {
             ok: true,
             wide,
-            navOnRight,
+            navOnLeft,
             fillRatio: Math.round(fillRatio * 100) / 100,
             panels: panels.length,
             stray,
@@ -1279,11 +1275,11 @@ async function main() {
           };
         })()`);
         check(
-          '设置页改版：结构图搬到右侧整列、十个分区都在内容区里、点哪个换哪个且卡片真看得见（改版）',
+          '设置页改版：结构图固定在左列、分区一列到底、十个分区点哪个换哪个且卡片真看得见（改版）',
           Boolean(
             settingsNavFlow &&
               settingsNavFlow.ok &&
-              (settingsNavFlow.navOnRight === true || settingsNavFlow.wide === false) &&
+              (settingsNavFlow.navOnLeft === true || settingsNavFlow.wide === false) &&
               (settingsNavFlow.fillRatio >= 0.7 || settingsNavFlow.wide === false) &&
               settingsNavFlow.stray.length === 0 &&
               settingsNavFlow.panels === 10 &&

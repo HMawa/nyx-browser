@@ -23,10 +23,9 @@
           <span class="badge" id="nav-version">—</span>
         </div>
 
-        <nav class="mindmap" id="mindmap" aria-label="设置结构图">
+        <nav class="mindmap" id="mindmap" aria-label="设置结构图" title="点任意一个分区就切到那一页；也可以按 ↑ ↓ 在分区之间走、回车进入">
           <!-- 结构图：中心是「Nyx 设置」，四条分支是用途分组，末端是可以点的设置分区 -->
-          <svg class="mindmap-links" id="mindmap-links" aria-hidden="true" focusable="false"></svg>
-          <div class="mindmap-stage" id="mindmap-stage">
+            <div class="mindmap-stage" id="mindmap-stage">
             <div class="mindmap-root" id="mindmap-root" aria-hidden="true">Nyx 设置</div>
             <!-- 分组节点与分区节点由 settings.js 按下面的 #nav-list 生成，位置随窗口宽度重算 -->
           </div>
@@ -59,9 +58,9 @@
           </li>
         </ul>
 
-        <p class="nav-note">
-          点结构图上的任意一个分区就能切换；这一列会跟着窗口上下占满，窗口太矮时图自己滚动，不会把节点挤没。
-        </p>
+          <p class="nav-note">
+            点左边任意一个分区，右边就换成那一页；也可以用 ↑ ↓ 在分区之间走、回车进入。
+          </p>
       </aside>
 
       <main class="settings-main">
