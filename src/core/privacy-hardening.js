@@ -12,6 +12,8 @@
  * 而不是随便编一个。IP 在美国、时区报上海，比不伪装更容易被识别。
  */
 
+const os = require('node:os');
+
 /** 无法从出口信息推断时使用的兜底语言 */
 const DEFAULT_LANGUAGE = 'en-US,en';
 
@@ -47,6 +49,63 @@ function platformName() {
   if (process.platform === 'win32') return 'Windows';
   if (process.platform === 'darwin') return 'macOS';
   return 'Linux';
+}
+
+/**
+ * navigator.platform 用的值。注意它和 userAgentData.platform 不是一回事：
+ * 真 Chrome 在 Windows 上报的是 `Win32`，不是 `Windows`。两边写成同一个值，
+ * 页面里一对比就露馅（Worker 里报的还是真的 Win32，主世界报 Windows，自相矛盾）。
+ */
+function navigatorPlatform() {
+  if (process.platform === 'win32') return 'Win32';
+  if (process.platform === 'darwin') return 'MacIntel';
+  return 'Linux x86_64';
+}
+
+/**
+ * Windows 版本号 → UA-CH 的 platformVersion。
+ *
+ * 这里只做"读得出就说、读不出就不说"：留空只是少一条信息，
+ * 猜一个错的值反而和 UA、客户端提示里的其它字段对不上。
+ */
+function windowsPlatformVersion(release) {
+  const build = Number(String(release || '').split('.')[2]);
+  if (!Number.isFinite(build) || build <= 0) return '';
+  if (build >= 26100) return '19.0.0'; // Windows 11 24H2
+  if (build >= 22631) return '15.0.0'; // Windows 11 23H2
+  if (build >= 22000) return '13.0.0'; // Windows 11 21H2 / 22H2
+  if (build >= 10240) return '10.0.0'; // Windows 10
+  return '';
+}
+
+/** 本机 Windows 版本对应的 UA-CH platformVersion；非 Windows 一律空串 */
+function currentPlatformVersion() {
+  if (process.platform !== 'win32') return '';
+  try {
+    return windowsPlatformVersion(os.release());
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 解析 Accept-Language：真 Chrome 的 `navigator.languages` 里**不含 `;q=`**，
+ * 直接把请求头串塞给页面会得到 `["zh-HK","zh;q=0.9"]` 这种一眼假的东西。
+ * 请求头照旧用原始串，只有页面里读到的列表要解析。
+ */
+function parseAcceptLanguage(raw) {
+  const source = String(raw == null ? '' : raw);
+  const seen = new Set();
+  const out = [];
+  for (const item of source.split(',')) {
+    const code = String(item).split(';')[0].trim();
+    if (!code) continue;
+    const key = code.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(code);
+  }
+  return out.length ? out : DEFAULT_LANGUAGE.split(',');
 }
 
 /** 计算某个 IANA 时区相对 UTC 的偏移（分钟，符号与 getTimezoneOffset 一致） */
@@ -168,13 +227,20 @@ class PrivacyHardening {
       mode: 'private',
       seed: makeSeed(),
       ua,
+      // UA 里写的是 `Chrome/<主版本>.0.0.0`，但客户端提示（userAgentData）里的
+      // fullVersionList 必须给完整版本号，否则两边一对就不一致。
       chromeMajor: major,
+      chromeVersion: String(process.versions.chrome || ''),
+      // 两个"平台"分开存：`platform` 给 UA-CH（Windows），
+      // `navigatorPlatform` 给 navigator.platform（Win32）。真 Chrome 就是这么分工的。
       platform: platformName(),
+      navigatorPlatform: navigatorPlatform(),
+      platformVersion: currentPlatformVersion(),
       country,
       timezone: spoofTimezone ? timezone : '',
       timezoneOffset: spoofTimezone ? timezoneOffsetMinutes(timezone) : null,
       acceptLanguage: resolvedLanguage,
-      languages: resolvedLanguage.split(',').map((item) => item.trim()).filter(Boolean),
+      languages: parseAcceptLanguage(resolvedLanguage),
       exitIp: egress ? egress.ip : null,
       exitIsp: egress ? egress.isp : '',
       exitAsn: egress ? egress.asn : '',
@@ -197,8 +263,10 @@ class PrivacyHardening {
       `--nyx-lang=${active.languages.join(',')}`,
       `--nyx-ua=${encodeURIComponent(active.ua)}`,
       `--nyx-platform=${active.platform}`,
-      `--nyx-chrome=${active.chromeMajor}`,
+      // 客户端提示要用完整版本号；主版本 / 完整版本必须是同一版的两种写法
+      `--nyx-chrome=${active.chromeVersion || active.chromeMajor}`,
     ];
+    if (active.platformVersion) args.push(`--nyx-platform-version=${active.platformVersion}`);
     if (active.timezone) {
       args.push(`--nyx-tz=${active.timezone}`);
       args.push(`--nyx-tz-offset=${active.timezoneOffset}`);
@@ -357,6 +425,11 @@ module.exports = {
   PrivacyHardening,
   chromiumMajor,
   platformToken,
+  platformName,
+  navigatorPlatform,
+  windowsPlatformVersion,
+  currentPlatformVersion,
+  parseAcceptLanguage,
   timezoneOffsetMinutes,
   isValidTimezone,
   languagesForCountryLite,

@@ -23,7 +23,7 @@
 'use strict';
 
 /** 主世界补丁的版本号：改了补丁逻辑就加一，便于在诊断里区分 */
-const SURFACE_SCRIPT_VERSION = 1;
+const SURFACE_SCRIPT_VERSION = 2;
 
 /**
  * 生成主世界加固脚本。
@@ -42,7 +42,9 @@ function buildHardeningScript(profile) {
   const payload = {
     seed: String(source.seed || 'nyx'),
     ua: String(source.ua || ''),
-    platform: String(source.platform || 'Win32'),
+    // navigator.platform 用的是 Win32 这种值（不是 UA-CH 里的 Windows），
+    // 画像里两者分开存；老调用方只传 platform 时按 Win32 兜底。
+    platform: String(source.navigatorPlatform || source.platform || 'Win32'),
     languages: Array.isArray(source.languages) && source.languages.length ? source.languages : ['en-US', 'en'],
     timezone: String(source.timezone || ''),
     timezoneOffset: Number.isFinite(source.timezoneOffset) ? source.timezoneOffset : null,
@@ -119,11 +121,23 @@ function buildHardeningScript(profile) {
     };
   }
 
-  // ---- Canvas：只加极小的确定性噪声（够打乱指纹，肉眼看不出来） ----
-  const noisy = (data, strength) => {
+  // ---- Canvas：确定性噪声（同一块画布算多少次都一样），且绝不写回页面画布 ----
+  // 两条都是被对抗测试抓出来的真 bug：
+  //   ① 噪声按调用次数推进 PRNG → 同一画布两次 toDataURL/getImageData 结果不同，
+  //      而真 Chrome 是确定的，"两次不一致"本身就是检测信号；
+  //   ② toDataURL 把噪声 putImageData 写回了原画布 → 页面画布被篡改、重复导出累积噪声。
+  const seedHash = state;
+  const noiseFor = (index, value) => {
+    let h = (seedHash ^ Math.imul(index, 2654435761) ^ Math.imul(value, 40503)) >>> 0;
+    h ^= h >>> 16;
+    h = Math.imul(h, 2246822507) >>> 0;
+    h ^= h >>> 13;
+    return (h % 3) - 1;
+  };
+  const noisy = (data) => {
     if (!data || !data.length) return data;
     for (let i = 0; i < data.length; i += 4) {
-      data[i] = Math.max(0, Math.min(255, data[i] + Math.floor(next() * strength)));
+      data[i] = Math.max(0, Math.min(255, data[i] + noiseFor(i, data[i])));
     }
     return data;
   };
@@ -131,17 +145,30 @@ function buildHardeningScript(profile) {
     const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
     CanvasRenderingContext2D.prototype.getImageData = function getImageData(...args) {
       const out = origGetImageData.apply(this, args);
-      noisy(out.data, 2);
+      // getImageData 本来就返回一份拷贝，改它不会动到页面画布
+      noisy(out.data);
       return out;
     };
     const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    const surfaceCopies = new WeakSet();
     HTMLCanvasElement.prototype.toDataURL = function toDataURL(...args) {
+      // 自己造的副本直接原样导出，否则会一层层复制下去（递归）
+      if (surfaceCopies.has(this)) return origToDataURL.apply(this, args);
       try {
         const ctx = this.getContext('2d');
         if (ctx && this.width && this.height) {
           const data = origGetImageData.call(ctx, 0, 0, this.width, this.height);
-          noisy(data.data, 2);
-          ctx.putImageData(data, 0, 0);
+          noisy(data.data);
+          // 在副本上导出：原画布一个像素都不碰
+          const copy = document.createElement('canvas');
+          copy.width = this.width;
+          copy.height = this.height;
+          const copyCtx = copy.getContext('2d');
+          if (copyCtx) {
+            copyCtx.putImageData(data, 0, 0);
+            surfaceCopies.add(copy);
+            return origToDataURL.apply(copy, args);
+          }
         }
       } catch (err) { /* 跨域画布会抛，忽略 */ }
       return origToDataURL.apply(this, args);
@@ -154,7 +181,7 @@ function buildHardeningScript(profile) {
       const origOff = OffscreenCanvasRenderingContext2D.prototype.getImageData;
       OffscreenCanvasRenderingContext2D.prototype.getImageData = function getImageData(...args) {
         const out = origOff.apply(this, args);
-        noisy(out.data, 2);
+        noisy(out.data);
         return out;
       };
     }
@@ -262,6 +289,9 @@ function buildCdpSteps(profile) {
   const majorMatch = ua.match(/Chrome\/(\d+)/);
   const major = majorMatch ? majorMatch[1] : '';
   if (ua) {
+    // fullVersionList 必须是完整版本号（156.0.8078.100 这种），而 brands 里写主版本；
+    // 之前两处都写 `<主版本>.0.0.0`，与 uaFullVersion 对不上，是自相矛盾的一条。
+    const fullVersion = String(source.chromeVersion || '') || (major ? `${major}.0.0.0` : '');
     const metadata = {
       brands: major
         ? [
@@ -270,17 +300,18 @@ function buildCdpSteps(profile) {
             { brand: 'Not)A;Brand', version: '99' },
           ]
         : [],
-      fullVersionList: major
+      fullVersionList: fullVersion
         ? [
-            { brand: 'Chromium', version: `${major}.0.0.0` },
-            { brand: 'Google Chrome', version: `${major}.0.0.0` },
+            { brand: 'Chromium', version: fullVersion },
+            { brand: 'Google Chrome', version: fullVersion },
             { brand: 'Not)A;Brand', version: '99.0.0.0' },
           ]
         : [],
-      // 真实 Chrome 在 Windows 上一直是 10.0.0，写死比留空安全：留空会让
-      // navigator.userAgentData.platform === ''，那比不伪装更显眼。
-      platform: 'Windows',
-      platformVersion: '10.0.0',
+      // UA-CH 的 platform 是 `Windows`（不是 navigator.platform 的 Win32）；
+      // 留空会让 navigator.userAgentData.platform === ''，那比不伪装更显眼。
+      platform: String(source.platform || 'Windows'),
+      // 读得出真实系统版本才写，读不出就不传 —— 猜一个错的值反而对不上。
+      ...(source.platformVersion ? { platformVersion: String(source.platformVersion) } : {}),
       architecture: 'x86',
       model: '',
       mobile: false,
@@ -291,8 +322,9 @@ function buildCdpSteps(profile) {
       method: 'Emulation.setUserAgentOverride',
       params: {
         userAgent: ua,
-        acceptLanguage: Array.isArray(source.languages) ? source.languages.join(',') : 'en-US,en',
-        platform: String(source.platform || 'Win32'),
+        // 请求头用原始的 Accept-Language（带 q 值是正常的），页面里读到的列表另行解析
+        acceptLanguage: String(source.acceptLanguage || '') || (Array.isArray(source.languages) ? source.languages.join(',') : 'en-US,en'),
+        platform: String(source.navigatorPlatform || source.platform || 'Win32'),
         userAgentMetadata: metadata,
       },
     });

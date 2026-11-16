@@ -39,7 +39,11 @@ function read(rel) {
 const PROFILE = {
   seed: 'seed-abc',
   ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36',
-  platform: 'Win32',
+  // 两个"平台"是两个东西：UA-CH 用 Windows，navigator.platform 用 Win32。
+  platform: 'Windows',
+  navigatorPlatform: 'Win32',
+  chromeVersion: '156.0.8078.100',
+  platformVersion: '19.0.0',
   languages: ['en-US', 'en'],
   timezone: 'America/New_York',
   timezoneOffset: 300,
@@ -69,17 +73,25 @@ class CanvasRenderingContext2D {
     data.fill(100);
     return { data };
   }
-  putImageData() {}
+  putImageData() {
+    globalThis.__putCalls = (globalThis.__putCalls || 0) + 1;
+    globalThis.__putTargets = (globalThis.__putTargets || []).concat([this]);
+  }
 }
 globalThis.CanvasRenderingContext2D = CanvasRenderingContext2D;
+globalThis.__putCalls = 0;
+// 打补丁之前先留一份"原样读取"的通道，用来核对页面画布有没有被偷偷改过
+globalThis.__origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+globalThis.__rawPixels = () => Array.from(globalThis.__origGetImageData.call(new CanvasRenderingContext2D(), 0, 0, 2, 2).data);
 globalThis.makeCtx = () => new CanvasRenderingContext2D();
 
 class HTMLCanvasElement {
-  constructor() { this.width = 2; this.height = 2; }
-  getContext() { return new CanvasRenderingContext2D(); }
+  constructor() { this.width = 2; this.height = 2; this._ctx = new CanvasRenderingContext2D(); }
+  getContext() { return this._ctx; }
   toDataURL() { return 'data:image/png;base64,AAAA'; }
 }
 globalThis.HTMLCanvasElement = HTMLCanvasElement;
+globalThis.document = { createElement: () => new HTMLCanvasElement() };
 
 class WebGLRenderingContext {
   getParameter(param) {
@@ -150,6 +162,22 @@ const noise3 = canvasNoise(surface.buildHardeningScript(Object.assign({}, PROFIL
 check('Canvas 读回值被加了噪声（不等于原始的 100）', !/^(100,)+100$/.test(noise1), noise1.slice(0, 40));
 check('同一会话两次读到的噪声完全一致（"每次都变"才是更强的指纹）', noise1 === noise2);
 check('换一个会话种子 → 噪声不同', noise1 !== noise3);
+
+/* ④b 同一个页面里两次读 / 一次导出：真 Chrome 是确定的，而且导出不能改动画布 */
+const canvasWorld = makePageWorld(surface.buildHardeningScript(PROFILE));
+const readA = canvasWorld.eval('Array.from(makeCtx().getImageData(0, 0, 2, 2).data).join(",")');
+const readB = canvasWorld.eval('Array.from(makeCtx().getImageData(0, 0, 2, 2).data).join(",")');
+check('同一个页面里连读两次，结果完全一样（否则"两次不一致"本身就是指纹）', readA === readB, `${readA.slice(0, 24)} / ${readB.slice(0, 24)}`);
+canvasWorld.eval('globalThis.pageCanvas = new HTMLCanvasElement(); pageCanvas.toDataURL()');
+check(
+  '导出图片只写在自己造的副本上，页面画布那一份一次都没被写过',
+  canvasWorld.eval('(__putTargets || []).every((t) => t !== pageCanvas.getContext("2d"))') === true,
+  String(canvasWorld.eval('__putCalls')),
+);
+check(
+  '导出之后原画布像素仍是原值（页面自己再读不会发现被改过）',
+  canvasWorld.eval('__rawPixels().every((v) => v === 100)') === true,
+);
 const gl = makePageWorld(script).eval('(params) => WebGLRenderingContext.prototype.getParameter(params)');
 check('WebGL vendor/renderer 不再是真实型号', gl(37445).includes('Google Inc') && gl(37446).includes('ANGLE'), `${gl(37445)} / ${gl(37446)}`);
 
@@ -181,10 +209,53 @@ check(
     && uaStep.params.userAgentMetadata.brands.some((b) => b.version === '156'),
   JSON.stringify(uaStep.params.userAgentMetadata && uaStep.params.userAgentMetadata.brands),
 );
+check(
+  '两个"平台"分开：UA-CH 报 Windows、navigator.platform 报 Win32（同时报 Wind32 那种写法会自相矛盾）',
+  uaStep.params.userAgentMetadata.platform === 'Windows'
+    && uaStep.params.platform === 'Win32'
+    && world.eval('navigator.platform') === 'Win32',
+  `${uaStep.params.userAgentMetadata.platform} / ${uaStep.params.platform} / ${world.eval('navigator.platform')}`,
+);
+check(
+  'fullVersionList 用完整版本号，与 uaFullVersion 同源（都写 <主版本>.0.0.0 会自相矛盾）',
+  uaStep.params.userAgentMetadata.fullVersionList.every((b) => /^99\.|^156\.0\.8078\.100$/.test(b.version))
+    && uaStep.params.userAgentMetadata.fullVersionList.some((b) => b.version === '156.0.8078.100'),
+  JSON.stringify(uaStep.params.userAgentMetadata.fullVersionList),
+);
+check(
+  'platformVersion 读得出真实系统版本才写，读不出就不传（猜错的值反而对不上）',
+  uaStep.params.userAgentMetadata.platformVersion === '19.0.0'
+    && !('platformVersion' in surface.buildCdpSteps(Object.assign({}, PROFILE, { platformVersion: '' }))
+      .find((item) => item.method === 'Emulation.setUserAgentOverride').params.userAgentMetadata),
+);
+check(
+  '页面里读到的 languages 不含 ;q=（真 Chrome 的 navigator.languages 没有 q 值）',
+  world.eval('navigator.languages.join(",")').indexOf(';q=') < 0,
+  world.eval('navigator.languages.join(",")'),
+);
 const injectStep = steps.find((item) => item.method === 'Page.addScriptToEvaluateOnNewDocument');
-check('注入的脚本就是同一条加固脚本（不是另一个空壳）', injectStep.params.source === script);
-const noTz = surface.buildCdpSteps(Object.assign({}, PROFILE, { timezone: '', timezoneOffset: null }));
+check('注入的脚本就是同一条加固脚本（不是另一个空壳）', injectStep.params.source === script);const noTz = surface.buildCdpSteps(Object.assign({}, PROFILE, { timezone: '', timezoneOffset: null }));
 check('出口时区未知时不谎报时区（不发 setTimezoneOverride）', !noTz.some((s) => s.method === 'Emulation.setTimezoneOverride'));
+
+/* ⑥.5 画像字段的自相矛盾（对抗测试报告 P1 那三条） */
+const hardening = require(path.join(ROOT, 'src/core/privacy-hardening.js'));
+check(
+  'Accept-Language 解析：去掉 q 值、按大小写去重、顺序不变（请求头仍用原始串）',
+  JSON.stringify(hardening.parseAcceptLanguage('zh-HK,zh;q=0.9,en;q=0.8')) === JSON.stringify(['zh-HK', 'zh', 'en'])
+    && JSON.stringify(hardening.parseAcceptLanguage('en-US, en-US , en-US;q=0.7')) === JSON.stringify(['en-US'])
+    && JSON.stringify(hardening.parseAcceptLanguage('')) === JSON.stringify(['en-US', 'en']),
+  JSON.stringify(hardening.parseAcceptLanguage('zh-HK,zh;q=0.9,en;q=0.8')),
+);
+check(
+  'navigatorPlatform 与 UA-CH platform 是两个值，Windows 版本号能映射成 UA-CH 的写法',
+  hardening.navigatorPlatform() === 'Win32'
+    && hardening.platformName() === 'Windows'
+    && hardening.windowsPlatformVersion('10.0.26100') === '19.0.0'
+    && hardening.windowsPlatformVersion('10.0.22631') === '15.0.0'
+    && hardening.windowsPlatformVersion('10.0.19045') === '10.0.0'
+    && hardening.windowsPlatformVersion('6.1.7601') === '',
+  `${hardening.navigatorPlatform()} / ${hardening.currentPlatformVersion()}`,
+);
 
 /* ⑦ 模式与失败文案 */
 check('只有隐私模式才装配指纹面', surface.shouldAttachSurface('private') === true && surface.shouldAttachSurface('normal') === false);

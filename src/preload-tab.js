@@ -21,7 +21,7 @@ const { ipcRenderer, contextBridge } = require('electron');
 
 /** 解析主进程经 additionalArguments 传入的配置 */
 function parseArgs(argv) {
-  const config = { mode: 'normal', seed: '0', tz: '', tzOffset: null, languages: [], ua: '', platform: 'Windows', chrome: '' };
+  const config = { mode: 'normal', seed: '0', tz: '', tzOffset: null, languages: [], ua: '', platform: 'Windows', chrome: '', platformVersion: '' };
   for (const raw of argv || []) {
     const arg = String(raw);
     if (arg.startsWith('--nyx-mode=')) config.mode = arg.slice(11);
@@ -36,6 +36,7 @@ function parseArgs(argv) {
         config.ua = arg.slice(9);
       }
     } else if (arg.startsWith('--nyx-platform=')) config.platform = arg.slice(15);
+    else if (arg.startsWith('--nyx-platform-version=')) config.platformVersion = arg.slice(23);
     else if (arg.startsWith('--nyx-chrome=')) config.chrome = arg.slice(13);
   }
   return config;
@@ -62,7 +63,7 @@ function fetchSyncConfig() {
 function mergeConfig(fromArgv, fromMain) {
   const merged = { ...fromArgv };
   if (!fromMain) return merged;
-  for (const key of ['mode', 'seed', 'tz', 'ua', 'platform', 'chrome', 'country']) {
+  for (const key of ['mode', 'seed', 'tz', 'ua', 'platform', 'chrome', 'platformVersion', 'country']) {
     if (fromMain[key] !== undefined && fromMain[key] !== null && fromMain[key] !== '') {
       merged[key] = fromMain[key];
     }
@@ -1051,12 +1052,16 @@ function guardIdentity() {
 
   // 客户端提示（UA-CH）：必须和 UA 字符串讲同一套话，否则一眼矛盾
   if (navigator.userAgentData || CONFIG.chrome) {
-    const major = CONFIG.chrome || '120';
+    // CONFIG.chrome 现在是完整版本号（例如 156.0.8078.100）：brands 里写主版本，
+    // fullVersionList / uaFullVersion 写完整版本，两边必须是同一版的两种写法。
+    const fullVersion = String(CONFIG.chrome || '120.0.0.0');
+    const major = fullVersion.split('.')[0] || '120';
+    const platformVer = String(CONFIG.platformVersion || '');
     const data = {
       brands: [
         { brand: 'Chromium', version: major },
         { brand: 'Google Chrome', version: major },
-        { brand: 'Not-A.Brand', version: '24' },
+        { brand: 'Not)A;Brand', version: '99' },
       ],
       mobile: false,
       platform: CONFIG.platform || 'Windows',
@@ -1067,15 +1072,16 @@ function guardIdentity() {
             bitness: '64',
             brands: data.brands,
             fullVersionList: [
-              { brand: 'Chromium', version: `${major}.0.0.0` },
-              { brand: 'Google Chrome', version: `${major}.0.0.0` },
-              { brand: 'Not-A.Brand', version: '24.0.0.0' },
+              { brand: 'Chromium', version: fullVersion },
+              { brand: 'Google Chrome', version: fullVersion },
+              { brand: 'Not)A;Brand', version: '99.0.0.0' },
             ],
             mobile: false,
             model: '',
             platform: data.platform,
-            platformVersion: CONFIG.platform === 'Windows' ? '10.0.0' : '15.0.0',
-            uaFullVersion: `${major}.0.0.0`,
+            // 读不出本机真实系统版本就不写这一项（猜一个错的值反而对不上）
+            ...(platformVer ? { platformVersion: platformVer } : {}),
+            uaFullVersion: fullVersion,
             wow64: false,
           };
           if (!Array.isArray(hints) || !hints.length) return full;
