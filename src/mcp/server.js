@@ -272,8 +272,11 @@ async function main() {
         steps: z.number().optional().describe('撤销几步（默认 1，最多 5）'),
       },
     },
-    async ({ key, value, confirm }) =>
-      (await invoke({ type: 'settings', params: { key, value, confirm } }))(),
+    async ({ key, value, confirm, preset, accepts, undo, steps }) =>
+      (await invoke({
+        type: 'settings',
+        params: { key, value, confirm, preset, accepts, undo, steps },
+      }))(),
   );
 
   const transport = new StdioServerTransport();

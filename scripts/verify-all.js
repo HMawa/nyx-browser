@@ -36,11 +36,14 @@
  * 30. scripts/verify-onboard-e2e.js（首次引导真机：全新安装弹一次、点默认后落盘并关窗、再启动与升级安装都不弹，7 项）
  * 31. scripts/verify-agent-doc.js（agent 接入说明：端点来自运行时、两种模式边界、会被拦下的四种情况、复制回读，9 项；纯 Node，不启动 Electron）
  * 32. scripts/verify-themes.js（主题：六套主题与枚举一一对应、新主题令牌齐全、对比度实算、不许有渐变、主题与显示分区，7 项；纯 Node，不启动 Electron）
- * 33. scripts/verify-shell-guard.js（外壳导航守卫：只许停在自己那份文档、网络地址与伪协议全拦、弹窗只放行 http(s)、不许内嵌 webview、接线与提示，11 项；纯 Node，不启动 Electron）
+ * 33. scripts/verify-shell-guard.js（外壳导航守卫：只许停在自己那份文档、网络地址与伪协议全拦、弹窗只放行 http(s)、不许内嵌 webview、接线与提示，13 项；纯 Node，不启动 Electron）
  * 34. scripts/verify-update-policy.js（更新通道准入：只许 https、本地目录必须显式确认、版本必须单调、缺 sha256 一律拒绝，10 项；纯 Node，不启动 Electron）
  * 35. scripts/verify-update-signature.js（更新签名：清单 Ed25519 签名往返、改任一受保护字段即失效、安装包六种验签结果、私钥不入库，17 项；纯 Node，不启动 Electron）
- * 36. scripts/verify-privacy-surface.js（隐私指纹面：加固脚本放进假页面世界真跑一遍核对 UA/语言/时区/Canvas/WebGL、CDP 四步顺序、接线与失败可见，28 项；纯 Node，不启动 Electron）
- * 37. scripts/verify-ipc-guard.js（IPC 发送方校验：只认同项目 renderer 下的 html、子框架与网络地址全拒、三个注册口都被包上、页面上下文通道单独列，9 项；纯 Node，不启动 Electron）
+ * 36. scripts/verify-privacy-surface.js（隐私指纹面：加固脚本放进假页面世界真跑一遍核对 UA/语言/时区/Canvas/WebGL、CDP 五步顺序、userAgentMetadata、文档就绪补打与接线可见，34 项；纯 Node，不启动 Electron）
+ * 37. scripts/verify-ipc-guard.js（IPC 发送方校验：只认同项目 renderer 下的 html、子框架与网络地址全拒、三个注册口都被包上、页面上下文通道单独列，10 项；纯 Node，不启动 Electron）
+ * 38. scripts/verify-http-api-auth.js（本地接口鉴权：只认请求头 token、查询串不再接受、无 token 的 health 不泄露版本，7 项；纯 Node，不启动 Electron）
+ * 39. scripts/verify-audit-p2.js（安全审计 P2 批次：隐私模式 agent 内容边界、state 只读豁免、截图重试、密码框 name 抹除、limits 传参、设置只读不确认、MCP 参数转发，14 项；纯 Node，不启动 Electron）
+ * 40. scripts/verify-permissions.js（站点设备授权白名单：设备项拆分、来源只收 http(s)、三档授权、隐私模式封死、撤销/清空与接线，22 项；纯 Node，不启动 Electron）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -123,13 +126,13 @@ const STEPS = [
   {
     label: '动作通道回归',
     script: 'verify-agent-dispatch.js',
-    items: '22 项',
+    items: '24 项',
     timeoutMs: 60000,
   },
   {
     label: '页面读取回归',
     script: 'verify-page-reader.js',
-    items: '21 项',
+    items: '22 项',
     timeoutMs: 60000,
   },
   {
@@ -272,7 +275,7 @@ const STEPS = [
   {
     label: '外壳导航守卫回归',
     script: 'verify-shell-guard.js',
-    items: '11 项',
+    items: '13 项',
     timeoutMs: 60000,
   },
   {
@@ -290,13 +293,13 @@ const STEPS = [
   {
     label: '隐私指纹面回归',
     script: 'verify-privacy-surface.js',
-    items: '28 项',
+    items: '34 项',
     timeoutMs: 60000,
   },
   {
     label: 'IPC 发送方校验回归',
     script: 'verify-ipc-guard.js',
-    items: '9 项',
+    items: '10 项',
     timeoutMs: 60000,
   },
   {
@@ -309,6 +312,12 @@ const STEPS = [
     label: '安全审计 P2 批次回归',
     script: 'verify-audit-p2.js',
     items: '14 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '站点设备权限回归',
+    script: 'verify-permissions.js',
+    items: '22 项',
     timeoutMs: 60000,
   },
 ];

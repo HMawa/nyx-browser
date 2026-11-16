@@ -161,13 +161,28 @@ check('脚本跑两次仍然只有一层补丁（window.__nyxSurface 版本守�
 const steps = surface.buildCdpSteps(PROFILE);
 const methods = steps.map((item) => item.method);
 check(
-  'CDP 四步齐全且顺序正确（UA → 时区 → 语言 → 注入脚本）',
+  'CDP 五步齐全且顺序正确（先 Page.enable，再 UA → 时区 → 语言 → 注入脚本）',
   methods.join(',') ===
-    'Emulation.setUserAgentOverride,Emulation.setTimezoneOverride,Emulation.setLocaleOverride,Page.addScriptToEvaluateOnNewDocument',
+    'Page.enable,Emulation.setUserAgentOverride,Emulation.setTimezoneOverride,Emulation.setLocaleOverride,Page.addScriptToEvaluateOnNewDocument',
   methods.join(','),
 );
-check('UA 覆盖带 acceptLanguage 与 platform（只改 UA 字符串不够）', steps[0].params.acceptLanguage === 'en-US,en' && steps[0].params.platform === 'Win32');
-check('注入的脚本就是同一条加固脚本（不是另一个空壳）', steps[3].params.source === script);
+check(
+  '第一条必须是 Page.enable（没有它注入脚本"成功返回但从不执行"，指纹一条都不生效）',
+  methods[0] === 'Page.enable',
+);
+const uaStep = steps.find((item) => item.method === 'Emulation.setUserAgentOverride');
+check('UA 覆盖带 acceptLanguage 与 platform（只改 UA 字符串不够）', uaStep.params.acceptLanguage === 'en-US,en' && uaStep.params.platform === 'Win32');
+check(
+  'UA 覆盖带 userAgentMetadata（否则 userAgentData 是空的，比不伪装更显眼）',
+  Boolean(uaStep.params.userAgentMetadata)
+    && Array.isArray(uaStep.params.userAgentMetadata.brands)
+    && uaStep.params.userAgentMetadata.brands.length >= 2
+    && uaStep.params.userAgentMetadata.platform === 'Windows'
+    && uaStep.params.userAgentMetadata.brands.some((b) => b.version === '156'),
+  JSON.stringify(uaStep.params.userAgentMetadata && uaStep.params.userAgentMetadata.brands),
+);
+const injectStep = steps.find((item) => item.method === 'Page.addScriptToEvaluateOnNewDocument');
+check('注入的脚本就是同一条加固脚本（不是另一个空壳）', injectStep.params.source === script);
 const noTz = surface.buildCdpSteps(Object.assign({}, PROFILE, { timezone: '', timezoneOffset: null }));
 check('出口时区未知时不谎报时区（不发 setTimezoneOverride）', !noTz.some((s) => s.method === 'Emulation.setTimezoneOverride'));
 
@@ -200,6 +215,26 @@ check(
     /tab\.privacyIncomplete = true;/.test(main),
 );
 check('隐私模式没有 profile 时明确拒绝装配（不假装成功）', /隐私模式没有可用的指纹画像/.test(main));
+
+/* ⑨ 对抗测试 N1 的现场教训：CDP 命令"全部成功、页面里一条都没生效" */
+check(
+  '文档就绪后补打一次，并当场核对 window.__nyxSurface（不是发完命令就算完）',
+  /wc\.once\('dom-ready'[\s\S]{0,160}applySurfaceToCurrentDocument\(tab, profile\)/.test(main) &&
+    /window\.__nyxSurface \|\| null/.test(main),
+);
+check(
+  '补打没生效就报 PRIVACY_SURFACE_NOT_APPLIED 并给前台提示',
+  /diagnostics\.error\('PRIVACY_SURFACE_NOT_APPLIED'/.test(main) &&
+    /隐私模式加固没生效/.test(main),
+);
+check(
+  '导航前那一轮不发送 Page.addScriptToEvaluateOnNewDocument（没有文档时它不回执，会把整条链路挂住）',
+  /step\.method === 'Page\.addScriptToEvaluateOnNewDocument'\) continue;/.test(main),
+);
+check(
+  '单条 CDP 下发失败不再掐断整条链路，但要留痕（PRIVACY_SURFACE_STEP_FAILED）',
+  /PRIVACY_SURFACE_STEP_FAILED/.test(main) && !/return fail\(describeSurfaceFailure\('send', err\)\)/.test(main),
+);
 
 console.log('');
 console.log(`隐私指纹面回归：通过 ${passed} 项，失败 ${failed} 项`);

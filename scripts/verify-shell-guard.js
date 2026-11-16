@@ -158,6 +158,29 @@ check('守卫模块保持纯逻辑（不发请求、不读文件）', () => {
   assert(!/require\('node:fs'\)|require\('node:https?'\)|fetch\(/.test(source), '守卫模块不应读盘或发请求');
 });
 
+// 12. 历史 API 逃逸（N4）：pushState 换个地址再 reload，就能让外壳跑在别的 origin 上
+check('历史记录守卫脚本会拦住跨源 pushState/replaceState，放行外壳自己那份地址', () => {
+  const script = guard.buildHistoryGuardScript('file:///D:/app/renderer/index.html');
+  assert(/pushState/.test(script) && /replaceState/.test(script), '守卫脚本应同时接管 pushState 与 replaceState');
+  assert(/index\.html/.test(script), '守卫脚本里应带上"允许的那份地址"');
+  assert(/console\.warn/.test(script) && /return undefined/.test(script), '被拒时要拦住这次写入并留一句警告，而不是照写下去');
+  const allow = guard.decideShellEscape({ shellUrl: 'file:///D:/app/renderer/index.html', targetUrl: 'file:///D:/app/renderer/index.html' });
+  assert(allow.escaped === false, '外壳自己的地址应判为安全');
+  const escape = guard.decideShellEscape({ shellUrl: 'file:///D:/app/renderer/index.html', targetUrl: 'https://evil.example/x' });
+  assert(escape.escaped === true && escape.code, '换了 origin 应判为逃逸并给出错误码');
+  const other = guard.decideShellEscape({ shellUrl: 'file:///D:/app/renderer/index.html', targetUrl: 'file:///D:/app/renderer/other.html' });
+  assert(other.escaped === true, '同目录别的 html 也算逃逸');
+});
+
+// 13. 主进程真的装上了两层保险（静态接线守卫）
+check('主进程装上历史守卫并在导航后兜底一次（N4 接线）', () => {
+  const main = read('src/main.js');
+  assert(/executeJavaScript\(buildHistoryGuardScript\(shellUrl\)/.test(main), 'did-finish-load 里应执行历史守卫脚本');
+  assert(/did-navigate'/.test(main) && /SHELL_ESCAPED/.test(main), '应在导航落地后兜底并留痕');
+  assert(!/on\('did-start-navigation'/.test(main), '不要在导航刚开始时抢先 reload（会打断自己的 CDP 会话）');
+  assert(/win\.loadURL\(shellUrl\)/.test(main), '发现逃逸后应把外壳拉回自己那份地址');
+});
+
 console.log('');
 if (failed === 0) {
   console.log(`[Nyx] 外壳导航守卫回归通过（${passed} 项）`);

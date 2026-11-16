@@ -359,14 +359,20 @@ class TabManager {
     tab.url = target;
     tab.requestedUrl = target;
     // 重建后工具箱的粘性设置（UA / 视口 / 限速）要重新施加一遍
+    // 同样：返回 Promise（隐私模式要先注册指纹补丁）就等它，再加载
+    let gate = null;
     try {
-      this.onTabCreated(tab);
+      gate = this.onTabCreated(tab);
     } catch (err) {
       console.warn('[Nyx] 标签重建回调异常：', err.message);
     }
-    wc.loadURL(target).catch((err) => {
-      console.warn('[Nyx] 唤醒后加载失败：', err && err.message);
-    });
+    const startLoad = () => {
+      wc.loadURL(target).catch((err) => {
+        console.warn('[Nyx] 唤醒后加载失败：', err && err.message);
+      });
+    };
+    if (gate && typeof gate.then === 'function') gate.then(startLoad, startLoad);
+    else startLoad();
     this.layout();
     this.emit();
     return { ok: true, id: tab.id };
@@ -456,9 +462,12 @@ class TabManager {
     this.mainWindow.contentView.addChildView(view);
     this.bindEvents(tab);
 
-    // 新标签也要继承工具箱的粘性设置（UA / 视口 / 限速），否则每开一个标签都要重设
+    // 新标签也要继承工具箱的粘性设置（UA / 视口 / 限速），否则每开一个标签都要重设。
+    // 回调可能返回 Promise（隐私模式下要先把指纹补丁注册到新文档再导航），那就等它落地再 loadURL；
+    // 返回 undefined 的旧回调照旧同步走，行为不变。
+    let gate = null;
     try {
-      this.onTabCreated(tab);
+      gate = this.onTabCreated(tab);
     } catch (err) {
       console.warn('[Nyx] 标签创建回调异常：', err.message);
     }
@@ -473,10 +482,18 @@ class TabManager {
       return { action: 'deny' };
     });
 
-    wc.loadURL(target).catch((err) => {
-      // 加载失败不抛出，交由 did-fail-load 呈现
-      console.warn('[Nyx] 页面加载失败：', err.message);
-    });
+    const startLoad = () => {
+      wc.loadURL(target).catch((err) => {
+        // 加载失败不抛出，交由 did-fail-load 呈现
+        console.warn('[Nyx] 页面加载失败：', err.message);
+      });
+    };
+    if (gate && typeof gate.then === 'function') {
+      // 等指纹补丁落地；失败了也要照常加载页面（宁可标签能打开，不留下一个白页）
+      gate.then(startLoad, startLoad);
+    } else {
+      startLoad();
+    }
 
     this.activate(tab.id);
     return { ok: true, id: tab.id };

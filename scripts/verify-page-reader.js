@@ -213,6 +213,25 @@ function main() {
   };
   check('执行器/接口/MCP 全部接上 readPage 与 elementId，截图降级为人工辅助', Object.values(wiring).every(Boolean), JSON.stringify(wiring));
 
+  // N5：maxElements / maxText 之前是被默认值静默封顶的（要 500 也只给 300，字节数一模一样）
+  const many = Array.from({ length: 600 }, (_, i) => ({
+    id: 'e' + i,
+    role: 'button',
+    name: '按钮 ' + i,
+    tag: 'button',
+    inputType: '',
+    value: '',
+    inViewport: true,
+  }));
+  const bigRaw = { ok: true, url: 'https://example.com/', title: 'T', elements: many, text: 'x'.repeat(12000) };
+  const defaultCut = reader.summarizeReadPage(bigRaw, {});
+  const asked = reader.summarizeReadPage(bigRaw, { maxElements: 500, maxText: 10000 });
+  check(
+    '要更多就给更多：maxElements=500 不再被默认 300 静默封顶，maxText 同理（N5）',
+    defaultCut.elements.length === 300 && asked.elements.length === 500 && asked.text.length === 10000,
+    JSON.stringify({ 默认给: defaultCut.elements.length, 要500给: asked.elements.length, 默认字数: defaultCut.text.length, 要1万给: asked.text.length }),
+  );
+
   console.log('');
   if (failures.length === 0) {
     console.log(`[Nyx] 页面读取回归通过：${passed}/${passed} 项全绿`);

@@ -48,6 +48,13 @@ function buildHardeningScript(profile) {
     timezoneOffset: Number.isFinite(source.timezoneOffset) ? source.timezoneOffset : null,
     hardwareConcurrency: Number.isFinite(source.hardwareConcurrency) ? source.hardwareConcurrency : 8,
     deviceMemory: Number.isFinite(source.deviceMemory) ? source.deviceMemory : 8,
+    // 屏幕尺寸/像素比/时区名这些"额外特征"：画像里没给就用一个与常见 1080p 笔记本一致的稳定值，
+    // 至少不再是"本机真实分辨率的唯一值"；同一会话内保持一致（见下面 next() 的稳定伪随机）。
+    screenWidth: Number.isFinite(source.screenWidth) ? source.screenWidth : 1920,
+    screenHeight: Number.isFinite(source.screenHeight) ? source.screenHeight : 1080,
+    devicePixelRatio: Number.isFinite(source.devicePixelRatio) ? source.devicePixelRatio : 1,
+    timezoneLabel: String(source.timezoneLabel || source.timezone || 'GMT+0000 (Coordinated Universal Time)'),
+    locale: String(source.locale || (Array.isArray(source.languages) && source.languages[0]) || 'en-US'),
   };
 
   return `(() => {
@@ -141,14 +148,41 @@ function buildHardeningScript(profile) {
     };
   } catch (err) { /* 环境不支持 Canvas 就算了 */ }
 
+  // ---- OffscreenCanvas：worker 里也能画，别让 canvas 指纹只剩一条缝 ----
+  try {
+    if (typeof OffscreenCanvasRenderingContext2D !== 'undefined') {
+      const origOff = OffscreenCanvasRenderingContext2D.prototype.getImageData;
+      OffscreenCanvasRenderingContext2D.prototype.getImageData = function getImageData(...args) {
+        const out = origOff.apply(this, args);
+        noisy(out.data, 2);
+        return out;
+      };
+    }
+  } catch (err) { /* 没有 OffscreenCanvas 就算了 */ }
+
   // ---- WebGL：vendor / renderer 说成主流 GPU，别暴露真实型号 ----
   try {
     const origGetParameter = WebGLRenderingContext.prototype.getParameter;
-    WebGLRenderingContext.prototype.getParameter = function getParameter(param) {
+    const fakeGlParam = (param) => {
       if (param === 37445) return 'Google Inc. (Intel)';
       if (param === 37446) return 'ANGLE (Intel, Intel(R) UHD Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)';
+      return undefined;
+    };
+    WebGLRenderingContext.prototype.getParameter = function getParameter(param) {
+      const fake = fakeGlParam(param);
+      if (fake !== undefined) return fake;
       return origGetParameter.call(this, param);
     };
+    // WebGL2 是另一套原型：只改 WebGL1 的话，webgl2 上下文里的 getParameter(37446)
+    // 照样把真实型号报出来（对抗测试就是从这里钻过去的）。
+    if (typeof WebGL2RenderingContext !== 'undefined') {
+      const origGet2 = WebGL2RenderingContext.prototype.getParameter;
+      WebGL2RenderingContext.prototype.getParameter = function getParameter(param) {
+        const fake = fakeGlParam(param);
+        if (fake !== undefined) return fake;
+        return origGet2.call(this, param);
+      };
+    }
   } catch (err) { /* 没有 WebGL 就算了 */ }
 
   // ---- Audio：频域数据加一点噪声，避免 AudioContext 指纹 ----
@@ -156,9 +190,43 @@ function buildHardeningScript(profile) {
     const origFloat = AnalyserNode.prototype.getFloatFrequencyData;
     AnalyserNode.prototype.getFloatFrequencyData = function getFloatFrequencyData(array) {
       origFloat.call(this, array);
-      for (let i = 0; i < array.length; i += 1) array[i] += (next() - 0.5) * 0.02;
+      for (let i = 0; i < array.length; i += 1) {
+        // 原本是 -Infinity 的位置要单独兜住：加噪声还是 -Infinity，会一眼看出"被改过"
+        const base = Number.isFinite(array[i]) ? array[i] : -100 + next() * 0.5;
+        array[i] = base + (next() - 0.5) * 0.02;
+      }
     };
   } catch (err) { /* 没有 AnalyserNode 就算了 */ }
+
+  // ---- 屏幕尺寸与像素比：外接屏 / 缩放比例是很强的区分特征 ----
+  try {
+    if (typeof Screen !== 'undefined') {
+      defineGetter(Screen.prototype, 'width', () => CFG.screenWidth);
+      defineGetter(Screen.prototype, 'height', () => CFG.screenHeight);
+      defineGetter(Screen.prototype, 'availWidth', () => CFG.screenWidth);
+      defineGetter(Screen.prototype, 'availHeight', () => CFG.screenHeight - 40);
+      defineGetter(Screen.prototype, 'colorDepth', () => 24);
+      defineGetter(Screen.prototype, 'pixelDepth', () => 24);
+    }
+    defineGetter(window, 'devicePixelRatio', () => CFG.devicePixelRatio);
+  } catch (err) { /* 没有 screen 就算了 */ }
+
+  // ---- 时间字符串：Date.toString() 里带本机时区名与语言，是最后一处真值出口 ----
+  try {
+    const origDateToString = Date.prototype.toString;
+    const origToLocale = Date.prototype.toLocaleString;
+    Date.prototype.toString = function toString() {
+      try {
+        return origDateToString.call(this).replace(/\\(([^)]+)\\)/, '(' + CFG.timezoneLabel + ')');
+      } catch (err) {
+        return origDateToString.call(this);
+      }
+    };
+    Date.prototype.toLocaleString = function toLocaleString(locales, options) {
+      if (locales === undefined) return origToLocale.call(this, CFG.locale, options);
+      return origToLocale.call(this, locales, options);
+    };
+  } catch (err) { /* 改不动就靠 Intl 那一层 */ }
 
   // ---- 让改过的函数"看起来像原生的"（否则 toString 一眼看出被 hook） ----
   try {
@@ -182,17 +250,50 @@ function buildHardeningScript(profile) {
 /**
  * 需要下发给页面的 CDP 命令（顺序固定，且在导航之前下发）。
  * 只包含"对齐身份"的三条 + 一条注入；不含任何读写页面内容的命令。
+ *
+ * 第一条 Page.enable 是必须的：`Page.addScriptToEvaluateOnNewDocument` 在 Page 域没启用时
+ * 会"成功返回但从不执行"（实测：没有它，页面里读不到 `window.__nyxSurface`，指纹一条都没改，
+ * 只有 UA / 请求头生效）。这类"看起来成功、其实没跑"的失败最难查，所以放在最前面。
  */
 function buildCdpSteps(profile) {
   const source = profile || {};
-  const steps = [];
-  if (source.ua) {
+  const steps = [{ method: 'Page.enable', params: {} }];
+  const ua = String(source.ua || '');
+  const majorMatch = ua.match(/Chrome\/(\d+)/);
+  const major = majorMatch ? majorMatch[1] : '';
+  if (ua) {
+    const metadata = {
+      brands: major
+        ? [
+            { brand: 'Chromium', version: major },
+            { brand: 'Google Chrome', version: major },
+            { brand: 'Not)A;Brand', version: '99' },
+          ]
+        : [],
+      fullVersionList: major
+        ? [
+            { brand: 'Chromium', version: `${major}.0.0.0` },
+            { brand: 'Google Chrome', version: `${major}.0.0.0` },
+            { brand: 'Not)A;Brand', version: '99.0.0.0' },
+          ]
+        : [],
+      // 真实 Chrome 在 Windows 上一直是 10.0.0，写死比留空安全：留空会让
+      // navigator.userAgentData.platform === ''，那比不伪装更显眼。
+      platform: 'Windows',
+      platformVersion: '10.0.0',
+      architecture: 'x86',
+      model: '',
+      mobile: false,
+      bitness: '64',
+      wow64: false,
+    };
     steps.push({
       method: 'Emulation.setUserAgentOverride',
       params: {
-        userAgent: String(source.ua),
+        userAgent: ua,
         acceptLanguage: Array.isArray(source.languages) ? source.languages.join(',') : 'en-US,en',
         platform: String(source.platform || 'Win32'),
+        userAgentMetadata: metadata,
       },
     });
   }

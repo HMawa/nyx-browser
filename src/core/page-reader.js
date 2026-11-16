@@ -81,12 +81,19 @@ const PAGE_PRELUDE = String.raw`
     }
     return 'generic';
   };
-  const nameOf = (el) => norm(
-    (el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('alt') || el.getAttribute('placeholder')))
-    || (el.tagName === 'INPUT' ? '' : el.innerText)
-    || el.value
-    || ''
-  );
+  const nameOf = (el) => {
+    // 密码框的 name 绝不能回退到 el.value：类型遮住了、名字里又把明文带出去，
+    // 等于没遮（对抗测试就是这么把密码读出来的）。
+    if (String(el.type || '').toLowerCase() === 'password') {
+      return norm((el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('placeholder'))) || '密码输入框');
+    }
+    return norm(
+      (el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('alt') || el.getAttribute('placeholder')))
+      || (el.tagName === 'INPUT' ? '' : el.innerText)
+      || el.value
+      || ''
+    );
+  };
   const pathOf = (el) => {
     const parts = [];
     let node = el;
@@ -308,10 +315,12 @@ function summarizeReadPage(raw, limits) {
     const inputType = String(item && item.inputType ? item.inputType : '');
     // 密码框双重保险：即使页面脚本传回了值（老版本 / 被测脚本改过），这里也一律抹掉
     const masked = inputType === 'password';
+    // 名字也一样：密码框的 name 只保留"这是个密码框"这个事实，不带任何原文
+    const rawName = masked ? '' : (item && item.name);
     return {
       id: String(item && item.id ? item.id : ''),
       role: String(item && item.role ? item.role : 'generic'),
-      name: normalizeName(item && item.name, lim.maxNameLen),
+      name: masked ? '密码输入框' : normalizeName(rawName, lim.maxNameLen),
       tag: String(item && item.tag ? item.tag : ''),
       inputType,
       value: masked ? '' : String(item && item.value ? item.value : '').slice(0, 60),

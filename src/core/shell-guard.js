@@ -115,9 +115,59 @@ function describeAttachBlock() {
   return { allow: false, code: 'BLOCK_WEBVIEW', reason: '外壳不允许内嵌 webview。' };
 }
 
+/**
+ * 外壳里改地址栏的请求（`history.pushState` / `replaceState`）。
+ * 它们不触发 will-navigate，却能把 `location.origin` 改成远端地址；此后一次 reload 就会让
+ * Chromium 按"远端 origin"处理外壳并直接终止 renderer——既是地址欺骗，也是一次 DoS。
+ * 所以只接受与外壳同一份文件的地址；其余一律拒绝并留下可见记录。
+ */
+function buildHistoryGuardScript(shellUrl) {
+  const expected = String(shellUrl || '');
+  return `(() => {
+  const SHELL_URL = ${JSON.stringify(expected)};
+  if (!SHELL_URL || window.__nyxHistoryGuard) return;
+  window.__nyxHistoryGuard = true;
+  const sameFile = (raw) => {
+    if (raw === undefined || raw === null || raw === '') return true;
+    try {
+      const target = new URL(String(raw), location.href);
+      const shell = new URL(SHELL_URL);
+      return target.protocol === 'file:' && target.pathname === shell.pathname;
+    } catch (err) {
+      return false;
+    }
+  };
+  for (const name of ['pushState', 'replaceState']) {
+    const orig = History.prototype[name];
+    if (typeof orig !== 'function') continue;
+    const guard = function (state, title, url) {
+      if (!sameFile(url)) {
+        console.warn('[Nyx] 外壳拒绝了改地址的请求：', String(url));
+        return undefined;
+      }
+      return orig.call(this, state, title, url);
+    };
+    try {
+      History.prototype[name] = guard;
+    } catch (err) {
+      try { Object.defineProperty(history, name, { value: guard, configurable: true, writable: true }); } catch (e2) { /* 两道都不成就只能靠主进程兜底 */ }
+    }
+  }
+})();`;
+}
+
+/** 主进程兜底：外壳真的跑到别处去了，就停下来并重新加载自己（绝不把窗口留在那个页面） */
+function decideShellEscape(input) {
+  const nav = decideShellNavigation(input);
+  if (nav.allow) return { escaped: false, code: nav.code, reason: nav.reason };
+  return { escaped: true, code: nav.code, reason: nav.reason };
+}
+
 module.exports = {
   describeTarget,
   decideShellNavigation,
   decideShellWindowOpen,
   describeAttachBlock,
+  buildHistoryGuardScript,
+  decideShellEscape,
 };

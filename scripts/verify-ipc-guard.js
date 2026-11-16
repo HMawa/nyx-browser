@@ -103,6 +103,22 @@ check(
   'module.exports.decideIpcSender',
 );
 
+// 10. P1-5 的第二半：vault / forms 的站点标识必须取自发送方文档，不信 payload 自称
+check(
+  '10. 密码与表单按「发送方文档的 origin」隔离，不再信 payload 里自称的 origin（P1-5）',
+  (() => {
+    const main = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
+    const start = main.indexOf('function safeOrigin(');
+    if (start < 0) return false;
+    const fn = main.slice(start, start + 900);
+    const usesFrame = /event\.senderFrame/.test(fn) && /new URL\(frameUrl\)/.test(fn);
+    // payload 只在拿不到发送方地址时兜底
+    const payloadIsFallback = fn.indexOf('event.senderFrame') < fn.indexOf('payload && payload.origin');
+    const callers = (main.match(/safeOrigin\(payload, event\)/g) || []).length;
+    return usesFrame && payloadIsFallback && callers >= 6;
+  })(),
+);
+
 console.log('');
 const total = passed + failures.length;
 console.log(`IPC 发送方校验：${total} 项检查，${passed} 项通过，${failures.length} 项失败`);

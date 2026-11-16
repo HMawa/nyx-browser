@@ -439,6 +439,37 @@ async function main() {
     };
   });
 
+  await check('24. 只读设置不弹确认、真改才弹（N8）', () => {
+    const readOnly = requiresConfirmation('settings', {});
+    const readOnlyList = requiresConfirmation('settings', { list: true });
+    const mutateKey = requiresConfirmation('settings', { key: 'tabSleepMinutes', value: 10 });
+    const mutatePreset = requiresConfirmation('settings', { preset: 'quiet' });
+    const mutateUndo = requiresConfirmation('settings', { undo: true });
+    const before = requiresConfirmation('settings');
+    const ok = !readOnly && !readOnlyList && mutateKey && mutatePreset && mutateUndo && before === true;
+    return {
+      ok,
+      detail: {
+        只读不弹: !readOnly,
+        列举也不弹: !readOnlyList,
+        真改要弹: mutateKey && mutatePreset,
+        撤销也要弹: mutateUndo,
+        没带参数按老规矩弹: before === true,
+      },
+    };
+  });
+
+  await check('25. 空白页上 agent 能读到运行状态（N9：只读状态不涉及页面内容，不该被站点授权拦）', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'utf8');
+    const start = mainSrc.indexOf('async function authorizeAgentAction');
+    const fn = mainSrc.slice(start, start + 2600);
+    const allowed = /type === 'state'[\s\S]{0,120}state-readonly/.test(fn);
+    const beforeSiteCheck = fn.indexOf("type === 'state'") < fn.indexOf('evaluateSite(');
+    return { ok: allowed && beforeSiteCheck, detail: { 直接放行: allowed, 在站点判定之前: beforeSiteCheck } };
+  });
+
   // 附带打印一次能力清单，便于人工核对确认策略
   console.log('');
   console.log('[Nyx] 动作确认策略：');

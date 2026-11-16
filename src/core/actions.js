@@ -245,11 +245,28 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog, ge
             true,
           );
           if (aborted()) return interrupted();
-          return wrap(summarizeReadPage(raw));
+          // 上限要两处一致：页面脚本按它截，汇总这里也按同一份截。
+          // 只给页面不给汇总，就会出现「文档说能给 800，实际 300 就封顶」的静默封顶。
+          return wrap(summarizeReadPage(raw, { maxElements: params.maxElements, maxText: params.maxText }));
         }
 
         case 'screenshot': {
-          const image = await wc.capturePage();
+          // 导航刚完成时第一次 capturePage 常常拿不到帧（UnknownVizError），
+          // 等一帧再来一次通常就好——所以失败重试一次，而不是直接把错丢给用户。
+          let image = null;
+          let lastError = null;
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+              image = await wc.capturePage();
+              break;
+            } catch (err) {
+              lastError = err;
+              if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 180));
+            }
+          }
+          if (!image) {
+            return wrap({ ok: false, error: `截图失败：${(lastError && lastError.message) || '页面还没画出第一帧'}` });
+          }
           const size = image.getSize();
           return wrap({
             ok: true,

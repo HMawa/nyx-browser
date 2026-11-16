@@ -59,9 +59,20 @@ const {
 
 const sessions = require('./core/sessions');
 const { PrivacyHardening } = require('./core/privacy-hardening');
-const { buildCdpSteps, describeSurfaceFailure, shouldAttachSurface } = require('./core/privacy-surface');
+const {
+  buildCdpSteps,
+  buildHardeningScript,
+  describeSurfaceFailure,
+  shouldAttachSurface,
+} = require('./core/privacy-surface');
 // IPC 发送方校验（安全审计 P1-5）：只认 Nyx 自己 renderer/ 下的本地页面
 const { decideIpcSender } = require('./core/ipc-guard');
+// 站点设备授权白名单：纯逻辑模块，文件读写留在主进程
+const {
+  normalizeOrigin: normalizePermissionOrigin,
+  parseWhitelist: parsePermissionWhitelist,
+  serializeWhitelist: serializePermissionWhitelist,
+} = require('./core/permission-store');
 const { Vault } = require('./core/vault');
 const { ProxyService } = require('./core/proxy-service');
 const { TabManager, normalizeInput } = require('./core/tabs');
@@ -133,6 +144,8 @@ const {
 } = require('./core/onboarding');
 const { screenshotFilename } = require('./core/toolbar');
 const {
+  buildHistoryGuardScript,
+  decideShellEscape,
   decideShellNavigation,
   decideShellWindowOpen,
   describeAttachBlock,
@@ -954,6 +967,8 @@ async function bootstrap() {
    * 界面查到的审计列表来自另一个空实例。父窗口用取值函数延迟解析，
    * 因为此刻主窗口还没创建。
    */
+  // 站点设备授权：白名单在会话装配前读入，权限回调才能拿到同一份数据
+  const permissionWhitelist = loadPermissionWhitelist();
   sessions.initPermissions({
     getWindow: () => runtime.mainWindow,
     log: (entry) =>
@@ -961,6 +976,9 @@ async function bootstrap() {
         `[Nyx] 权限决策｜模式：${entry.mode}｜站点：${entry.origin}｜${entry.permission} → ` +
           `${entry.granted ? '允许' : '拒绝'}｜依据：${entry.via}`,
       ),
+    whitelist: permissionWhitelist.entries,
+    whitelistError: permissionWhitelist.error,
+    saveWhitelist: (entries) => savePermissionWhitelist(entries),
   });
 
   // 密码库与隐私加固装配器先就绪：恢复隐私模式时要立刻用它们下发 profile
@@ -1154,7 +1172,7 @@ function initVault() {
   const stats = runtime.vault.stats();
   console.log(
     `[Nyx] 密码库就绪｜可用：${stats.available ? '是' : '否'}｜加密后端：${stats.backend}｜` +
-      `条目：${stats.credentials} 个来源 / ${stats.forms} 份表单记忆｜文件：${stats.file}`,
+      `条目：${stats.credentialCount} 个来源 / ${stats.formCount} 份表单记忆｜文件：${stats.file}`,
   );
   return runtime.vault;
 }
@@ -1706,7 +1724,7 @@ async function applyPrivacyHardening() {
  * 任何一层失败都必须让用户看见（红线 2）：不静默降级成"半加固"，
  * 并在标签上记 `privacyIncomplete` 供后续排障。
  */
-function attachPrivacySurface(tab) {
+async function attachPrivacySurface(tab) {
   if (!tab || !tab.view) return { ok: false, error: '标签还没准备好' };
   if (!shouldAttachSurface(sessions.getMode())) return { ok: true, skipped: true };
 
@@ -1733,21 +1751,92 @@ function attachPrivacySurface(tab) {
     return fail(describeSurfaceFailure('setUserAgent', err));
   }
 
-  // 2) + 3) CDP：身份对齐 + 主世界补丁（在导航之前下发）
+  // 2) 首个文档的补丁：**先挂好再导航**
+  // Page.addScriptToEvaluateOnNewDocument 在"这个 webContents 还没有任何文档"时不会回执
+  // （实测 3 秒超时，连带把整条装配链路掐断），所以不能指望它在导航前注册成功。
+  // 可靠的路子是在文档就绪后把同一条脚本直接打进主世界，并当场核对标记。
+  // 代价写在台账里：第一个文档的补丁是"文档就绪之后"打上的；从第二次导航起才在文档开始时就生效。
+  wc.once('dom-ready', () => {
+    applySurfaceToCurrentDocument(tab, profile).catch((err) => {
+      console.warn('[Nyx] 隐私指纹面补打失败：', err && err.message);
+    });
+  });
+
+  // 3) CDP：身份对齐（UA 元数据 / 时区 / 语言）。这些命令在导航前是有效的；
+  // 失败不掐断整条链路，但要留痕——补丁本身靠上一步，这一层只负责"别再报真型号"。
   try {
     if (!wc.debugger.isAttached()) wc.debugger.attach('1.3');
-    for (const step of buildCdpSteps(profile)) {
-      const sent = wc.debugger.sendCommand(step.method, step.params);
-      if (sent && typeof sent.catch === 'function') {
-        sent.catch((err) => fail(describeSurfaceFailure('send', err)));
-      }
-    }
   } catch (err) {
     return fail(describeSurfaceFailure('attach', err));
+  }
+  // Page.enable 在"还没有文档"时不回执，发出去就行，不等。
+  try {
+    wc.debugger.sendCommand('Page.enable', {}).catch(() => {});
+  } catch (err) {
+    console.warn('[Nyx] 指纹面 Page.enable 发送失败：', err && err.message);
+  }
+  for (const step of buildCdpSteps(profile)) {
+    if (step.method === 'Page.enable' || step.method === 'Page.addScriptToEvaluateOnNewDocument') continue;
+    try {
+      const started = Date.now();
+      const sent = wc.debugger.sendCommand(step.method, step.params);
+      const timeout = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('下发超时（3 秒没有回执）')), 3000);
+      });
+      await Promise.race([sent, timeout]);
+      console.log(`[Nyx] 指纹面下发 ${step.method} 完成（${Date.now() - started}ms）`);
+    } catch (err) {
+      const message = describeSurfaceFailure('send', err);
+      console.warn(`[Nyx] 指纹面下发 ${step.method} 失败：${message}`);
+      diagnostics.warn('PRIVACY_SURFACE_STEP_FAILED', message, { tabId: tab.id, step: step.method });
+    }
   }
 
   tab.privacyIncomplete = false;
   return { ok: true };
+}
+
+/**
+ * 把加固脚本打进**当前文档**并核对标记是否真的落地。
+ * 这一步存在的理由：Page.addScriptToEvaluateOnNewDocument 在"目标还没有任何文档"时
+ * 不一定赶得上首个文档（对抗测试 N1 的现场就是这样：命令全成功、页面里一条都没生效）。
+ */
+async function applySurfaceToCurrentDocument(tab, profile) {
+  if (!tab || !tab.view || !profile) return { ok: false, error: '没有可用的标签或画像' };
+  const wc = tab.view.webContents;
+  if (wc.isDestroyed()) return { ok: false, error: '标签已经关掉了' };
+  const source = buildHardeningScript(profile);
+  // 现在这个 webContents 有文档了，Page 域的命令才会回执：趁这一步把注入注册上，
+  // 之后同一标签再导航（点链接、刷新）就能在"文档开始"时生效，不必每次都靠补打。
+  try {
+    if (!wc.debugger.isAttached()) wc.debugger.attach('1.3');
+    const enable = wc.debugger.sendCommand('Page.enable', {});
+    const inject = wc.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', { source });
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('3 秒没有回执')), 3000));
+    await Promise.race([Promise.all([enable, inject]), timeout]);
+  } catch (err) {
+    console.warn('[Nyx] 指纹面注入注册失败（本页仍会补打）：', err && err.message);
+  }
+  try {
+    await wc.executeJavaScript(source, true);
+    const applied = await wc.executeJavaScript('window.__nyxSurface || null', true);
+    if (!applied) {
+      tab.privacyIncomplete = true;
+      const message = '隐私模式加固没生效：这一页的指纹仍是本机的（加固脚本没有跑起来）。关掉这一页重新打开；如果一直这样，请把诊断包发出来。';
+      diagnostics.error('PRIVACY_SURFACE_NOT_APPLIED', '加固脚本在当前文档里没有生效', { tabId: tab.id });
+      notifyNotice({ level: 'error', code: 'PRIVACY_SURFACE_FAILED', title: '隐私模式加固没做完', message });
+      return { ok: false, error: message };
+    }
+    tab.privacyIncomplete = false;
+    return { ok: true, applied };
+  } catch (err) {
+    tab.privacyIncomplete = true;
+    diagnostics.error('PRIVACY_SURFACE_PATCH_FAILED', '当前文档补打加固脚本失败', {
+      tabId: tab.id,
+      reason: String((err && err.message) || err),
+    });
+    return { ok: false, error: String((err && err.message) || err) };
+  }
 }
 
 /**
@@ -2957,6 +3046,12 @@ function createMainWindow() {
     flushPendingNotices(win);
     // 首次安装引导（清单 D2）：外壳能显示之后再开，否则弹在空壳上一个字也没有
     maybeOpenOnboarding();
+    // 对抗测试 N4：pushState/replaceState 不触发 will-navigate，却能把 location.origin 改成远端，
+    // 之后一次 reload 就会让 Chromium 按远端 origin 处理外壳并终止 renderer。这里把改地址
+    // 的入口按"只许同一份文件"焊住（页面脚本每次加载都补一遍，幂等）。
+    win.webContents
+      .executeJavaScript(buildHistoryGuardScript(shellUrl), true)
+      .catch((err) => console.warn('[Nyx] 外壳改地址守卫没能装上：', err && err.message));
   });
 
   // UI 外壳自身也套用防泄漏策略
@@ -2998,6 +3093,33 @@ function createMainWindow() {
   };
   win.webContents.on('will-navigate', blockShellNav('will-navigate'));
   win.webContents.on('will-redirect', blockShellNav('will-redirect'));
+  // 对抗测试 N4 的兜底：pushState 之后 reload 不会走 will-navigate。真有这种事发生，
+  // 就把外壳停住、重新加载自己——绝不把窗口留在那个页面上（宁可重开，也不留在错的地方）。
+  //
+  // 注意：这里看的是**已经落地的地址**（did-navigate / did-navigate-in-page），不是
+  // did-start-navigation 的目标地址。用目标地址会在"导航刚开始、will-navigate 正准备拦下它"
+  // 时抢先 reload 一次，等于自己把外壳的 CDP 会话打断（界面回归就是这么炸的）。
+  const enforceShellStay = (source) => (event, url, second) => {
+    if (source === 'did-navigate-in-page' && second === false) return;
+    const verdict = decideShellEscape({ targetUrl: url, shellUrl });
+    if (!verdict.escaped) return;
+    console.warn(`[Nyx] 外壳自己跑到了别处（${verdict.code}），正在把它拉回来：`, url);
+    diagnostics.error('SHELL_ESCAPED', '外壳跑到了不该去的地方，已强制重新加载', {
+      code: verdict.code,
+      url: redactUrlForLog(url),
+    });
+    try {
+      win.webContents.stop();
+    } catch (err) { /* 已经在停就算了 */ }
+    if (!win.isDestroyed()) win.loadURL(shellUrl);
+    notifyNotice({
+      level: 'warn',
+      title: '外壳被强制重置',
+      message: '外壳页面想跑到别的地方，Nyx 把它拉回来了。你的标签页还在。',
+    });
+  };
+  win.webContents.on('did-navigate', enforceShellStay('did-navigate'));
+  win.webContents.on('did-navigate-in-page', enforceShellStay('did-navigate-in-page'));
   win.webContents.on('will-attach-webview', (event) => {
     const verdict = describeAttachBlock();
     event.preventDefault();
@@ -3086,10 +3208,13 @@ function createMainWindow() {
         });
       }
       // 安全审计 P0-3：隐私模式下把 UA 与指纹补丁真正下发给**主世界**。
-      // 必须在 loadURL 之前（标签创建回调就在 loadURL 之前），否则页面脚本先跑一步就白做。
-      attachPrivacySurface(tab);
+      // 必须在 loadURL 之前完成（标签创建回调就在 loadURL 之前），否则页面脚本先跑一步就白做。
+      // 所以这里把一个 Promise 交回去，让 TabManager 等它落地再 loadURL——见 tabs.js 里的
+      // "回调返回 Promise 就先等它"。对抗测试 N1 的根因正是"命令发出去了、页面已经先加载了"。
+      const surface = attachPrivacySurface(tab);
       // 历史记录：导航提交（主框架）即记账，页面标题就绪后再修正标题
       hookHistoryRecording(tab);
+      return surface && typeof surface.then === 'function' ? surface.then(() => undefined, () => undefined) : undefined;
     },
     // 后台标签闲置到点就休眠，释放渲染进程（清单 G）。0 = 关闭休眠。
     // 环境变量只是自动化验证用的旋钮，正常启动就是默认的 30 分钟。
@@ -4529,9 +4654,26 @@ const PRIVATE_DENIED = {
   error: '隐私模式下不读取、不写入任何密码与表单记忆',
 };
 
-/** 从 IPC 参数里取来源标识（站点 origin），并做长度与格式收敛 */
-function safeOrigin(payload) {
-  const origin = payload && payload.origin ? String(payload.origin).trim() : '';
+/**
+ * 从 IPC 参数里取来源标识（站点 origin），并做长度与格式收敛。
+ *
+ * 有 `event` 时**以发送方文档的 url 为准**，不信 payload 里自称的 origin：
+ * 页面脚本能随便写 payload.origin，但改不了自己文档的地址（对抗测试 P1-5 的缺口）。
+ * 拿不到 event（内部调用）才退回 payload。
+ */
+function safeOrigin(payload, event) {
+  const frame = event && event.senderFrame ? event.senderFrame : null;
+  const frameUrl = frame && typeof frame.url === 'string' ? frame.url : '';
+  let origin = '';
+  if (frameUrl) {
+    try {
+      const parsed = new URL(frameUrl);
+      origin = parsed.protocol === 'file:' ? '' : parsed.origin;
+    } catch (err) {
+      origin = '';
+    }
+  }
+  if (!origin && payload && payload.origin) origin = String(payload.origin).trim();
   if (!origin || origin.length > 200 || /[\r\n]/.test(origin)) return '';
   return origin;
 }
@@ -4575,7 +4717,13 @@ function buildPermissionView(limit) {
   const manager = sessions.getPermissionManager();
   if (!manager) return { ok: false, error: '权限管理器未就绪', decisions: [] };
   const size = Number(limit) > 0 ? Math.min(Number(limit), 200) : 50;
-  return { ok: true, decisions: manager.list(size), summary: manager.summary() };
+  return {
+    ok: true,
+    decisions: manager.list(size),
+    summary: manager.summary(),
+    whitelist: manager.whitelistEntries(),
+    whitelistError: manager.whitelistError || '',
+  };
 }
 
 function registerPrivacyIpc() {
@@ -4609,13 +4757,47 @@ function registerPrivacyIpc() {
 
   ipcMain.handle('nyx:permissions:list', (_event, limit) => buildPermissionView(limit));
 
-  /** 清空"按站点已记住的授权"：只清内存缓存，不触碰任何站点数据 */
+  /** 清空"按站点已记住的授权"：只清会话缓存，不触碰持久白名单与站点数据 */
   ipcMain.handle('nyx:permissions:clear', () => {
     const manager = sessions.getPermissionManager();
     if (!manager) return { ok: false, error: '权限管理器未就绪' };
     const result = manager.clearCache();
-    console.log('[Nyx] 已清空按站点记住的授权');
+    console.log('[Nyx] 已清空本会话记住的授权');
     return result && typeof result === 'object' ? result : { ok: true };
+  });
+
+  /** 撤销某个站点的设备白名单；不带 permission 表示撤销该站点全部设备 */
+  ipcMain.handle('nyx:permissions:revoke', (_event, payload) => {
+    const manager = sessions.getPermissionManager();
+    if (!manager) return { ok: false, error: '权限管理器未就绪' };
+    const origin = normalizePermissionOrigin(payload && payload.origin);
+    if (!origin) return { ok: false, error: '来源不合法，只支持 http(s) 站点' };
+    const permission = String((payload && payload.permission) || '').toLowerCase();
+    const result = manager.revokeWhitelist(origin, permission);
+    if (result.ok) {
+      console.log(`[Nyx] 已撤销设备授权｜站点：${origin}｜${permission || '全部设备'}`);
+    } else {
+      console.warn(`[Nyx] 撤销设备授权失败｜${result.error}`);
+    }
+    return {
+      ...result,
+      whitelist: manager.whitelistEntries(),
+      whitelistError: manager.whitelistError || '',
+    };
+  });
+
+  /** 清空站点设备白名单（会话缓存另用 nyx:permissions:clear） */
+  ipcMain.handle('nyx:permissions:whitelist-clear', () => {
+    const manager = sessions.getPermissionManager();
+    if (!manager) return { ok: false, error: '权限管理器未就绪' };
+    const result = manager.clearWhitelist();
+    if (result.ok) console.log('[Nyx] 已清空站点设备授权白名单');
+    else console.warn(`[Nyx] 清空站点设备授权白名单失败｜${result.error}`);
+    return {
+      ...result,
+      whitelist: manager.whitelistEntries(),
+      whitelistError: manager.whitelistError || '',
+    };
   });
 
   /* ---------------- 密码与表单记忆 ---------------- */
@@ -4639,7 +4821,7 @@ function registerPrivacyIpc() {
   ipcMain.handle('nyx:vault:has', (event, payload) => {
     if (!runtime.vault) return { ok: false, error: '密码库未初始化' };
     if (senderMode(event) === 'private') return { ...PRIVATE_DENIED, has: false };
-    const origin = safeOrigin(payload);
+    const origin = safeOrigin(payload, event);
     if (!origin) return { ok: false, error: '来源缺失' };
     return { ok: true, has: runtime.vault.hasCredential(origin) };
   });
@@ -4653,7 +4835,7 @@ function registerPrivacyIpc() {
   ipcMain.handle('nyx:vault:fill', (event, payload) => {
     if (!runtime.vault) return { ok: false, error: '密码库未初始化' };
     if (senderMode(event) === 'private') return { ...PRIVATE_DENIED };
-    const origin = safeOrigin(payload);
+    const origin = safeOrigin(payload, event);
     if (!origin) return { ok: false, error: '来源缺失' };
 
     const credential = runtime.vault.readCredential(origin);
@@ -4665,7 +4847,7 @@ function registerPrivacyIpc() {
   ipcMain.handle('nyx:vault:offer-save', (event, payload) => {
     if (!runtime.vault) return { ok: false, error: '密码库未初始化' };
     if (senderMode(event) === 'private') return { ...PRIVATE_DENIED };
-    const origin = safeOrigin(payload);
+    const origin = safeOrigin(payload, event);
     if (!origin) return { ok: false, error: '来源缺失' };
 
     const result = runtime.vault.saveCredential(origin, {
@@ -4683,7 +4865,7 @@ function registerPrivacyIpc() {
   ipcMain.handle('nyx:forms:save', (event, payload) => {
     if (!runtime.vault) return { ok: false, error: '密码库未初始化' };
     if (senderMode(event) === 'private') return { ...PRIVATE_DENIED };
-    const origin = safeOrigin(payload);
+    const origin = safeOrigin(payload, event);
     if (!origin) return { ok: false, error: '来源缺失' };
     return runtime.vault.saveFormValues(origin, payload && payload.values);
   });
@@ -4691,7 +4873,7 @@ function registerPrivacyIpc() {
   ipcMain.handle('nyx:forms:load', (event, payload) => {
     if (!runtime.vault) return { ok: false, error: '密码库未初始化' };
     if (senderMode(event) === 'private') return { ok: false, code: 'PRIVATE_MODE', values: {} };
-    const origin = safeOrigin(payload);
+    const origin = safeOrigin(payload, event);
     if (!origin) return { ok: false, error: '来源缺失' };
     return { ok: true, values: runtime.vault.readFormValues(origin) || {} };
   });
@@ -4701,7 +4883,7 @@ function registerPrivacyIpc() {
   ipcMain.handle('nyx:vault:remove', (event, payload) => {
     if (!runtime.vault) return { ok: false, error: '密码库未初始化' };
     if (senderMode(event) === 'private') return { ...PRIVATE_DENIED };
-    const origin = safeOrigin(payload);
+    const origin = safeOrigin(payload, event);
     if (!origin) return { ok: false, error: '来源缺失' };
     const result = runtime.vault.removeCredential(origin);
     if (result.ok) console.log(`[Nyx] 已删除该站点的密码｜站点：${origin}`);
@@ -9423,6 +9605,31 @@ function userDataFile(name) {
   return path.join(app.getPath('userData'), name);
 }
 
+/**
+ * 读取站点设备授权白名单。
+ * 文件不存在 → 空名单；文件读坏 → 空名单 + 可展示的错误，绝不把"读不懂"当成"全部允许"。
+ */
+function loadPermissionWhitelist() {
+  try {
+    const parsed = parsePermissionWhitelist(fs.readFileSync(userDataFile('permission-whitelist.json'), 'utf8'));
+    if (parsed.error) console.warn(`[Nyx] ${parsed.error}`);
+    return parsed;
+  } catch (err) {
+    if (err.code === 'ENOENT') return { entries: [], error: '' };
+    const error = `站点设备白名单读取失败：${err.message}`;
+    console.warn(`[Nyx] ${error}`);
+    return { entries: [], error };
+  }
+}
+
+/** 原子写白名单：先写临时文件再改名，避免写一半留下坏 JSON */
+function savePermissionWhitelist(entries) {
+  const file = userDataFile('permission-whitelist.json');
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, serializePermissionWhitelist(entries), { mode: 0o600 });
+  fs.renameSync(tmp, file);
+}
+
 /** 读取或生成访问 Token（首次启动时随机生成并落盘） */
 function ensureApiToken() {
   const file = userDataFile('api-token.txt');
@@ -9572,7 +9779,7 @@ async function askAgentSiteTrust(input) {
  */
 
 /** 隐私模式下直接拒绝的 agent 动作（安全审计 P2）：它们天生就是"把页面内容带出去" */
-const PRIVATE_MODE_AGENT_BLOCKED = new Set(['screenshot', 'readPage']);
+const PRIVATE_MODE_AGENT_BLOCKED = new Set(['screenshot', 'readPage', 'extractText']);
 async function authorizeAgentAction(action, ctx) {
   const type = action && action.type ? action.type : '';
   const site = (ctx && ctx.site) || '';
@@ -9586,6 +9793,11 @@ async function authorizeAgentAction(action, ctx) {
       reason: '隐私模式下不允许 agent 截图或读取页面内容：它会离开"这一页不留痕"的范围。退出隐私模式再做。',
       rule: 'private-mode',
     };
+  }
+  // 安全审计 P2：`state` 只是"现在是什么模式、开了几个标签"，不读页面内容，
+  // 也就不该被站点授权拦下（否则空白页 / 启动页上 agent 连自己的状态都查不到）。
+  if (type === 'state') {
+    return { decision: 'allow', reason: '只读运行状态，不涉及页面内容', rule: 'state-readonly' };
   }
   // 安全审计 P1-3：navigate 要按「要去的地方」判定，不是按「现在在哪」判定。
   // 以前 authorize 拿到的是当前页 host，于是"在已信任的站点上让 agent 跳到屏蔽站点"

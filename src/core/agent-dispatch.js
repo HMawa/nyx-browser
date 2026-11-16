@@ -86,6 +86,9 @@ const CONFIRM_RULES = {
   },
   settings: {
     required: true,
+    // 只读清单不改任何东西，就没有"确认"的必要——每次读设置都弹一次框，只会训练用户闭眼点确定。
+    // 所以这条规则只在真改的时候成立：有 key+value、有 preset、或要 undo。
+    mutatesOnly: true,
     why: '改设置会影响你之后所有的浏览行为（读写落盘、摘要开关等），必须人工确认后才生效',
   },
   // 安全审计 P1-2：执行脚本能读到这一页的一切（含已登录状态的 DOM 与 cookie 可见部分），
@@ -233,9 +236,22 @@ function describeTarget(type, params) {
   return type === 'state' || type === 'screenshot' || type === 'riskLog' ? '（当前标签）' : '';
 }
 
-function requiresConfirmation(type) {
+/** settings 这类"只在真改时才确认"的动作：只读清单不该弹框 */
+function settingsMutates(params) {
+  // 没带参数就当成"可能要改"——宁可多问一句，也不能让调用方漏传参数就绕过确认
+  if (!params || typeof params !== 'object') return true;
+  const source = params;
+  if (source.undo === true) return true;
+  if (typeof source.preset === 'string' && source.preset) return true;
+  if (typeof source.key === 'string' && source.key) return true;
+  return false;
+}
+
+function requiresConfirmation(type, params) {
   const rule = CONFIRM_RULES[type];
-  return Boolean(rule && rule.required);
+  if (!rule || !rule.required) return false;
+  if (rule.mutatesOnly) return settingsMutates(params);
+  return true;
 }
 
 /** 给 /capabilities 用：每个动作是否强制人工确认 */
@@ -244,6 +260,7 @@ function describeAction(type) {
   return {
     type,
     confirmRequired: Boolean(rule && rule.required),
+    confirmConditional: Boolean(rule && rule.mutatesOnly),
     confirmWhy: rule ? rule.why : '',
   };
 }
@@ -475,7 +492,7 @@ function createDispatcher(options) {
     }
 
     // ③ 需要人工确认就挂起（动作级确认优先于站点白名单，白名单不豁免）
-    const needConfirm = decision.decision === 'confirm' || requiresConfirmation(type);
+    const needConfirm = decision.decision === 'confirm' || requiresConfirmation(type, action && action.params);
     let confirmedBy = '';
     if (needConfirm) {
       if (!confirmChannel) {
