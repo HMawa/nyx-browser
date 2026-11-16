@@ -624,6 +624,24 @@
 
             <section class="info-card">
               <div class="info-head">
+                <h3>设备与站点权限</h3>
+                <span class="badge" id="perm-whitelist-badge">—</span>
+                <div class="info-head-actions">
+                  <button type="button" class="btn btn-mini btn-danger" id="btn-perm-whitelist-clear">清空白名单</button>
+                </div>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  正常模式下，站点申请摄像头、麦克风等本地设备时会先问你：拒绝、仅本次、始终允许。
+                  「始终允许」会写入这份白名单，同一来源、同一设备不再询问；隐私模式一律拒绝，不弹窗、也不看这份名单。
+                </p>
+                <p class="hint" id="perm-whitelist-hint" role="status" aria-live="polite"></p>
+                <div id="perm-whitelist-wrap"></div>
+              </div>
+            </section>
+
+            <section class="info-card">
+              <div class="info-head">
                 <h3>密码与表单记忆</h3>
                 <span class="badge" id="vault-badge">—</span>
                 <div class="info-head-actions">

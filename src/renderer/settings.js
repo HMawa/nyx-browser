@@ -30,6 +30,9 @@
     media: '摄像头 / 麦克风',
     'audioCapture': '麦克风',
     'videoCapture': '摄像头',
+    camera: '摄像头',
+    microphone: '麦克风',
+    screen: '屏幕共享',
     geolocation: '定位',
     notifications: '通知',
     clipboardRead: '读取剪贴板',
@@ -1624,6 +1627,95 @@
     wrap.appendChild(table);
   }
 
+  /**
+   * 站点设备白名单：只读列表 + 逐站点撤销。
+   * 数据来自 nyx:permissions:list 的 whitelist 字段；隐私模式不使用这份名单。
+   */
+  function renderPermissionWhitelist(view) {
+    const badge = byId('perm-whitelist-badge');
+    const hint = byId('perm-whitelist-hint');
+    const wrap = byId('perm-whitelist-wrap');
+    if (!badge || !wrap) return;
+    wrap.textContent = '';
+
+    const entries = (view && Array.isArray(view.whitelist)) ? view.whitelist : [];
+    const error = (view && view.whitelistError) || '';
+    badge.textContent = `白名单 ${entries.length} 个站点`;
+    badge.classList.toggle('bad', Boolean(error));
+
+    if (hint) {
+      hint.textContent = error
+        ? `白名单读写有问题：${error}`
+        : entries.length
+          ? '这些站点在正常模式下不再询问对应设备；撤销后下次访问会重新询问。'
+          : '还没有站点进入白名单。站点选择「始终允许」后会出现在这里。';
+      hint.classList.toggle('warn-text', Boolean(error));
+    }
+
+    if (!entries.length) {
+      const note = document.createElement('p');
+      note.className = 'empty-note';
+      note.textContent = '摄像头、麦克风、屏幕共享等设备的「始终允许」会记录在这份名单里；隐私模式一律拒绝，不读这份名单。';
+      wrap.appendChild(note);
+      return;
+    }
+
+    const table = document.createElement('table');
+    table.className = 'mini-table';
+
+    const head = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    for (const title of ['来源', '允许的设备', '记录时间', '操作']) {
+      const th = document.createElement('th');
+      th.textContent = title;
+      headRow.appendChild(th);
+    }
+    head.appendChild(headRow);
+    table.appendChild(head);
+
+    const body = document.createElement('tbody');
+    for (const item of entries) {
+      const row = document.createElement('tr');
+      const labels = (item.labels && item.labels.length ? item.labels : item.keys || []).join('、');
+
+      const originCell = document.createElement('td');
+      originCell.textContent = item.origin || '—';
+      originCell.className = 'mono';
+      row.appendChild(originCell);
+
+      const labelCell = document.createElement('td');
+      labelCell.textContent = labels || '—';
+      row.appendChild(labelCell);
+
+      const timeCell = document.createElement('td');
+      timeCell.textContent = formatTime(item.at);
+      timeCell.className = 'mono';
+      row.appendChild(timeCell);
+
+      const actionCell = document.createElement('td');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn btn-mini';
+      button.textContent = '撤销';
+      button.addEventListener('click', async () => {
+        if (!window.confirm(`撤销该站点的设备授权？\n\n${item.origin}\n${labels}\n\n下次访问会重新询问。`)) return;
+        const res = await window.nyx.revokePermission(item.origin);
+        if (!res || !res.ok) {
+          setStatus(`撤销失败：${(res && res.error) || '未知原因'}`, true);
+          return;
+        }
+        setStatus(`已撤销 ${item.origin} 的设备授权`);
+        await loadPrivacy();
+      });
+      actionCell.appendChild(button);
+      row.appendChild(actionCell);
+
+      body.appendChild(row);
+    }
+    table.appendChild(body);
+    wrap.appendChild(table);
+  }
+
   function renderVault(entries) {
     const badge = byId('vault-badge');
     const wrap = byId('vault-table-wrap');
@@ -2852,6 +2944,7 @@
 
       renderPrivacy(status);
       renderPermissionDecisions(decisions);
+      renderPermissionWhitelist(decisions);
       renderVault(entries);
 
       // 标记位只在真正拿到数据后置位：中途失败要允许用户重进分区重试
@@ -2887,6 +2980,17 @@
       return;
     }
     setStatus('已清空按站点记住的授权');
+    await loadPrivacy();
+  });
+
+  byId('btn-perm-whitelist-clear').addEventListener('click', async () => {
+    if (!window.confirm('清空站点设备授权白名单？\n\n摄像头、麦克风等设备下次会重新询问；本会话按站点记住的授权也会一并清空。')) return;
+    const res = await window.nyx.clearPermissionWhitelist();
+    if (!res || !res.ok) {
+      setStatus(`清空白名单失败：${(res && res.error) || '未知原因'}`, true);
+      return;
+    }
+    setStatus('已清空站点设备授权白名单');
     await loadPrivacy();
   });
 

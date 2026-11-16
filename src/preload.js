@@ -212,8 +212,15 @@ contextBridge.exposeInMainWorld('nyx', {
   /** 权限决策轨迹（默认最近 50 条） */
   listPermissionDecisions: (limit) => ipcRenderer.invoke('nyx:permissions:list', limit),
 
-  /** 清空"按站点已记住的授权"（只清内存缓存） */
+  /** 清空"按站点已记住的授权"（只清会话缓存，不碰持久白名单） */
   clearPermissionCache: () => ipcRenderer.invoke('nyx:permissions:clear'),
+
+  /** 撤销某个站点的设备白名单；permission 省略表示撤销该站点全部设备 */
+  revokePermission: (origin, permission) =>
+    ipcRenderer.invoke('nyx:permissions:revoke', { origin, permission }),
+
+  /** 清空站点设备授权白名单 */
+  clearPermissionWhitelist: () => ipcRenderer.invoke('nyx:permissions:whitelist-clear'),
 
   /** 密码库统计（不含任何条目内容） */
   getVaultStats: () => ipcRenderer.invoke('nyx:vault:stats'),
