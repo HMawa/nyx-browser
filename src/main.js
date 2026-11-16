@@ -62,6 +62,7 @@ const { PrivacyHardening } = require('./core/privacy-hardening');
 const {
   buildCdpSteps,
   buildHardeningScript,
+  buildWorkerHardeningScript,
   describeSurfaceFailure,
   shouldAttachSurface,
 } = require('./core/privacy-surface');
@@ -1756,7 +1757,10 @@ async function attachPrivacySurface(tab) {
   // （实测 3 秒超时，连带把整条装配链路掐断），所以不能指望它在导航前注册成功。
   // 可靠的路子是在文档就绪后把同一条脚本直接打进主世界，并当场核对标记。
   // 代价写在台账里：第一个文档的补丁是"文档就绪之后"打上的；从第二次导航起才在文档开始时就生效。
-  wc.once('dom-ready', () => {
+  // 用 on 而不是 once：首个 dom-ready 可能落在 about:blank 这种空文档上（
+  // 实测就是这样——补打打进了空文档，紧接着真正的页面加载把它整个换掉，
+  // 页面里 window.__nyxSurface 又变成 null）。每次文档就绪都补一次，脚本自己幂等。
+  wc.on('dom-ready', () => {
     applySurfaceToCurrentDocument(tab, profile).catch((err) => {
       console.warn('[Nyx] 隐私指纹面补打失败：', err && err.message);
     });
@@ -1790,6 +1794,39 @@ async function attachPrivacySurface(tab) {
       console.warn(`[Nyx] 指纹面下发 ${step.method} 失败：${message}`);
       diagnostics.warn('PRIVACY_SURFACE_STEP_FAILED', message, { tabId: tab.id, step: step.method });
     }
+  }
+
+  // 4) Worker：Page.addScriptToEvaluateOnNewDocument 只管文档，管不到 Worker 上下文
+  //    （对抗测试 P0 实测：同一页主世界 en-US、Worker 里 zh-CN + 24 核）。
+  //    这里用 Target.setAutoAttach 把 worker 目标在"开跑之前"拦住，先把 worker 版脚本
+  //    evaluate 进去，再 runIfWaitingForDebugger 放行。拦不住也必须有痕迹（红线 2）。
+  try {
+    const workerSource = buildWorkerHardeningScript(profile);
+    wc.debugger.on('message', (event, method, params, sessionId) => {
+      if (method !== 'Target.attachedToTarget') return;
+      const info = (params && params.targetInfo) || {};
+      const kind = String(info.type || '');
+      const session = (params && params.sessionId) || sessionId;
+      if (kind !== 'worker' || !session) return;
+      wc.debugger
+        .sendCommand('Runtime.evaluate', { expression: workerSource, includeCommandLineAPI: false }, session)
+        .catch((err) => {
+          diagnostics.warn('PRIVACY_WORKER_INJECT_FAILED', 'Worker 里的指纹补丁没打进去', {
+            tabId: tab.id,
+            error: String((err && err.message) || err),
+          });
+        });
+      wc.debugger.sendCommand('Runtime.runIfWaitingForDebugger', {}, session).catch(() => {});
+    });
+    await wc.debugger.sendCommand('Target.setAutoAttach', {
+      autoAttach: true,
+      waitForDebuggerOnStart: true,
+      flatten: true,
+    });
+  } catch (err) {
+    const message = `隐私模式没能接管 Worker 上下文（${(err && err.message) || err}）：网页里由后台线程读到的语言/时区/核数可能仍是本机的。`;
+    console.warn('[Nyx] 指纹面 Worker 接管失败：', message);
+    diagnostics.warn('PRIVACY_WORKER_ATTACH_FAILED', message, { tabId: tab.id });
   }
 
   tab.privacyIncomplete = false;

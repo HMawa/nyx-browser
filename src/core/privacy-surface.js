@@ -360,10 +360,95 @@ function describeSurfaceFailure(step, error) {
   return `隐私模式加固没做完（${stage || '未知环节'}：${reason}）：这一页的指纹可能不完整。`;
 }
 
+/**
+ * Worker 版的加固脚本（对抗测试 P0：Worker 里读到的是真实值）。
+ *
+ * 为什么必须单独一份：`Page.addScriptToEvaluateOnNewDocument` 只作用于**文档**（含 iframe），
+ * 不进入 Worker / ServiceWorker；`Emulation.setTimezoneOverride` 也不跨 worker 目标。
+ * 实测同一页三处不一致：主世界 en-US/Win32、Worker zh-CN/Win32（真值）、iframe en-US/Win32。
+ * Worker 里没有 document / window，只有 self，所以这里只碰 navigator、Date、Intl、OffscreenCanvas。
+ * 同样的原则：失败不抛到页面，各处 try/catch。
+ */
+function buildWorkerHardeningScript(profile) {
+  const source = profile || {};
+  const payload = {
+    version: SURFACE_SCRIPT_VERSION,
+    seed: String(source.seed || 'nyx'),
+    ua: String(source.ua || ''),
+    platform: String(source.navigatorPlatform || source.platform || 'Win32'),
+    language: String(source.language || 'en-US'),
+    languages: Array.isArray(source.languages) ? source.languages.slice(0, 8) : [],
+    // 与主世界保持同一套默认值：画像里没有这两个字段时主世界用 8，Worker 也必须用 8，
+    // 否则同一页主世界 8 核、Worker 24 核，等于自己把矛盾暴露出来（实测踩过）。
+    cores: Number.isFinite(source.hardwareConcurrency) ? source.hardwareConcurrency : 8,
+    memory: Number.isFinite(source.deviceMemory) ? source.deviceMemory : 8,
+    timezone: String(source.timezone || ''),
+  };
+  return `(function () {
+  try {
+    var CFG = ${JSON.stringify(payload)};
+    var scope = typeof self !== 'undefined' ? self : this;
+    var nav = scope.navigator;
+    if (nav) {
+      var def = function (name, value) {
+        try { Object.defineProperty(nav, name, { get: function () { return value; }, configurable: true }); } catch (e) {}
+      };
+      if (CFG.ua) def('userAgent', CFG.ua);
+      def('appVersion', String(CFG.ua || '').replace(/^Mozilla\\//, ''));
+      def('platform', CFG.platform);
+      def('language', CFG.language);
+      if (CFG.languages.length) {
+        var langs = CFG.languages.slice();
+        try { Object.freeze(langs); } catch (e) {}
+        def('languages', langs);
+      }
+      if (CFG.cores > 0) def('hardwareConcurrency', CFG.cores);
+      if (CFG.memory > 0) def('deviceMemory', CFG.memory);
+      def('webdriver', false);
+    }
+    if (CFG.timezone) {
+      try {
+        var fmt = Intl.DateTimeFormat;
+        var origFormat = fmt.prototype.resolvedOptions;
+        fmt.prototype.resolvedOptions = function () {
+          var out = origFormat.call(this);
+          out.timeZone = CFG.timezone;
+          return out;
+        };
+        var origOffset = Date.prototype.getTimezoneOffset;
+        var probe = new Date(2020, 0, 1);
+        var probeText = probe.toLocaleString('en-US', { timeZone: CFG.timezone });
+        var parsed = Date.parse(probeText);
+        var offset = Math.round(((parsed ? probe.getTime() - parsed : 0) / 60000));
+        Date.prototype.getTimezoneOffset = function () { return offset; };
+        if (typeof origOffset !== 'function') { /* 只作可读性 */ }
+      } catch (e) {}
+    }
+    try {
+      if (typeof OffscreenCanvasRenderingContext2D !== 'undefined') {
+        var origGet = OffscreenCanvasRenderingContext2D.prototype.getImageData;
+        OffscreenCanvasRenderingContext2D.prototype.getImageData = function () {
+          var out = origGet.apply(this, arguments);
+          var data = out && out.data;
+          if (data && data.length) {
+            for (var i = 0; i < data.length; i += 4) {
+              data[i] = Math.max(0, Math.min(255, data[i] + ((i % 3) - 1)));
+            }
+          }
+          return out;
+        };
+      }
+    } catch (e) {}
+    scope.__nyxSurface = CFG.version;
+  } catch (err) { /* worker 里也不许把页面搞崩 */ }
+})();`;
+}
+
 module.exports = {
   SURFACE_SCRIPT_VERSION,
   buildCdpSteps,
   buildHardeningScript,
+  buildWorkerHardeningScript,
   describeSurfaceFailure,
   shouldAttachSurface,
 };

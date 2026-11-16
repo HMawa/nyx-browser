@@ -290,8 +290,12 @@ check('隐私模式没有 profile 时明确拒绝装配（不假装成功）', /
 /* ⑨ 对抗测试 N1 的现场教训：CDP 命令"全部成功、页面里一条都没生效" */
 check(
   '文档就绪后补打一次，并当场核对 window.__nyxSurface（不是发完命令就算完）',
-  /wc\.once\('dom-ready'[\s\S]{0,160}applySurfaceToCurrentDocument\(tab, profile\)/.test(main) &&
+  /wc\.on\('dom-ready'[\s\S]{0,200}applySurfaceToCurrentDocument\(tab, profile\)/.test(main) &&
     /window\.__nyxSurface \|\| null/.test(main),
+);
+check(
+  '每次文档就绪都补打（不是 once）——首个 dom-ready 可能落在空文档上，用 once 会把补丁打空',
+  /wc\.on\('dom-ready'/.test(main) && !/wc\.once\('dom-ready'/.test(main),
 );
 check(
   '补打没生效就报 PRIVACY_SURFACE_NOT_APPLIED 并给前台提示',
@@ -307,6 +311,56 @@ check(
   /PRIVACY_SURFACE_STEP_FAILED/.test(main) && !/return fail\(describeSurfaceFailure\('send', err\)\)/.test(main),
 );
 
+/* ⑧ Worker 上下文：Page.addScriptToEvaluateOnNewDocument 管不到它（对抗测试 P0） */
+const WORKER_PREAMBLE = `
+globalThis.self = globalThis;
+class WorkerNavigator {}
+Object.defineProperty(WorkerNavigator.prototype, 'userAgent', { get: () => 'Nyx/1.17.12 Electron/45.3.2 Chrome/156', configurable: true });
+Object.defineProperty(WorkerNavigator.prototype, 'platform', { get: () => 'Win32-real', configurable: true });
+Object.defineProperty(WorkerNavigator.prototype, 'language', { get: () => 'zh-CN', configurable: true });
+Object.defineProperty(WorkerNavigator.prototype, 'languages', { get: () => ['zh-CN', 'zh'], configurable: true });
+Object.defineProperty(WorkerNavigator.prototype, 'hardwareConcurrency', { get: () => 24, configurable: true });
+Object.defineProperty(WorkerNavigator.prototype, 'deviceMemory', { get: () => 16, configurable: true });
+globalThis.navigator = new WorkerNavigator();
+`;
+const workerScript = surface.buildWorkerHardeningScript(PROFILE);
+let workerCompiles = true;
+try {
+  new vm.Script(workerScript);
+} catch {
+  workerCompiles = false;
+}
+check('Worker 版加固脚本可以编译', workerCompiles);
+check(
+  'Worker 版脚本不碰 document / window（Worker 里没有这两样，用了就会整段抛掉）',
+  !/\bdocument\./.test(workerScript) && !/\bwindow\./.test(workerScript),
+);
+const workerContext = vm.createContext({ console: { log() {}, warn() {}, error() {} } });
+vm.runInContext(WORKER_PREAMBLE, workerContext, { timeout: 5000 });
+vm.runInContext(workerScript, workerContext, { timeout: 5000 });
+const workerRead = (code) => vm.runInContext(code, workerContext, { timeout: 5000 });
+check('Worker 里的语言与主世界同源（不再是本机的 zh-CN）', workerRead('navigator.language') === 'en-US', String(workerRead('navigator.language')));
+check('Worker 里的平台与主世界同源', workerRead('navigator.platform') === 'Win32', String(workerRead('navigator.platform')));
+check(
+  'Worker 里的核数/内存与主世界同为画像值（不能一边画像值、一边真值）',
+  workerRead('navigator.hardwareConcurrency') === world.eval('navigator.hardwareConcurrency') &&
+    workerRead('navigator.deviceMemory') === world.eval('navigator.deviceMemory'),
+  `worker ${workerRead('navigator.hardwareConcurrency')}/${workerRead('navigator.deviceMemory')} vs 主世界 ${world.eval('navigator.hardwareConcurrency')}/${world.eval('navigator.deviceMemory')}`,
+);
+check(
+  'Worker 里也留下了版本标记（说明补丁真的跑进去了）',
+  workerRead('self.__nyxSurface') === surface.SURFACE_SCRIPT_VERSION,
+  String(workerRead('self.__nyxSurface')),
+);
+check(
+  '主进程用 Target.setAutoAttach 拦住 worker 再放行，失败要留痕',
+  /buildWorkerHardeningScript/.test(main) &&
+    /Target\.setAutoAttach/.test(main) &&
+    /waitForDebuggerOnStart: true/.test(main) &&
+    /Target\.attachedToTarget/.test(main) &&
+    /Runtime\.runIfWaitingForDebugger/.test(main) &&
+    /PRIVACY_WORKER_ATTACH_FAILED/.test(main),
+);
 console.log('');
 console.log(`隐私指纹面回归：通过 ${passed} 项，失败 ${failed} 项`);
 if (failed > 0) {
