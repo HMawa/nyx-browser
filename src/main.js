@@ -244,6 +244,13 @@ const {
 
 // 夜间安装器 e2e 的最近一次结果（第八轮 ③）：结果文件 → 中文结论
 const { describeNightlyStatus } = require('./core/nightly-status');
+const {
+  EGRESS_UNKNOWN_TTL_MS,
+  PROXY_PROBE_TTL_MS,
+  describeTiming,
+  readTimed,
+  writeTimed,
+} = require('./core/switch-cache');
 const NIGHTLY_STATUS_FILE = 'nightly-e2e.json';
 
 // 夜间计划任务（第九轮 ②，界面入口）：参数怎么拼、输出怎么读只留一份纯逻辑在 core 里，
@@ -603,6 +610,12 @@ const runtime = {
    * 链路本身以 sessions.getLink() 为准，这里只放"探测结论"，避免两份链路状态打架。
    */
   network: { proxyReachable: null, checkedAt: 0, note: '' },
+  /**
+   * 切换模式的短时缓存（见 src/core/switch-cache.js）：
+   *   proxy        —— 30 秒内复用"代理可达吗"的结论；
+   *   egressUnknown —— 60 秒内复用"出口自查取不到"这个结论（失败那一次最贵，要等满 6 秒）。
+   */
+  switchCache: { proxy: null, egressUnknown: null },
   /** 普通模式链路复核定时器 */
   linkTimer: null,
   /** 代理失效降级是否正在处理（防重入：一次加载失败可能牵出多个错误码） */
@@ -1654,6 +1667,23 @@ async function resolveEgressForProfile() {
   const service = runtime.proxyService;
   if (!service) return { egress: null, egressUnknown: true, error: '代理服务未就绪' };
 
+  // "取不到出口"这个结论也缓存 60 秒：最贵的不是成功那次，而是失败那次——
+  // 出口自查超时要等满 6 秒，连着切两次就是 12 秒，而结论通常不会在两分钟内变好。
+  const unknownCache = runtime.switchCache && runtime.switchCache.egressUnknown;
+  if (unknownCache) {
+    const hit = readTimed(unknownCache, Date.now(), EGRESS_UNKNOWN_TTL_MS);
+    if (hit.hit) {
+      return {
+        egress: null,
+        egressUnknown: true,
+        reused: true,
+        error: `${hit.value || '出口自查没有取到'}（${Math.round(hit.ageMs / 1000)} 秒前刚试过，${Math.round(
+          EGRESS_UNKNOWN_TTL_MS / 1000,
+        )} 秒内不重复等）`,
+      };
+    }
+  }
+
   const cached = service.egressProfile();
   if (cached && cached.ip && cached.checkedAt && Date.now() - cached.checkedAt < EGRESS_CACHE_TTL_MS) {
     return { egress: cached, egressUnknown: false, reused: true };
@@ -1670,12 +1700,15 @@ async function resolveEgressForProfile() {
 
     const profile = service.egressProfile();
     if (profile && profile.ip) return { egress: profile, egressUnknown: false, reused: false };
+    const reason = fresh && fresh.error ? fresh.error : `出口自查超时（${EGRESS_MAX_WAIT_MS}ms）`;
+    if (runtime.switchCache) runtime.switchCache.egressUnknown = writeTimed(reason, Date.now());
     return {
       egress: null,
       egressUnknown: true,
-      error: fresh && fresh.error ? fresh.error : `出口自查超时（${EGRESS_MAX_WAIT_MS}ms）`,
+      error: reason,
     };
   } catch (err) {
+    if (runtime.switchCache) runtime.switchCache.egressUnknown = writeTimed(err.message, Date.now());
     return { egress: null, egressUnknown: true, error: err.message };
   }
 }
@@ -3466,6 +3499,34 @@ function openInNewTab(url) {
 /* ------------------------------------------------------------------ */
 
 /**
+ * 带缓存的代理可达性探测：30 秒内复用上一次结论。
+ *
+ * 为什么可以复用：切换模式时探一次 TCP 的用途只是"这次能不能走代理"，
+ * 30 秒内同一台机器的同一个端口不会自己变；用户在这 30 秒里把代理关掉，
+ * 最坏结果是这一次切换按"可达"进去、页面自己报连不上（日志会写清是复用的）。
+ *
+ * @param {{host?:string, port?:number, timeout?:number, force?:boolean}} [options]
+ * @returns {Promise<{reachable:boolean, host:string, port:number, latencyMs:number, error:null|string, reused?:boolean}>}
+ */
+async function probeProxyCached(options = {}) {
+  const host = options.host || sessions.PROXY_HOST;
+  const port = options.port || sessions.getProxyPort();
+  const key = `${host}:${port}`;
+  const cached = runtime.switchCache && runtime.switchCache.proxy;
+  if (!options.force && cached && cached.value && cached.value.key === key) {
+    const hit = readTimed(cached, Date.now(), PROXY_PROBE_TTL_MS);
+    if (hit.hit) {
+      return { ...hit.value.probe, reused: true };
+    }
+  }
+  const probe = await isProxyReachable(options);
+  if (runtime.switchCache) {
+    runtime.switchCache.proxy = writeTimed({ key, probe }, Date.now());
+  }
+  return probe;
+}
+
+/**
  * 探测本机代理端口是否可达（纯 TCP 连接探测，不发起任何 HTTP 请求）。
  *
  * @param {{host?:string, port?:number, timeout?:number}} [options]
@@ -3612,6 +3673,17 @@ async function switchMode(mode) {
   /** 切回普通模式时预判出的链路（proxy / direct），在模式落定后统一应用 */
   let normalLinkOnEnter = null;
 
+  // 切换耗时记账：每一步都记下来，最后拼成一句话写进日志与诊断。
+  // 目的不是好看，而是"下次说切换慢"时能直接指到是哪一步慢（报告里实测约 8 秒）。
+  const switchT0 = Date.now();
+  const switchSteps = [];
+  const trackStep = async (stepName, run) => {
+    const started = Date.now();
+    const value = await run();
+    switchSteps.push({ step: stepName, ms: Date.now() - started });
+    return value;
+  };
+
   if (next === current) {
     return { ok: true, state: currentSnapshot() };
   }
@@ -3711,7 +3783,9 @@ async function switchMode(mode) {
       // 隐私必须经代理：内核没跑且用户允许自启时，先按需拉起，避免"内核没开所以进不去"
       await ensureProxyKernelForPrivate();
 
-      const probe = recordProbe(await isProxyReachable());
+      let probeStarted = Date.now();
+      const probe = recordProbe(await probeProxyCached());
+      switchSteps.push({ step: '探代理', ms: Date.now() - probeStarted, reused: Boolean(probe.reused) });
 
       if (!probe.reachable) {
         const notice = buildProxyBlockedNotice(probe);
@@ -3751,7 +3825,9 @@ async function switchMode(mode) {
     }
   } else {
     // 切回普通模式：不做拦截，只重探一次决定走代理还是直连
-    const probe = recordProbe(await isProxyReachable());
+    const probeStarted = Date.now();
+    const probe = recordProbe(await probeProxyCached());
+    switchSteps.push({ step: '探代理', ms: Date.now() - probeStarted, reused: Boolean(probe.reused) });
     normalLinkOnEnter = probe.reachable ? 'proxy' : 'direct';
     console.log(
       `[Nyx] 切回普通模式｜出站链路预判：${
@@ -3764,7 +3840,9 @@ async function switchMode(mode) {
   closeAddressSuggest();
 
   // 1. 关闭所有标签（它们的 session 即将失效）
-  if (runtime.tabManager) runtime.tabManager.closeAll();
+  await trackStep('关旧标签', async () => {
+    if (runtime.tabManager) runtime.tabManager.closeAll();
+  });
 
   // 2. 切换模式并记录，供下次启动恢复
   sessions.setMode(next);
@@ -3794,7 +3872,7 @@ async function switchMode(mode) {
   //     必须落在"重建标签"之前：标签创建时就要带上当前模式的 preload 参数与
   //     WebRTC 策略，晚一步首个标签就会跑在上一轮的 profile 上（等于用旧指纹上站）。
   if (next === 'private') {
-    const applied = await applyPrivacyHardening();
+    const applied = await trackStep('装配加固', applyPrivacyHardening);
 
     if (!applied.ok) {
       // 装配不出 profile 就不进隐私模式：硬着头皮进去等于没穿衣服上站。
@@ -3838,9 +3916,19 @@ async function switchMode(mode) {
   }
 
   // 4. 在新模式下重建标签
-  if (runtime.tabManager) runtime.tabManager.create(HOME_URL);
+  await trackStep('建新标签', async () => {
+    if (runtime.tabManager) runtime.tabManager.create(HOME_URL);
+  });
 
-  return { ok: true, state: currentSnapshot() };
+  const timing = describeTiming(switchSteps, Date.now() - switchT0);
+  console.log(`[Nyx] 模式切换完成｜${next === 'private' ? '隐私' : '普通'}模式｜${timing.text}`);
+  diagnostics.info('MODE_SWITCH_TIMING', timing.text, {
+    from: current,
+    to: next,
+    totalMs: timing.totalMs,
+    steps: switchSteps,
+  });
+  return { ok: true, state: currentSnapshot(), timing };
 }
 
 /**
