@@ -116,6 +116,11 @@ class Cdp {
   }
 
   async eval(expression) {
+    // 排障用：Nyx_UI_TRACE=1 时把每条表达式的前 80 字符打出来，
+    // 这样超时的时候能一眼看出卡在哪一句（默认不打印，别把输出刷爆）。
+    if (process.env.NYX_UI_TRACE === '1') {
+      console.log('[trace] eval→', String(expression).replace(/\s+/g, ' ').slice(0, 80));
+    }
     const result = await this.send('Runtime.evaluate', {
       expression,
       awaitPromise: true,

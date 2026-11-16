@@ -76,13 +76,16 @@ check(
 
 // 3. 隐私模式拦 agent 读页面
 const mainSrc = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
+const privateBlockedSet = mainSrc.match(/const PRIVATE_MODE_AGENT_BLOCKED = new Set\(\[([^\]]*)\]\)/);
 check(
   '隐私模式下 agent 的截图与读页面被直接拒绝，并说清"退出隐私模式再做"（P2）',
-  /const PRIVATE_MODE_AGENT_BLOCKED = new Set\(\['screenshot', 'readPage'\]\)/.test(mainSrc) &&
+  !!privateBlockedSet &&
+    /'screenshot'/.test(privateBlockedSet[1]) &&
+    /'readPage'/.test(privateBlockedSet[1]) &&
     /PRIVATE_MODE_AGENT_BLOCKED\.has\(type\) && sessions\.getMode\(\) === 'private'/.test(mainSrc) &&
     /rule: 'private-mode'/.test(mainSrc) &&
     /退出隐私模式再做/.test(mainSrc),
-  JSON.stringify({ blocked: true }),
+  JSON.stringify({ blocked: true, set: privateBlockedSet ? privateBlockedSet[1].trim() : null }),
 );
 
 // 4. 接线守卫
