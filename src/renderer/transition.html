@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: file:"
+    />
+    <title>Nyx · 切换</title>
+    <link rel="stylesheet" href="transition.css" />
+  </head>
+  <body>
+    <!-- 这个窗口只画一次动画，不接受任何输入：没有按钮、没有键盘焦点 -->
+    <canvas id="stage" width="1" height="1"></canvas>
+    <div id="enter"></div>
+    <div id="exit" aria-hidden="true"><img id="bucket" alt="" /></div>
+    <script src="transition.js"></script>
+  </body>
+</html>

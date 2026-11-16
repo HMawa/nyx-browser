@@ -1391,6 +1391,7 @@
     byId('pref-show-mode-switch').checked = uiPrefs.showModeSwitch !== false;
     if (byId('pref-toolbar-labels')) byId('pref-toolbar-labels').checked = uiPrefs.toolbarLabels !== false;
     if (byId('pref-motion-level')) byId('pref-motion-level').value = uiPrefs.motionLevel === 'lively' ? 'lively' : 'calm';
+  if (byId('pref-mode-transition')) byId('pref-mode-transition').checked = uiPrefs.modeTransition !== false;
     applySettingsMotion(uiPrefs);
     // 主题回填 + 设置窗口自身立即换肤（主窗口由主进程 pushState 同步）
     byId('pref-theme').value = uiPrefs.theme || 'ink';
@@ -1488,6 +1489,13 @@
   if (byId('pref-motion-level')) {
     byId('pref-motion-level').addEventListener('change', (event) => {
       saveUiPref('motionLevel', event.target.value === 'lively' ? 'lively' : 'calm');
+    });
+  }
+
+  // 模式切换动画开关：关掉就是"瞬时切换"，切换逻辑本身完全不变
+  if (byId('pref-mode-transition')) {
+    byId('pref-mode-transition').addEventListener('change', (event) => {
+      saveUiPref('modeTransition', event.target.checked);
     });
   }
 

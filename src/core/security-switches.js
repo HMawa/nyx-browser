@@ -97,6 +97,15 @@ const WINDOW_ROLES = [
     why: '为了和被测外壳同构（sandbox:false），否则演示的结论不适用于真实外壳；用完立刻销毁。',
   },
   {
+    role: 'transition',
+    label: '模式切换动画窗口',
+    preload: '（无 preload：这个窗口不暴露任何接口）',
+    expect: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+    why:
+      '透明无边框子窗口，只画一次动画（像素扩散 / 牛奶桶），不加载任何远端内容、不持有任何 IPC 通道；' +
+      '没有 preload 也不可交互（setIgnoreMouseEvents + focusable:false），调用方按尺寸盖在主窗口上，用完立刻销毁。',
+  },
+  {
     role: 'onboarding',
     label: '首次安装引导窗口',
     preload: 'src/preload.js',

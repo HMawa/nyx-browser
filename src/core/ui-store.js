@@ -27,6 +27,11 @@ const UI_PREF_DEFAULTS = {
    * 只影响小按钮的过渡与按压缩放；系统开了「减少动效」时一律降到最短，不看这个值。
    */
   motionLevel: 'calm',
+  /**
+   * 模式切换动画（用户要求做成可关）：默认开。
+   * 关掉之后切换是瞬时的——有人嫌动画碍事，也有人机器带不动透明窗口，这是他们该有的开关。
+   */
+  modeTransition: true,
   /** 界面主题：ink 墨夜 / aurora 极光 / paper 素纸 / quiet 静谧 / cream 奶白 / sea 海盐 */
   theme: 'ink',
   /** 下载保存目录；空字符串 = 跟随系统下载目录 */

@@ -1,0 +1,66 @@
+/* 模式切换动画窗口的样式。
+   这个窗口只画一次动画、不接受输入，所以这里不引主题令牌：
+   它盖在整屏之上，用固定深色（与墨夜同值）才不会在浅色主题下露出边缘光。 */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  cursor: default;
+  user-select: none;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  display: block;
+}
+
+#enter {
+  position: fixed;
+  inset: 0;
+  background: #07090a;
+  opacity: 0;
+  transition: opacity 120ms linear;
+}
+
+#exit {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(7, 9, 10, 0);
+  opacity: 0;
+  transition: background 180ms ease, opacity 120ms linear;
+}
+
+#exit.on {
+  opacity: 1;
+  background: rgba(7, 9, 10, 0.92);
+}
+
+#bucket {
+  width: 34vmin;
+  height: 34vmin;
+  image-rendering: pixelated;
+  transform: scale(0.6) rotate(-8deg);
+  transition: transform 180ms cubic-bezier(0.2, 0.9, 0.2, 1);
+  filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.55));
+}
+
+#bucket.pop {
+  transform: scale(1) rotate(0deg);
+}
+
+/* 系统开了「减少动效」：一律只做最短的一次淡出，不做扩散与弹跳 */
+@media (prefers-reduced-motion: reduce) {
+  #enter,
+  #exit,
+  #bucket {
+    transition: none !important;
+  }
+}

@@ -3651,6 +3651,117 @@ function currentSnapshot() {
 }
 
 /**
+ * 模式切换动画窗口：一个盖在主窗口上的透明子窗口。
+ *
+ * 为什么必须是独立窗口：页面内容是 WebContentsView，原生视图永远画在外壳 DOM 之上，
+ * 在外壳里做全屏动画会被视图盖住（「更多」菜单那次就是这个坑）。
+ *
+ * 这个窗口不加载任何远端内容、不注入 preload、不接受鼠标与键盘（focusable:false +
+ * setIgnoreMouseEvents），画完由主进程按 duration 收掉；失败只留诊断，绝不影响切换本身。
+ */
+let transitionWindow = null;
+let transitionTimer = null;
+
+/** 进 / 出两个动画的时长（毫秒）：扩散稍长，牛奶桶稍短 */
+const TRANSITION_ENTER_MS = 820;
+const TRANSITION_EXIT_MS = 620;
+
+function modeTransitionEnabled() {
+  if (!runtime.uiStore) return true;
+  return runtime.uiStore.get().modeTransition !== false;
+}
+
+function closeModeTransition() {
+  if (transitionTimer) {
+    clearTimeout(transitionTimer);
+    transitionTimer = null;
+  }
+  const win = transitionWindow;
+  transitionWindow = null;
+  if (!win) return;
+  try {
+    if (!win.isDestroyed()) win.destroy();
+  } catch {
+    /* 忽略：已经没了 */
+  }
+}
+
+/**
+ * 显示一次切换动画。
+ * @param {'enter'|'exit'} kind enter＝像素感染（进隐私），exit＝牛奶桶（回普通）
+ */
+function showModeTransition(kind) {
+  if (!modeTransitionEnabled()) return;
+  const parentWindow = runtime.mainWindow;
+  if (!parentWindow || parentWindow.isDestroyed()) return;
+  if (!parentWindow.isVisible()) return;
+
+  closeModeTransition();
+
+  const duration = kind === 'exit' ? TRANSITION_EXIT_MS : TRANSITION_ENTER_MS;
+  const bounds = parentWindow.getBounds();
+  const prefs = {
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+    spellcheck: false,
+  };
+  registerSecurityWindow('transition', prefs);
+
+  try {
+    const win = new BrowserWindow({
+      parent: parentWindow,
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      frame: false,
+      transparent: true,
+      backgroundColor: '#00000000',
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      focusable: false,
+      hasShadow: false,
+      show: false,
+      webPreferences: prefs,
+    });
+    transitionWindow = win;
+    win.setIgnoreMouseEvents(true, { forward: false });
+    win.once('ready-to-show', () => {
+      if (win.isDestroyed()) return;
+      // showInactive：绝不能把焦点从地址栏抢走（与建议浮层同一套理由）
+      win.showInactive();
+    });
+    win.on('closed', () => {
+      if (transitionWindow === win) transitionWindow = null;
+    });
+
+    const bucket = pathToFileURL(path.join(__dirname, 'renderer', 'assets', 'milk-bucket.webp')).href;
+    const query = { kind, duration: String(duration), bucket };
+
+    win.loadFile(path.join(__dirname, 'renderer', 'transition.html'), { query }).catch((err) => {
+      diagnostics.warn('MODE_TRANSITION_FAILED', '切换动画没能显示（不影响切换本身）', {
+        error: err && err.message,
+      });
+      closeModeTransition();
+    });
+
+    // 兜底：页面自己不会关窗口，到点由主进程收；多给 420ms 让最后一帧画完
+    transitionTimer = setTimeout(closeModeTransition, duration + 420);
+    if (typeof transitionTimer.unref === 'function') transitionTimer.unref();
+  } catch (err) {
+    transitionWindow = null;
+    diagnostics.warn('MODE_TRANSITION_FAILED', '切换动画没能显示（不影响切换本身）', {
+      error: err && err.message,
+    });
+  }
+}
+
+/**
  * 切换普通 / 隐私模式。
  *
  * 隐私模式强制走代理，"进入隐私模式"因此是一次带前置校验的操作：
@@ -3838,6 +3949,12 @@ async function switchMode(mode) {
 
   // 0. 收起地址栏建议浮层：模式一旦切换，历史建议的可用性随之改变（隐私模式不出建议）
   closeAddressSuggest();
+
+  // 0.5 切换动画：校验全部通过、真的要动了才开始画。
+  //     进隐私＝像素感染（盖住等待过程），回普通＝牛奶桶（盖住解冻与挂回）。
+  //     关掉动画的人在设置里关，这里就不起窗口——切换本身完全不受影响。
+  if (next === 'private') showModeTransition('enter');
+  else if (current === 'private') showModeTransition('exit');
 
   // 1. 停靠（而不是销毁）现有标签。旧视图的 session 即将失效，不能再留在窗口上；
   //    但用户正在填的表单、滚到一半的长文都挂在那个 WebContents 里，一并 close 就没了。
