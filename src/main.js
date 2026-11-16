@@ -3839,9 +3839,13 @@ async function switchMode(mode) {
   // 0. 收起地址栏建议浮层：模式一旦切换，历史建议的可用性随之改变（隐私模式不出建议）
   closeAddressSuggest();
 
-  // 1. 关闭所有标签（它们的 session 即将失效）
-  await trackStep('关旧标签', async () => {
-    if (runtime.tabManager) runtime.tabManager.closeAll();
+  // 1. 停靠（而不是销毁）现有标签。旧视图的 session 即将失效，不能再留在窗口上；
+  //    但用户正在填的表单、滚到一半的长文都挂在那个 WebContents 里，一并 close 就没了。
+  const parked = await trackStep('停靠旧标签', async () => {
+    if (!runtime.tabManager || typeof runtime.tabManager.parkAll !== 'function') {
+      return { parked: 0, dropped: 0, droppedUrls: [] };
+    }
+    return runtime.tabManager.parkAll();
   });
 
   // 2. 切换模式并记录，供下次启动恢复
@@ -3915,10 +3919,34 @@ async function switchMode(mode) {
     resetPrivacyHardening();
   }
 
-  // 4. 在新模式下重建标签
-  await trackStep('建新标签', async () => {
-    if (runtime.tabManager) runtime.tabManager.create(HOME_URL);
+  // 4. 回到普通模式时先把停靠的标签挂回来（页面状态还在），没有可挂的才开新标签；
+  //    进隐私模式则老老实实开一个隐私标签（停靠着的普通标签继续躺着，联网但不走代理）。
+  const restored = await trackStep('挂回/建标签', async () => {
+    if (!runtime.tabManager) return { restored: 0 };
+    if (next === 'normal' && typeof runtime.tabManager.restoreParked === 'function') {
+      const result = runtime.tabManager.restoreParked();
+      if (result.restored > 0) return result;
+    }
+    runtime.tabManager.create(HOME_URL);
+    return { restored: 0 };
   });
+
+  // 超出预算被降级的标签必须让用户知道：页面状态确实丢了，不能装没事。
+  if (parked && parked.dropped > 0) {
+    notifyNotice({
+      level: 'warn',
+      code: 'TABS_DROPPED_ON_SWITCH',
+      title: `有 ${parked.dropped} 个标签没能保住页面状态`,
+      message:
+        `切模式时最多保住 ${runtime.tabManager ? runtime.tabManager.maxParked || 12 : 12} 个标签的页面状态，` +
+        '超出的这几个只会记住地址，恢复时需要重新打开（填写的内容与滚动位置会丢）。',
+    });
+    diagnostics.warn('TABS_DROPPED_ON_SWITCH', '切模式时部分标签只记住了地址', {
+      dropped: parked.dropped,
+      kept: parked.parked,
+      urls: (parked.droppedUrls || []).slice(0, 10),
+    });
+  }
 
   const timing = describeTiming(switchSteps, Date.now() - switchT0);
   console.log(`[Nyx] 模式切换完成｜${next === 'private' ? '隐私' : '普通'}模式｜${timing.text}`);

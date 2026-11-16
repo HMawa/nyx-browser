@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把四十一个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把四十二个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
@@ -45,6 +45,7 @@
  * 39. scripts/verify-audit-p2.js（安全审计 P2 批次：隐私模式 agent 内容边界、state 只读豁免、截图重试、密码框 name 抹除、limits 传参、设置只读不确认、MCP 参数转发，14 项；纯 Node，不启动 Electron）
  * 40. scripts/verify-permissions.js（站点设备授权白名单：设备项拆分、来源只收 http(s)、三档授权、隐私模式封死、撤销/清空与接线，22 项；纯 Node，不启动 Electron）
  * 41. scripts/verify-switch-cache.js（模式切换缓存：代理可达 30 秒、出口取不到 60 秒内复用、时钟回拨不认、计时文案点名最慢一步，以及主进程真的接上了，21 项；纯 Node，不启动 Electron）
+ * 42. scripts/verify-tab-park.js（标签停靠：切模式不再销毁标签、视图摘下但不关页面、恢复按原顺序挂回、超出 12 个降级成只记地址并当面告知，12 项；纯 Node，不启动 Electron）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -325,6 +326,12 @@ const STEPS = [
     label: '模式切换缓存回归',
     script: 'verify-switch-cache.js',
     items: '21 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '标签停靠回归',
+    script: 'verify-tab-park.js',
+    items: '12 项',
     timeoutMs: 60000,
   },
 ];

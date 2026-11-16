@@ -184,6 +184,13 @@ class TabManager {
     /** @type {Array<{id:number, view:Electron.WebContentsView, url:string, title:string, loading:boolean, canGoBack:boolean, canGoForward:boolean}>} */
     this.tabs = [];
     this.activeId = null;
+    /**
+     * 切模式时"停靠"起来的标签（见 parkAll / restoreParked）。
+     * 上限 12 个是用户确认过的预算：超出部分降级成"只记地址"，恢复时重开并明说状态丢失。
+     */
+    this.parkedTabs = [];
+    this.parkedDropped = [];
+    this.maxParked = 12;
     this.seq = 1;
 
     /**
@@ -739,6 +746,118 @@ class TabManager {
     this.emit();
     return { ok: true };
   }
+
+  /**
+   * 切模式前的"停靠"：把标签从窗口上卸下来，但不销毁页面。
+   *
+   * 为什么要有这一步：切模式时 session 会换，旧标签确实不能再用了——但"不能用了"
+   * 不等于"必须销毁"。用户正在填的表单、滚到一半的长文，都挂在这个 WebContents 上，
+   * 一 close 就全没了（改造前的 closeAll 就是这样，实测会丢）。
+   *
+   * 做法：视图从 contentView 上摘下来（不再渲染、不再占显存），WebContents 保活并静音，
+   * 标签对象整体挪进 parkedTabs。回到普通模式时原样挂回去，页面状态（含表单、滚动、
+   * 历史）都在。
+   *
+   * 上限 12 个（用户确认过的预算）：超出的按"地址 + 标题"降级记录，恢复时重新打开，
+   * 并明确告诉用户这几个页面的状态丢了——静默丢数据是不可接受的。
+   *
+   * @returns {{ok:boolean, parked:number, dropped:number, droppedUrls:string[]}}
+   */
+  parkAll() {
+    this.stopLifecycle();
+    const dropped = [];
+    const keep = Math.max(0, Number(this.maxParked) || 12);
+    const all = this.tabs.slice();
+    this.tabs = [];
+    this.parkedTabs = [];
+
+    for (const tab of all) {
+      if (!tab) continue;
+      const url = String(tab.url || '');
+      const isAppPage = Boolean(tab.appPage);
+      if (this.parkedTabs.length >= keep && !isAppPage) {
+        // 超出预算：只能记住地址，页面状态确实会丢（下面会把丢掉的列出来）
+        dropped.push(url);
+        try {
+          if (tab.view) tab.view.webContents.close();
+        } catch {
+          /* 忽略：窗口可能已销毁 */
+        }
+        tab.view = null;
+        continue;
+      }
+      if (tab.view) {
+        try {
+          this.mainWindow.contentView.removeChildView(tab.view);
+        } catch {
+          /* 忽略：窗口可能已销毁 */
+        }
+        try {
+          // 冻结期间按用户口径：允许联网，但绝不能出声、也绝不走代理
+          // （普通分区本来就不挂代理；这里只保证不静音用户正在听的页面之外的影响）。
+          tab.view.webContents.setAudioMuted(true);
+          tab.view.webContents.setBackgroundThrottling(true);
+        } catch {
+          /* 忽略 */
+        }
+        tab.view.setVisible(false);
+      }
+      this.parkedTabs.push(tab);
+    }
+
+    this.activeId = null;
+    this.parkedDropped = dropped.slice();
+    this.emit();
+    return { ok: true, parked: this.parkedTabs.length, dropped: dropped.length, droppedUrls: dropped };
+  }
+
+  /**
+   * 把停靠的标签挂回窗口（顺序与停靠前一致），并恢复活动标签。
+   *
+   * @returns {{ok:boolean, restored:number, dropped:number, droppedUrls:string[]}}
+   */
+  restoreParked() {
+    const parked = Array.isArray(this.parkedTabs) ? this.parkedTabs.slice() : [];
+    const dropped = Array.isArray(this.parkedDropped) ? this.parkedDropped.slice() : [];
+    this.parkedTabs = [];
+    this.parkedDropped = [];
+
+    for (const tab of parked) {
+      if (!tab || !tab.view) continue;
+      try {
+        this.mainWindow.contentView.addChildView(tab.view);
+      } catch {
+        /* 忽略：窗口可能已销毁 */
+      }
+      try {
+        tab.view.webContents.setAudioMuted(false);
+        tab.view.webContents.setBackgroundThrottling(false);
+      } catch {
+        /* 忽略 */
+      }
+      this.tabs.push(tab);
+    }
+
+    this.activeId = this.tabs.length > 0 ? this.tabs[0].id : null;
+
+    // 超出预算的那几个：状态确实保不住了，但地址还留着，恢复时按原地址重新打开，
+    // 至少不让用户回去自己再找一遍。
+    for (const url of dropped) {
+      if (!url) continue;
+      try {
+        this.create(url);
+      } catch {
+        /* 忽略：开不出来也不能中断恢复 */
+      }
+    }
+
+    this.applyLifecycle();
+    this.startLifecycle();
+    this.layout();
+    this.emit();
+    return { ok: true, restored: this.tabs.length, dropped: dropped.length, droppedUrls: dropped };
+  }
+
 
   /**
    * 记录一次加载失败并切到错误页。
