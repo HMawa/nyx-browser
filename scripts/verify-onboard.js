@@ -157,6 +157,16 @@ check('10. 接线：只有主进程判定、窗口只在 file:// 加载、标记
   assert.ok(!/#[0-9a-fA-F]{6}/.test(css), '引导样式不许写死色值');
 });
 
+// 首次安装标记可能被别的工具写成带 BOM 的 UTF-8；JSON.parse 见到 \uFEFF 会直接抛错，
+// 而那条错会被当成「没有标记」吞掉 —— 结果就是引导永远不弹（只在 console 留一句）。
+check('读安装标记前先剥 BOM（否则带 BOM 的标记会让引导永远不弹）', () => {
+  const mainSource = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
+  assert.ok(
+    /JSON\.parse\(fs\.readFileSync\(onboardMarkerPath\(\), 'utf8'\)\.replace\(\/\^\\uFEFF\/, ''\)\)/.test(mainSource),
+    'main.js 的 readOnboardMarker 应剥掉 BOM 再 parse',
+  );
+});
+
 const failed = checks.filter((item) => !item.pass);
 if (failed.length) {
   console.log('[首次引导回归] 未通过：');

@@ -180,6 +180,19 @@ check('14. 静态守卫：启动前读偏好并下发开关，且记录启动后
   return { ok, detail };
 });
 
+check('硬件信息这条 IPC 不会挂死：GPU 信息带超时，超时就退回系统接口并说明', () => {
+  const hardware = fs.readFileSync(path.join(ROOT, 'src', 'core', 'hardware.js'), 'utf8');
+  const detail = {
+    有超时常量: /const GPU_INFO_TIMEOUT_MS = \d+;/.test(hardware),
+    用超时包住: /withTimeout\(app\.getGPUInfo\('basic'\), GPU_INFO_TIMEOUT_MS\)/.test(hardware),
+    超时后退回WMI: /info\.__timeout[\s\S]{0,220}probeGpuDevice\(\)/.test(hardware),
+    说明给用户看: /没有返回，已改用系统接口读设备名/.test(hardware),
+    探针本身有上限: /timeout: 15000/.test(hardware) && /timeout: 12000/.test(hardware),
+  };
+  const ok = Object.values(detail).every(Boolean);
+  return { ok, detail };
+});
+
 const failed = results.filter((r) => !r.ok);
 console.log('');
 if (failed.length > 0) {

@@ -74,6 +74,26 @@ const GPU_FEATURE_LABELS = {
   'multiple_raster_threads': '多线程光栅化',
 };
 
+/**
+ * 这条 IPC 挂死过一次（设置页「硬件加速」永远显示"读取中…"）：
+ * `app.getGPUInfo()` 在 GPU 进程没起来 / 被显卡驱动拖住时**可能永不 resolve**，
+ * 而它又跑在 ipcMain.handle 里，等于把整条通道钉死。
+ *
+ * 所以给它一个上限：超时就当"读不到"，退回用系统接口（WMI）拿设备名，
+ * 并把这件事写进 note——用户看到的是"没读到"，而不是永远转圈。
+ */
+const GPU_INFO_TIMEOUT_MS = 2500;
+
+function withTimeout(promise, ms) {
+  let timer = null;
+  const guard = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ __timeout: true }), ms);
+  });
+  return Promise.race([promise, guard]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 /** 组装硬件状态快照（只读） */
 async function getHardwareStatus() {
   const out = {
@@ -83,20 +103,30 @@ async function getHardwareStatus() {
   };
 
   try {
-    const info = await app.getGPUInfo('basic');
-    const dev = info && info.gpuDevice && info.gpuDevice[0];
-    if (dev && dev.deviceName) {
-      out.gpu.available = true;
-      out.gpu.device = dev.deviceName;
-      out.gpu.vendor = dev.vendorId ? `0x${dev.vendorId.toString(16).toUpperCase()}` : '';
-      out.gpu.driverVersion = dev.driverVersion || '';
-    } else {
-      // basic 模式偶尔取不到设备名（驱动信息在别的字段），用 WMI 兜底
+    const info = await withTimeout(app.getGPUInfo('basic'), GPU_INFO_TIMEOUT_MS);
+    if (info && info.__timeout) {
+      out.gpu.note = `GPU 信息 ${GPU_INFO_TIMEOUT_MS} 毫秒没有返回，已改用系统接口读设备名。`;
       const wmi = await probeGpuDevice();
       if (wmi) {
         out.gpu.available = true;
         out.gpu.device = wmi.device;
         out.gpu.driverVersion = wmi.driver;
+      }
+    } else {
+      const dev = info && info.gpuDevice && info.gpuDevice[0];
+      if (dev && dev.deviceName) {
+        out.gpu.available = true;
+        out.gpu.device = dev.deviceName;
+        out.gpu.vendor = dev.vendorId ? `0x${dev.vendorId.toString(16).toUpperCase()}` : '';
+        out.gpu.driverVersion = dev.driverVersion || '';
+      } else {
+        // basic 模式偶尔取不到设备名（驱动信息在别的字段），用 WMI 兜底
+        const wmi = await probeGpuDevice();
+        if (wmi) {
+          out.gpu.available = true;
+          out.gpu.device = wmi.device;
+          out.gpu.driverVersion = wmi.driver;
+        }
       }
     }
   } catch (err) {

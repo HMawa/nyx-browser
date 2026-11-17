@@ -165,6 +165,28 @@ check('9. 写剪贴板失败要报出来，并且不许把失败当成功', () =
   assert.ok(!/availableFormats/.test(stripped), 'availableFormats() 在 Electron 45 已不存在，不许再调用');
 });
 
+// Electron 45 把 safeStorage.isEncryptionAvailable 标成 deprecated（推荐 isAsyncEncryptionAvailable）。
+// 我们的两个调用点都是同步的，所以做法是"启动时异步探一次并缓存，同步只读缓存"；
+// 这里守住这个形状，避免哪天有人又直接调同步版（每调一次就多一条弃用警告）。
+check('加密可用性走「异步探一次 + 缓存」，不再到处直调被弃用的同步 API', () => {
+  const mainSource = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
+  assert.ok(
+    /async function refreshEncryptionAvailability\(\)/.test(mainSource),
+    'main.js 里应有 refreshEncryptionAvailability()',
+  );
+  assert.ok(
+    /typeof safeStorage\.isAsyncEncryptionAvailable === 'function'/.test(mainSource),
+    '优先用 isAsyncEncryptionAvailable（Electron 45 推荐）',
+  );
+  assert.ok(
+    /refreshEncryptionAvailability\(\)\.catch\(\(\) => \{\}\)/.test(mainSource),
+    '启动时必须真去探一次，否则缓存永远是 null',
+  );
+  // 只允许两处出现同步版：异步版不可用时的回落 + 缓存未建立时的兜底
+  const syncCalls = mainSource.match(/safeStorage\.isEncryptionAvailable\(\)/g) || [];
+  assert.ok(syncCalls.length <= 2, `同步版只该在回退路径里出现，现在有 ${syncCalls.length} 处`);
+});
+
 const failed = checks.filter((item) => !item.ok);
 console.log(`\n运行时兼容回归：${checks.length - failed.length} / ${checks.length} 通过`);
 if (failed.length) {

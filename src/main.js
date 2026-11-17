@@ -982,6 +982,10 @@ async function bootstrap() {
   // 用户改完设置立刻生效，不用重启浏览器。
   setNavigateBudgetProvider(() => readToolboxPrefs().navigateTimeoutMs);
 
+  // 系统加密是否可用：用异步版探一次并缓存（Electron 45 起同步版已弃用）。
+  // 放在 UI 存储之前——隐私快照那几个判断都读这个缓存。
+  refreshEncryptionAvailability().catch(() => {});
+
   // 剪贴板 API 形状先探一次并记诊断：兼容层不能让"运行时退回了同步 API"这件事安静地发生
   probeClipboardShape().catch(() => {});
 
@@ -1433,15 +1437,51 @@ function writePrivateCache(store) {
   }
 }
 
-function privateCacheDecision() {
-  let encryptionAvailable = false;
+/**
+ * 系统加密是否可用（隐私快照要不要落盘靠它决定）。
+ *
+ * Electron 45 把 `safeStorage.isEncryptionAvailable` 标成 deprecated，
+ * 推荐 `isAsyncEncryptionAvailable()`（返回 Promise）。这两个调用点是同步的
+ * （要立刻决定"这条快照能不能写盘"），所以做法是：启动时用异步版探一次并缓存，
+ * 同步调用只读缓存；缓存还没建立时退回旧的同步 API（仍可用，只是会打一条弃用警告）。
+ */
+let encryptionAvailableCache = null;
+
+async function refreshEncryptionAvailability() {
   try {
-    encryptionAvailable = Boolean(safeStorage && safeStorage.isEncryptionAvailable());
-  } catch {
-    encryptionAvailable = false;
+    if (safeStorage && typeof safeStorage.isAsyncEncryptionAvailable === 'function') {
+      encryptionAvailableCache = Boolean(await safeStorage.isAsyncEncryptionAvailable());
+    } else if (safeStorage && typeof safeStorage.isEncryptionAvailable === 'function') {
+      encryptionAvailableCache = Boolean(safeStorage.isEncryptionAvailable());
+    } else {
+      encryptionAvailableCache = false;
+    }
+  } catch (err) {
+    encryptionAvailableCache = false;
+    diagnostics.warn('ENCRYPTION_STATE_FAILED', '读不到系统加密是否可用，按"不可用"处理', {
+      error: String(err && err.message ? err.message : err).slice(0, 160),
+    });
   }
+  diagnostics.info('ENCRYPTION_STATE', encryptionAvailableCache ? '系统加密可用' : '系统加密不可用', {
+    backend: encryptionAvailableCache ? 'os' : 'none',
+  });
+  return encryptionAvailableCache;
+}
+
+function encryptionAvailable() {
+  if (encryptionAvailableCache !== null) return encryptionAvailableCache === true;
+  // 还没探过（极少见：启动早期就有人问）——用旧接口兜一次，绝不当成"可用"
+  try {
+    return Boolean(safeStorage && safeStorage.isEncryptionAvailable());
+  } catch {
+    return false;
+  }
+}
+
+function privateCacheDecision() {
+  const available = encryptionAvailable();
   const enabled = runtime.uiStore ? runtime.uiStore.get().privateSnapshotEnabled !== false : true;
-  return pickPrivateStoreMode({ encryptionAvailable, enabled });
+  return pickPrivateStoreMode({ encryptionAvailable: available, enabled });
 }
 
 /**
@@ -1454,20 +1494,15 @@ function privateCacheDecision() {
 function privateSiteEffective() {
   const prefs = runtime.uiStore ? runtime.uiStore.get() : {};
   const enabled = prefs.privateSnapshotEnabled !== false;
-  let encryptionAvailable = false;
-  try {
-    encryptionAvailable = Boolean(safeStorage && safeStorage.isEncryptionAvailable());
-  } catch {
-    encryptionAvailable = false;
-  }
-  const active = enabled && encryptionAvailable;
+  const available = encryptionAvailable();
+  const active = enabled && available;
   let note = '';
   if (!enabled) {
     note = '隐私模式快照现在是关着的，这份名单暂时不会生效；把「隐私模式快照」打开之后才会按它来。';
-  } else if (!encryptionAvailable) {
+  } else if (!available) {
     note = '这台机器上系统加密不可用，隐私模式快照根本不会写盘，这份名单暂时不会生效。';
   }
-  return { enabled, encryptionAvailable, active, note };
+  return { enabled, encryptionAvailable: available, active, note };
 }
 
 function savePrivatePageCache(snapshot) {
@@ -4143,7 +4178,10 @@ function onboardMarkerPath() {
 
 function readOnboardMarker() {
   try {
-    const raw = JSON.parse(fs.readFileSync(onboardMarkerPath(), 'utf8'));
+    // 必须剥 BOM：安装器 / 别的工具写这个文件时可能带 BOM，而 JSON.parse 见到 \uFEFF
+    // 直接抛错。以前这条错被当成"没有标记"吞掉——结果就是**引导永远不弹**，
+    // 用户只在 console 里看到一句"读不懂"。（readManifest 早就这么做了，这里补齐。）
+    const raw = JSON.parse(fs.readFileSync(onboardMarkerPath(), 'utf8').replace(/^\uFEFF/, ''));
     return normalizeOnboardMarker(raw);
   } catch (err) {
     if (err && err.code !== 'ENOENT') {

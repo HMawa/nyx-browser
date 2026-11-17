@@ -8,7 +8,7 @@
  *  2. scripts/verify-ui-polish.js（界面体验，139 项）
  *  3. scripts/verify-link-guard.js（出站链路守卫，14 项；纯 Node，不启动 Electron）
  *  4. scripts/verify-downloads.js（下载链路，16 项；纯 Node，不启动 Electron）
- *  5. scripts/verify-gpu-policy.js（图形性能策略，14 项；纯 Node，不启动 Electron）
+ *  5. scripts/verify-gpu-policy.js（图形性能策略，15 项；含「硬件信息 IPC 不会挂死」五条；纯 Node，不启动 Electron）
  *  6. scripts/verify-security-baseline.js（安全基线对照，20 项；纯 Node，不启动 Electron）
  *  7. scripts/verify-security-switches.js（外壳防护基线，19 项；纯 Node，不启动 Electron）
  *  8. scripts/verify-screen-watch.js（录屏 / 被远控检测，14 项；纯 Node，不启动 Electron）
@@ -23,7 +23,7 @@
  * 17. scripts/verify-network-state.js（断网判定与断网横幅，10 项；纯 Node，不启动 Electron）
  * 18. scripts/verify-page-cache.js（离线页面缓存、快照块结构、隐私加密、两份站点名单（含各自的导入导出、「只存这些」与自定义模板及其导入导出、名单是否真生效、模板「并进/替换」与同时套到普通模式），坏条目清理，67 项；纯 Node，不启动 Electron）
  * 19. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
- * 20. scripts/verify-runtime-compat.js（运行时兼容：剪贴板异步化与版本三处一致，9 项；纯 Node，不启动 Electron）
+ * 20. scripts/verify-runtime-compat.js（运行时兼容：剪贴板异步化、版本三处一致、加密可用性走异步探一次，10 项；纯 Node，不启动 Electron）
  * 21. scripts/verify-release-gate.js（发版门禁、安装器 e2e 接线、验签挑包、差分命中率实测与过期判定、asar 差分结论、夜间 e2e 注册计划任务与状态卡、计划任务改时间/删任务的界面入口、发版后自动量差分，45 项；纯 Node，不跑安装包）
  * 22. scripts/verify-signing.js（安装包签名、密码存凭据管理器、证书有效期、签名状态进界面与打包接线，35 项；不看签名包时只跑静态守卫）
  * 23. scripts/verify-agent-settings.js（agent 改设置：白名单 / 锁死 / 确认 / 限流 / 多步撤销 / 场景预设 / 改动聚合视图与按时间筛选、CSV 导出 / 动作聚合（按类型与站点、被拦下单独报数）、动作记录也导出 CSV，34 项；纯 Node）
@@ -32,7 +32,7 @@
  * 26. scripts/verify-agent-lamp.js（agent 三色状态灯：只在动作执行时算"正在被驱动"、审计缺口不混进灯、窄面板只给看与急停，11 项；纯 Node，不启动 Electron）
  * 27. scripts/verify-toolbar.js（工具栏：四个主路径固定、「更多」四项固定、小字标签开关、截图落点顺序、四处接线，10 项；纯 Node，不启动 Electron）
  * 28. scripts/verify-motion.js（动效档位：两档时长与缓动同源、减少动效时降级、按住有反馈、不做外发光，8 项；纯 Node，不启动 Electron）
- * 29. scripts/verify-onboard.js（首次安装引导：四种判定口径、选"先不定"不落盘、"全部默认"一步落盘、非法取值整组拒绝、空白页不是 about:blank，12 项；纯 Node，不启动 Electron）
+ * 29. scripts/verify-onboard.js（首次安装引导：四种判定口径、选"先不定"不落盘、"全部默认"一步落盘、非法取值整组拒绝、空白页不是 about:blank、安装标记容忍 BOM，13 项；纯 Node，不启动 Electron）
  * 30. scripts/verify-onboard-e2e.js（首次引导真机：全新安装弹一次、点默认后落盘并关窗、再启动与升级安装都不弹，7 项）
  * 31. scripts/verify-agent-doc.js（agent 接入说明：端点来自运行时、两种模式边界、会被拦下的四种情况、复制回读，9 项；纯 Node，不启动 Electron）
  * 32. scripts/verify-themes.js（主题：六套主题与枚举一一对应、新主题令牌齐全、对比度实算、不许有渐变、主题与显示分区，7 项；纯 Node，不启动 Electron）
@@ -124,7 +124,7 @@ const STEPS = [
   {
     label: '图形性能策略',
     script: 'verify-gpu-policy.js',
-    items: '14 项',
+    items: '15 项',
     timeoutMs: 60000,
   },
   {
@@ -208,7 +208,7 @@ const STEPS = [
   {
     label: '运行时兼容',
     script: 'verify-runtime-compat.js',
-    items: '9 项',
+    items: '10 项',
     timeoutMs: 60000,
   },
   {
@@ -273,7 +273,7 @@ const STEPS = [
   {
     label: '首次引导回归',
     script: 'verify-onboard.js',
-    items: '12 项',
+    items: '13 项',
     timeoutMs: 60000,
   },
   {
