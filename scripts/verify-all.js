@@ -45,7 +45,7 @@
  * 39. scripts/verify-audit-p2.js（安全审计 P2 批次：隐私模式 agent 内容边界、state 只读豁免、截图重试、密码框 name 抹除、limits 传参、设置只读不确认、MCP 参数转发，14 项；纯 Node，不启动 Electron）
  * 40. scripts/verify-permissions.js（站点设备授权白名单：设备项拆分、来源只收 http(s)、三档授权、隐私模式封死、撤销/清空与接线，22 项；纯 Node，不启动 Electron）
  * 41. scripts/verify-switch-cache.js（模式切换缓存：代理可达 30 秒、出口取不到 60 秒内复用、时钟回拨不认、计时文案点名最慢一步，以及主进程真的接上了，21 项；纯 Node，不启动 Electron）
- * 42. scripts/verify-tab-park.js（标签停靠：切模式不再销毁标签、视图摘下但不关页面、恢复按原顺序挂回、超出 12 个降级成只记地址并当面告知，12 项；纯 Node，不启动 Electron）
+ * 42. scripts/verify-tab-park.js（标签停靠：切模式不再销毁标签、视图摘下但不关页面、恢复按原顺序挂回并还回原活动标签、退出私密时先摘调试通道再强制销毁私密标签、停靠不覆盖已有停靠、超出 12 个降级成只记地址并当面告知，21 项；纯 Node，不启动 Electron）
  * 43. scripts/verify-transition.js（切换动画：牛奶桶素材有效、页面无外联、进入＝从中心向外的黑色扩散、两套动画各 1 秒且时长与格子有上下限、减少动效降级、透明子窗口不抢焦点不开沙箱口子、开关默认开且可关，20 项；纯 Node，不启动 Electron）
  *
  * 行为约定：
@@ -332,7 +332,7 @@ const STEPS = [
   {
     label: '标签停靠回归',
     script: 'verify-tab-park.js',
-    items: '12 项',
+    items: '21 项',
     timeoutMs: 60000,
   },
   {

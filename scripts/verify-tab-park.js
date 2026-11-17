@@ -40,7 +40,7 @@ check('TabManager 提供 parkAll() 与 restoreParked()', /parkAll\(\)\s*\{/.test
 check('停靠上限是 12 个（用户确认过的预算）', /this\.maxParked = 12;/.test(tabsSource));
 check(
   '停靠时把视图从窗口上摘下来，但不销毁 webContents',
-  /parkAll\(\)[\s\S]{0,2200}removeChildView\(tab\.view\)[\s\S]{0,1200}parkedTabs\.push\(tab\)/.test(tabsSource),
+  /parkAll\(\)[\s\S]{0,2400}removeChildView\(tab\.view\)[\s\S]{0,1200}parked\.push\(tab\)/.test(tabsSource),
 );
 check(
   '停靠后立即静音并降低后台占用（不渲染、不出声，但页面还活着）',
@@ -68,7 +68,52 @@ check(
   '被降级的标签会当面告知，并落诊断（静默丢数据不可接受）',
   /TABS_DROPPED_ON_SWITCH/.test(switchModeSection) && /notifyNotice\(\{[\s\S]{0,400}TABS_DROPPED_ON_SWITCH/.test(switchModeSection),
 );
-check('停靠这一步也进了耗时记录（切换慢时能指到它）', /trackStep\('停靠旧标签'/.test(switchModeSection));
+check('停靠这一步也进了耗时记录（切换慢时能指到它）', /trackStep\(leavingPrivate \? '销毁私密标签' : '停靠普通标签'/.test(switchModeSection));
+
+/* ②.5 退出私密模式：私密标签必须销毁，不能被停靠回来（审计 P0） */
+check(
+  'TabManager 提供 destroyAll()：强制销毁、不保留、不自动补标签',
+  /destroyAll\(\)\s*\{/.test(tabsSource) && /webContents\.destroy\(\)/.test(tabsSource),
+);
+check(
+  'destroyAll 用 destroy 而不是 close（close 会走 unload，私密页可以拖着不销毁）',
+  /destroyAll\(\)[\s\S]{0,1400}webContents\.destroy\(\)/.test(tabsSource) &&
+    !/destroyAll\(\)[\s\S]{0,1400}webContents\.close\(\)/.test(tabsSource),
+);
+const destroyAllBody = (() => {
+  const start = tabsSource.indexOf('destroyAll()');
+  if (start < 0) return '';
+  const end = tabsSource.indexOf('return { ok: true, destroyed', start);
+  return end < 0 ? tabsSource.slice(start, start + 1600) : tabsSource.slice(start, end + 40);
+})();
+check(
+  'destroyAll 不清 parkedTabs（那是进私密前停靠的普通标签，回普通还要靠它恢复）',
+  /this\.activeId = null/.test(destroyAllBody) && !/this\.parkedTabs = \[\]/.test(destroyAllBody) && !/this\.parkedActiveId/.test(destroyAllBody),
+);
+check(
+  '切模式按方向走：离开私密调 destroyAll，且这条分支不调 parkAll',
+  /const leavingPrivate = current === 'private';/.test(switchModeSection) &&
+    /if \(leavingPrivate\) \{\s*runtime\.tabManager\.destroyAll\(\);/.test(switchModeSection),
+);
+
+/* ②.6 停靠不覆盖、并记住原活动标签（审计 P1 的 WebContents 泄漏） */
+check(
+  'parkAll 不覆盖已有停靠标签（旧实现 this.parkedTabs = [] 会让上一次的引用丢掉）',
+  /const parked = Array\.isArray\(this\.parkedTabs\) \? this\.parkedTabs\.slice\(\) : \[\];/.test(tabsSource) &&
+    /this\.parkedTabs = parked;/.test(tabsSource) &&
+    !/parkAll\(\)[\s\S]{0,600}this\.tabs = \[\];\s*\n\s*this\.parkedTabs = \[\];/.test(tabsSource),
+);
+check('停靠时记住当时的活动标签，恢复时还给他', /this\.parkedActiveId = this\.activeId;/.test(tabsSource));
+check(
+  'restoreParked 优先恢复原活动标签，被 drop 了就退回第一个',
+  /const wantActive = this\.parkedActiveId;/.test(tabsSource) &&
+    /this\.tabs\.some\(\(tab\) => tab\.id === wantActive\)/.test(tabsSource),
+);
+check('构造函数里有 parkedActiveId 的初值（否则第一次恢复读到 undefined）', /this\.parkedActiveId = null;/.test(tabsSource));
+check(
+  '销毁前先摘掉调试通道（隐私标签挂着指纹面的 debugger，带着 destroy 会把主进程带崩）',
+  /destroyAll\(\)[\s\S]{0,1600}wc\.debugger\.isAttached\(\)[\s\S]{0,120}wc\.debugger\.detach\(\)[\s\S]{0,400}webContents\.destroy\(\)/.test(tabsSource),
+);
 
 /* ③ 别处的显式关闭仍然有效（不能把"关标签"也停靠掉） */
 check('显式关闭标签仍是销毁页面', /close\(id\)\s*\{[\s\S]{0,900}webContents\.close\(\)/.test(tabsSource));

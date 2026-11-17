@@ -3963,13 +3963,20 @@ async function switchMode(mode) {
   if (next === 'private') showModeTransition('enter');
   else if (current === 'private') showModeTransition('exit');
 
-  // 1. 停靠（而不是销毁）现有标签。旧视图的 session 即将失效，不能再留在窗口上；
-  //    但用户正在填的表单、滚到一半的长文都挂在那个 WebContents 里，一并 close 就没了。
-  const parked = await trackStep('停靠旧标签', async () => {
-    if (!runtime.tabManager || typeof runtime.tabManager.parkAll !== 'function') {
+  // 1. 处理旧标签——方向很关键：
+  //    · 进隐私：普通标签「停靠」（保状态），之后建私密标签。
+  //    · 回普通：私密标签必须**销毁**，绝不能停靠——停靠了就等着被第 4 步挂回普通标签栈，
+  //      等于把私密页面搬进普通模式（审计实测的 P0）。停靠的普通标签由第 4 步挂回。
+  const leavingPrivate = current === 'private';
+  const parked = await trackStep(leavingPrivate ? '销毁私密标签' : '停靠普通标签', async () => {
+    if (!runtime.tabManager) return { parked: 0, dropped: 0, droppedUrls: [] };
+    if (leavingPrivate) {
+      runtime.tabManager.destroyAll();
       return { parked: 0, dropped: 0, droppedUrls: [] };
     }
-    return runtime.tabManager.parkAll();
+    return typeof runtime.tabManager.parkAll === 'function'
+      ? runtime.tabManager.parkAll()
+      : { parked: 0, dropped: 0, droppedUrls: [] };
   });
 
   // 2. 切换模式并记录，供下次启动恢复

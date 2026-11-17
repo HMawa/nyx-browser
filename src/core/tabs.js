@@ -190,6 +190,7 @@ class TabManager {
      */
     this.parkedTabs = [];
     this.parkedDropped = [];
+    this.parkedActiveId = null;
     this.maxParked = 12;
     this.seq = 1;
 
@@ -769,13 +770,17 @@ class TabManager {
     const keep = Math.max(0, Number(this.maxParked) || 12);
     const all = this.tabs.slice();
     this.tabs = [];
-    this.parkedTabs = [];
+    // 关键：不能覆盖已有的停靠标签。旧实现直接 this.parkedTabs = []，第二次停靠时
+    // 上一次的标签引用就丢了——既不关也不恢复，WebContents 变孤儿（审计的 P1）。
+    const parked = Array.isArray(this.parkedTabs) ? this.parkedTabs.slice() : [];
+    // 记住停靠前用户正在看的那一个，回来时还给他，而不是永远跳回第一个
+    if (!this.parkedActiveId) this.parkedActiveId = this.activeId;
 
     for (const tab of all) {
       if (!tab) continue;
       const url = String(tab.url || '');
       const isAppPage = Boolean(tab.appPage);
-      if (this.parkedTabs.length >= keep && !isAppPage) {
+      if (parked.length >= keep && !isAppPage) {
         // 超出预算：只能记住地址，页面状态确实会丢（下面会把丢掉的列出来）
         dropped.push(url);
         try {
@@ -802,13 +807,60 @@ class TabManager {
         }
         tab.view.setVisible(false);
       }
-      this.parkedTabs.push(tab);
+      parked.push(tab);
     }
 
+    this.parkedTabs = parked;
     this.activeId = null;
     this.parkedDropped = dropped.slice();
     this.emit();
-    return { ok: true, parked: this.parkedTabs.length, dropped: dropped.length, droppedUrls: dropped };
+    return { ok: true, parked: parked.length, dropped: dropped.length, droppedUrls: dropped };
+  }
+
+  /**
+   * 强制销毁当前全部标签（退出私密模式用；不保留、不自动补标签）。
+   *
+   * 为什么单独一个方法：私密标签在切回普通模式时必须**立即消失**。走 parkAll 会把它们
+   * 停靠起来，第 4 步 restoreParked 又挂回普通标签栈——等于把私密页面搬进普通模式。
+   *
+   * 用 destroy() 而不是 close()：close() 会走 unload/beforeunload，页面可以拖着不销毁；
+   * 私密页不能有这种"我说了算"的机会。
+   *
+   * 注意：不清 parkedTabs / parkedActiveId —— 那些是进入私密前停靠的**普通**标签，
+   * 退出私密后还要靠它们恢复。
+   *
+   * @returns {{ok:boolean, destroyed:number}}
+   */
+  destroyAll() {
+    this.stopLifecycle();
+    let destroyed = 0;
+    while (this.tabs.length > 0) {
+      const tab = this.tabs.pop();
+      if (!tab || !tab.view) continue;
+      try {
+        this.mainWindow.contentView.removeChildView(tab.view);
+      } catch {
+        /* 忽略：窗口可能已销毁 */
+      }
+      try {
+        // 隐私标签身上挂着调试通道（指纹面用），带着它直接 destroy 会把主进程带崩
+        // （实测：切回普通模式时整个应用退出）。先摘掉调试器再销毁。
+        const wc = tab.view.webContents;
+        if (wc.debugger && wc.debugger.isAttached()) wc.debugger.detach();
+      } catch {
+        /* 忽略：没有调试通道或已经断开 */
+      }
+      try {
+        tab.view.webContents.destroy();
+      } catch {
+        /* 忽略：可能已经没了 */
+      }
+      tab.view = null;
+      destroyed += 1;
+    }
+    this.activeId = null;
+    this.emit();
+    return { ok: true, destroyed };
   }
 
   /**
@@ -819,8 +871,10 @@ class TabManager {
   restoreParked() {
     const parked = Array.isArray(this.parkedTabs) ? this.parkedTabs.slice() : [];
     const dropped = Array.isArray(this.parkedDropped) ? this.parkedDropped.slice() : [];
+    const wantActive = this.parkedActiveId;
     this.parkedTabs = [];
     this.parkedDropped = [];
+    this.parkedActiveId = null;
 
     for (const tab of parked) {
       if (!tab || !tab.view) continue;
@@ -838,7 +892,10 @@ class TabManager {
       this.tabs.push(tab);
     }
 
-    this.activeId = this.tabs.length > 0 ? this.tabs[0].id : null;
+    // 恢复用户离开时正在看的那一个；它要是被 drop 掉了，就退回第一个，不抛错
+    this.activeId = this.tabs.some((tab) => tab.id === wantActive)
+      ? wantActive
+      : (this.tabs.length > 0 ? this.tabs[0].id : null);
 
     // 超出预算的那几个：状态确实保不住了，但地址还留着，恢复时按原地址重新打开，
     // 至少不让用户回去自己再找一遍。
