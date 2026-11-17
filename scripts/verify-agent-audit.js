@@ -242,7 +242,11 @@ function main() {
     stopNotifies: /function stopAgent[\s\S]{0,1200}code:\s*'AGENT_STOPPED'/.test(mainSrc),
     stopDiagnostics: mainSrc.includes("'AGENT_STOPPED'") && mainSrc.includes('aborted'),
     resumeResumes: /function resumeAgent[\s\S]{0,400}\.resume\(\)/.test(mainSrc),
-    shortcutGuard: /function registerAgentStopShortcut[\s\S]{0,900}AGENT_STOP_SHORTCUT_FAILED/.test(mainSrc),
+    // 急停快捷键守卫（v1.17.17）：原来断言"注册失败会记 AGENT_STOP_SHORTCUT_FAILED"，
+    // 现在首选被占用不是终点而是换备用键，所以守卫改成"有候选列表 + 失败与换键都留痕"。
+    shortcutGuard: /function registerAgentStopShortcut[\s\S]{0,1600}shortcutCandidates\(AGENT_STOP_SHORTCUT\)/.test(mainSrc)
+      && /function registerAgentStopShortcut[\s\S]{0,2000}AGENT_STOP_SHORTCUT_FALLBACK/.test(mainSrc)
+      && /function registerAgentStopShortcut[\s\S]{0,2400}AGENT_STOP_SHORTCUT_FAILED/.test(mainSrc),
     ipcRegistered: /registerDownloadsIpc\(\);\s*\n[\s\S]{0,80}registerAgentAuditIpc\(\)/.test(mainSrc),
     ipcHandlers:
       mainSrc.includes("'nyx:agent:status'") &&

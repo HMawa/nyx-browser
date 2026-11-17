@@ -273,6 +273,36 @@
               </div>
             </section>
 
+            <!-- agent 导航预算（v1.17.17）：慢站合法地会超过 15 秒，写死就会"明明打开了却报超时" -->
+            <section class="info-card">
+              <div class="info-head">
+                <h3>agent 打开网页的等待上限</h3>
+                <span class="badge" id="nav-budget-badge">— 秒</span>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  agent 让浏览器打开一个地址时，最多等这么久；超过就如实报「超时」，不会再无限期挂着。
+                  站点很慢、或者要等后端渲染时，可以调大——但它也是「卡住多久才算失败」的界线。
+                </p>
+                <div class="sec-actions net-slow-row">
+                  <input
+                    type="number"
+                    id="nav-budget-ms"
+                    class="text-input net-slow-input"
+                    aria-label="agent 导航等待上限（秒）"
+                    min="3"
+                    max="60"
+                    step="1"
+                    inputmode="numeric"
+                    spellcheck="false"
+                  />
+                  <span class="net-slow-unit">秒</span>
+                  <button type="button" class="btn" id="btn-nav-budget-save">保存</button>
+                  <span class="hint" id="nav-budget-hint">正在读取…</span>
+                </div>
+              </div>
+            </section>
+
             <!-- 图形性能（清单 A5）：默认核显优先，可显式切独显/跟随系统 -->
             <section class="info-card">
               <div class="info-head">

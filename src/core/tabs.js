@@ -806,6 +806,7 @@ class TabManager {
           /* 忽略 */
         }
         tab.view.setVisible(false);
+        this.freezeTab(tab);
       }
       parked.push(tab);
     }
@@ -815,6 +816,100 @@ class TabManager {
     this.parkedDropped = dropped.slice();
     this.emit();
     return { ok: true, parked: parked.length, dropped: dropped.length, droppedUrls: dropped };
+  }
+
+  /**
+   * 停靠时尽力把页面真正冻结（CDP `Page.setWebLifecycleState`）。
+   *
+   * 为什么只加"摘视图 + 静音 + 降频"不够：那样页面还在正常跑 JS、定时器、动画，
+   * 后台标签一多就是白白烧 CPU/电；用户要的是"挂起来"，不是"看不见但还在跑"。
+   *
+   * 为什么不让它失败影响停靠：冻结是 CDP 的额外能力，个别的 WebContents 可能
+   * 因为调试通道已被占用（隐私标签挂着指纹面）或版本差异拒绝这条命令。这时
+   * 退回"摘视图 + 静音 + 降频"三件事就好，绝不能因为冻结失败把标签留在窗口里。
+   *
+   * 用户口径：冻结期间允许联网，但不走代理——普通分区本来就不挂代理，所以这里
+   * 只冻结页面生命周期，不碰网络。
+   *
+   * @param {object} tab 标签对象（必须有 view）
+   * @returns {boolean} 是否真的把命令发下去了
+   */
+  freezeTab(tab) {
+    const wc = tab && tab.view ? tab.view.webContents : null;
+    if (!wc || wc.isDestroyed()) return false;
+    let owned = false;
+    try {
+      owned = !wc.debugger.isAttached();
+      if (owned) wc.debugger.attach('1.3');
+    } catch (err) {
+      // 挂不上调试通道：属于"冻结不了"，退回普通停靠，但要留痕
+      this.reportFreezeFailure(tab, err);
+      return false;
+    }
+    // 自己挂的调试器记得摘；原本就挂着的（比如隐私页）不要动别人的通道
+    tab.freezeDebugger = owned;
+    tab.frozen = false;
+    try {
+      wc.debugger
+        .sendCommand('Page.setWebLifecycleState', { state: 'frozen' })
+        .then(() => {
+          tab.frozen = true;
+        })
+        .catch((err) => {
+          tab.frozen = false;
+          this.reportFreezeFailure(tab, err);
+        });
+    } catch (err) {
+      this.reportFreezeFailure(tab, err);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * 把冻结过的页面解冻；顺手摘掉自己挂的调试通道。
+   * 不在这里抛错：恢复标签比"解冻干净"重要。
+   */
+  thawTab(tab) {
+    const wc = tab && tab.view ? tab.view.webContents : null;
+    if (!wc || wc.isDestroyed()) return false;
+    const owned = Boolean(tab.freezeDebugger);
+    try {
+      if (wc.debugger.isAttached()) {
+        wc.debugger.sendCommand('Page.setWebLifecycleState', { state: 'active' }).catch(() => {
+          /* 解冻失败：页面仍可用，只是可能还在被冻着，等它自己恢复 */
+        });
+      }
+    } catch {
+      /* 忽略：通道可能已经断了 */
+    }
+    tab.frozen = false;
+    tab.freezeDebugger = false;
+    if (owned) {
+      try {
+        wc.debugger.detach();
+      } catch {
+        /* 忽略 */
+      }
+    }
+    return true;
+  }
+
+  /** 冻结失败要留痕，但不必打扰用户——它只影响省电，不影响功能 */
+  reportFreezeFailure(tab, err) {
+    const message = (err && err.message) || String(err || '未知原因');
+    console.warn(`[Nyx] 停靠标签没能真正冻结（${tab && tab.url ? tab.url : '未知地址'}）：${message}`);
+    try {
+      const d = require('./diagnostics');
+      if (d && typeof d.warn === 'function') {
+        d.warn('TAB_FREEZE_FAILED', '停靠标签没能真正冻结，已退回"摘视图 + 静音 + 降频"', {
+          url: tab && tab.url ? String(tab.url).slice(0, 200) : '',
+          error: message.slice(0, 200),
+        });
+      }
+    } catch {
+      /* 忽略：诊断模块不可用时只留 console */
+    }
   }
 
   /**
@@ -889,6 +984,7 @@ class TabManager {
       } catch {
         /* 忽略 */
       }
+      this.thawTab(tab);
       this.tabs.push(tab);
     }
 

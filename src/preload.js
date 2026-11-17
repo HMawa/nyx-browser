@@ -607,9 +607,15 @@ contextBridge.exposeInMainWorld('nyx', {
 
   /** 读慢请求阈值：{ ok, slowMs, min, max, fallback } */
   tbSlowMs: () => ipcRenderer.invoke('nyx:tb:slow-ms'),
-
   /** 写慢请求阈值：ms → { ok, slowMs }（越界返回中文错误） */
   tbSlowMsSet: (ms) => ipcRenderer.invoke('nyx:tb:slow-ms-set', { slowMs: ms }),
+
+  /* ---------------- agent 导航预算（v1.17.17） ---------------- */
+
+  /** 读导航预算：{ ok, navigateTimeoutMs, min, max, fallback, example } */
+  tbNavigateTimeout: () => ipcRenderer.invoke('nyx:tb:navigate-timeout'),
+  /** 写导航预算：ms → { ok, navigateTimeoutMs, example }（越界返回中文错误） */
+  tbNavigateTimeoutSet: (ms) => ipcRenderer.invoke('nyx:tb:navigate-timeout-set', { navigateTimeoutMs: ms }),
 
   /** 订阅阈值变更推送（设置页保存后抓包面板即时生效），返回取消订阅函数 */
   onTbSlowMs: (listener) => {

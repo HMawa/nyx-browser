@@ -119,6 +119,31 @@ check(
 check('显式关闭标签仍是销毁页面', /close\(id\)\s*\{[\s\S]{0,900}webContents\.close\(\)/.test(tabsSource));
 check('closeAll 保留下来，只给真正需要清空的场景用', /closeAll\(\)\s*\{/.test(tabsSource));
 
+/* ④ 真正冻结：摘下视图之外还要把页面生命周挂起来 */
+check(
+  '停靠时会真的冻结页面（CDP Page.setWebLifecycleState frozen），不只是摘视图',
+  /freezeTab\(tab\)\{?[\s\S]{0,1200}Page\.setWebLifecycleState[\s\S]{0,200}state: 'frozen'/.test(tabsSource.replace(/\s+/g, ' ')) ||
+    /Page\.setWebLifecycleState', \{ state: 'frozen' \}/.test(tabsSource),
+);
+check('停靠循环里确实调了 freezeTab', /tab\.view\.setVisible\(false\);\s*\n\s*this\.freezeTab\(tab\);/.test(tabsSource));
+check(
+  '恢复时先解冻再挂回（否则页面还冻着，用户看到白屏）',
+  /this\.thawTab\(tab\);\s*\n\s*this\.tabs\.push\(tab\);/.test(tabsSource) &&
+    /Page\.setWebLifecycleState', \{ state: 'active' \}/.test(tabsSource),
+);
+check(
+  '只摘自己挂的调试通道（原本就挂着的隐私页不要动）',
+  /tab\.freezeDebugger = owned;/.test(tabsSource) &&
+    /const owned = Boolean\(tab\.freezeDebugger\);/.test(tabsSource) &&
+    /if \(owned\) \{[\s\S]{0,120}wc\.debugger\.detach\(\)/.test(tabsSource),
+);
+check(
+  '冻结失败不阻断停靠，但要留痕（TAB_FREEZE_FAILED + console）',
+  /reportFreezeFailure\(tab, err\)/.test(tabsSource) &&
+    /TAB_FREEZE_FAILED/.test(tabsSource) &&
+    /停靠标签没能真正冻结/.test(tabsSource),
+);
+
 console.log('');
 console.log(`标签停靠回归：通过 ${passed} 项，失败 ${failed} 项`);
 if (failed > 0) {

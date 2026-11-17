@@ -45,8 +45,10 @@
  * 39. scripts/verify-audit-p2.js（安全审计 P2 批次：隐私模式 agent 内容边界、state 只读豁免、截图重试、密码框 name 抹除、limits 传参、设置只读不确认、MCP 参数转发、回归只清理自己那棵进程树，17 项；纯 Node，不启动 Electron）
  * 40. scripts/verify-permissions.js（站点设备授权白名单：设备项拆分、来源只收 http(s)、三档授权、隐私模式封死、撤销/清空与接线，22 项；纯 Node，不启动 Electron）
  * 41. scripts/verify-switch-cache.js（模式切换缓存：代理可达 30 秒、出口取不到 60 秒内复用、时钟回拨不认、计时文案点名最慢一步，以及主进程真的接上了，21 项；纯 Node，不启动 Electron）
- * 42. scripts/verify-tab-park.js（标签停靠：切模式不再销毁标签、视图摘下但不关页面、恢复按原顺序挂回并还回原活动标签、退出私密时先摘调试通道再强制销毁私密标签、停靠不覆盖已有停靠、超出 12 个降级成只记地址并当面告知，21 项；纯 Node，不启动 Electron）
+ * 42. scripts/verify-tab-park.js（标签停靠：切模式不再销毁标签、视图摘下但不关页面、停靠时用 CDP 真正冻结页面、恢复时先解冻再挂回、只摘自己挂的调试通道、冻结失败留痕但不断停靠、退出私密时先摘调试通道再强制销毁私密标签、超出 12 个降级成只记地址并当面告知，26 项；纯 Node，不启动 Electron）
  * 43. scripts/verify-transition.js（切换动画：牛奶桶素材有效、页面无外联、进入＝从中心向外的黑色扩散、两套动画各 1 秒且时长与格子有上下限、减少动效降级、透明子窗口不抢焦点不开沙箱口子、开关默认开且可关，20 项；纯 Node，不启动 Electron）
+ * 44. scripts/verify-agent-stop.js（agent 急停与恐慌快捷键：首选被占用时按候选列表换备用键并当面说明、三处状态显示实际注册上的键、全失败只剩按钮，12 项；纯 Node，不启动 Electron）
+ * 45. scripts/verify-navigate-budget.js（agent 导航预算：默认 15 秒、3–60 秒边界、越界与小数一律拒绝不夹值、动作执行器从设置读取、主进程读写与留痕、设置页按秒填，14 项；纯 Node，不启动 Electron）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -349,13 +351,25 @@ const STEPS = [
   {
     label: '标签停靠回归',
     script: 'verify-tab-park.js',
-    items: '21 项',
+    items: '26 项',
     timeoutMs: 60000,
   },
   {
     label: '切换动画回归',
     script: 'verify-transition.js',
     items: '20 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '急停快捷键回归',
+    script: 'verify-agent-stop.js',
+    items: '12 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: 'agent 导航预算回归',
+    script: 'verify-navigate-budget.js',
+    items: '14 项',
     timeoutMs: 60000,
   },
 ];

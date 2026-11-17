@@ -31,8 +31,26 @@ const {
   validateLimits,
 } = require('./page-reader');
 
-/** 导航上限（安全审计 P1-4）：超过这么久没完成就如实报超时，不让整条通道挂住 */
+/** 导航上限（安全审计 P1-4）：超过这么久没完成就如实报超时，不让整条通道挂住。
+ *  v1.17.17 起可由主进程注入真实预算（设置页可调），这里只是兜底默认值。 */
+const { describeNavigateBudget, resolveNavigateBudget } = require('./navigate-budget');
 const NAVIGATE_TIMEOUT_MS = 15000;
+
+/** 预算来源：主进程启动时注入「读设置」的函数，测试里不注入就走默认值 */
+let navigateBudgetProvider = null;
+
+function setNavigateBudgetProvider(provider) {
+  navigateBudgetProvider = typeof provider === 'function' ? provider : null;
+}
+
+function currentNavigateBudget() {
+  if (!navigateBudgetProvider) return NAVIGATE_TIMEOUT_MS;
+  try {
+    return resolveNavigateBudget(navigateBudgetProvider());
+  } catch {
+    return NAVIGATE_TIMEOUT_MS;
+  }
+}
 
 const ACTION_TYPES = [
   'navigate',
@@ -215,7 +233,11 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog, ge
           // 以前 `await navigate()` 一直等加载完成——遇到不返回的站点、被系统吞掉的
           // 请求、或者一个永远在重定向的页面，这一个动作就会把整条动作通道挂住，
           // 后面的动作全部排队，用户只看到"agent 卡住了"。
-          const budget = Number.isFinite(params.timeoutMs) && params.timeoutMs > 0 ? params.timeoutMs : NAVIGATE_TIMEOUT_MS;
+          // 单个请求可以带 timeoutMs 覆盖；不合法就退回设置里的预算，绝不悄悄夹值。
+          const requested = params.timeoutMs;
+          const budget = requested === undefined || requested === null || requested === ''
+            ? currentNavigateBudget()
+            : resolveNavigateBudget(requested);
           let timer = null;
           const timeout = new Promise((resolve) => {
             timer = setTimeout(() => resolve({ __timeout: true }), budget);
@@ -231,7 +253,7 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog, ge
               ok: false,
               action: type,
               code: 'NAVIGATE_TIMEOUT',
-              error: `打开这个地址超过 ${Math.round(budget / 1000)} 秒还没完成（可能站点很慢、一直在跳转，或者网络断了）。地址本身已经交给浏览器，你可以稍后用 state / readPage 看看是否已经加载好。`,
+              error: `打开这个地址超过 ${describeNavigateBudget(budget)}还没完成（可能站点很慢、一直在跳转，或者网络断了）。地址本身已经交给浏览器，你可以稍后用 state / readPage 看看是否已经加载好。`,
               url: params.url,
               elapsedMs: Date.now() - started,
             };
@@ -376,4 +398,4 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog, ge
   return { run };
 }
 
-module.exports = { ACTION_TYPES, createActionRunner };
+module.exports = { ACTION_TYPES, createActionRunner, setNavigateBudgetProvider };

@@ -868,6 +868,8 @@
       wirePinnedIo();
       // 抓包慢请求阈值（v1.16.0）：与工具箱共用主进程偏好，进入分区就回读
       loadSlowMs();
+      // agent 导航预算（v1.17.17）：同样存在主进程，进分区回读
+      loadNavigateBudget();
       // 图形性能策略（A5）：进分区就回读，适配器信息也一并刷新
       loadGpuPolicy();
       // 标签休眠时长（G）：进分区回读，改完立刻生效
@@ -4041,6 +4043,85 @@
         if (event.key === 'Enter') {
           event.preventDefault();
           submitSlowMs();
+        }
+      });
+    }
+  }
+
+  /* ---------------- agent 导航预算（v1.17.17） ---------------- */
+  /*
+     与慢请求阈值同一套口径：值只有一份，存在主进程（toolbox-prefs.json）。
+     动作通道每次导航前问它，所以保存后立刻生效，不用重启。
+  */
+
+  async function loadNavigateBudget(notice) {
+    const input = byId('nav-budget-ms');
+    const hint = byId('nav-budget-hint');
+    const badge = byId('nav-budget-badge');
+    const saveBtn = byId('btn-nav-budget-save');
+    if (!input) return;
+
+    if (typeof window.nyx.tbNavigateTimeout !== 'function') {
+      if (saveBtn) saveBtn.disabled = true;
+      input.disabled = true;
+      if (hint) hint.textContent = '当前内核不支持读取这个值（缺少主进程接口）。';
+      return;
+    }
+
+    const res = await window.nyx.tbNavigateTimeout().catch(() => null);
+    if (!res || res.ok === false) {
+      if (hint) hint.textContent = `读取失败：${(res && res.error) || '未知原因'}`;
+      return;
+    }
+    const minSec = Math.round((res.min || 3000) / 1000);
+    const maxSec = Math.round((res.max || 60000) / 1000);
+    input.min = String(minSec);
+    input.max = String(maxSec);
+    input.value = String(Math.round((res.navigateTimeoutMs || 15000) / 1000));
+    if (badge) badge.textContent = `${Math.round((res.navigateTimeoutMs || 15000) / 1000)} 秒`;
+    if (hint) {
+      hint.textContent = notice
+        || `现在是 ${res.example || ''}（默认 ${Math.round((res.fallback || 15000) / 1000)} 秒，可设 ${minSec}–${maxSec} 秒）`;
+    }
+  }
+
+  const navBudgetSave = byId('btn-nav-budget-save');
+  const navBudgetInput = byId('nav-budget-ms');
+  if (navBudgetSave && navBudgetInput) {
+    if (typeof window.nyx.tbNavigateTimeoutSet !== 'function') {
+      navBudgetSave.disabled = true;
+      navBudgetInput.disabled = true;
+    } else {
+      const submitNavBudget = async () => {
+        const hint = byId('nav-budget-hint');
+        const badge = byId('nav-budget-badge');
+        const raw = String(navBudgetInput.value || '').trim();
+        const seconds = Number(raw);
+        if (!raw || !Number.isFinite(seconds) || !Number.isInteger(seconds) || seconds < 3 || seconds > 60) {
+          if (hint) hint.textContent = '这个上限需要是 3–60 之间的整数秒数';
+          return;
+        }
+        navBudgetSave.disabled = true;
+        try {
+          const res = await window.nyx.tbNavigateTimeoutSet(seconds * 1000).catch(() => null);
+          if (!res || res.ok === false) {
+            if (hint) hint.textContent = `保存失败：${(res && res.error) || '未知原因'}`;
+            setStatus('agent 导航上限保存失败', true);
+            return;
+          }
+          navBudgetInput.value = String(Math.round(res.navigateTimeoutMs / 1000));
+          if (badge) badge.textContent = `${Math.round(res.navigateTimeoutMs / 1000)} 秒`;
+          if (hint) hint.textContent = `已保存：agent 打开网页最多等 ${res.example}`;
+          setStatus(`agent 导航上限已保存为 ${res.example}`);
+        } finally {
+          navBudgetSave.disabled = false;
+        }
+      };
+      navBudgetSave.addEventListener('click', submitNavBudget);
+      navBudgetInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          submitNavBudget();
         }
       });
     }

@@ -77,10 +77,11 @@ const {
 const { Vault } = require('./core/vault');
 const { ProxyService } = require('./core/proxy-service');
 const { TabManager, normalizeInput } = require('./core/tabs');
-const { createActionRunner } = require('./core/actions');
+const { createActionRunner, setNavigateBudgetProvider } = require('./core/actions');
 // 统一动作通道（清单 C）：所有 agent 动作唯一入口，权限/确认/留痕/急停都从这里过
 const { createDispatcher } = require('./core/agent-dispatch');
 const { AgentAudit, toCsv } = require('./core/agent-audit');
+const { describeShortcutResult, shortcutCandidates } = require('./core/agent-shortcut');
 // 站点三层授权（清单 E）：屏蔽优先、白名单免进站确认、未命中问一次、全局关着一律不动
 const {
   addRule: addSiteRule,
@@ -335,6 +336,11 @@ const THEME_BG = { ink: '#0c0a09', aurora: '#080b16', paper: '#f5f1e8', quiet: '
 const MAX_TABS = Math.max(1, Number(process.env.NYX_MAX_TABS || 12));
 /** 恐慌清场快捷键 */
 const PANIC_SHORTCUT = process.env.NYX_PANIC_SHORTCUT || 'CommandOrControl+Shift+X';
+/**
+ * 恐慌清场的备用键：首选被占用时依次尝试。
+ * 与 agent 急停的备用键错开，免得两个安全键互抢。
+ */
+const PANIC_FALLBACKS = ['CommandOrControl+Alt+Shift+Q', 'CommandOrControl+Shift+F11'];
 /**
  * agent 紧急停止快捷键（清单 D）。
  *
@@ -972,6 +978,10 @@ if (process.argv.includes(VERIFY_INTEGRITY_FLAG)) {
 async function bootstrap() {
   registerIpc();
 
+  // 动作通道的导航预算从设置里读（v1.17.17）：注入成函数而不是值，
+  // 用户改完设置立刻生效，不用重启浏览器。
+  setNavigateBudgetProvider(() => readToolboxPrefs().navigateTimeoutMs);
+
   // 剪贴板 API 形状先探一次并记诊断：兼容层不能让"运行时退回了同步 API"这件事安静地发生
   probeClipboardShape().catch(() => {});
 
@@ -1146,7 +1156,7 @@ async function bootstrap() {
 
   console.log(
     `[Nyx] 就绪｜模式：${sessions.getMode()}｜出站链路：${sessions.getLink()}｜` +
-      `代理端口：${sessions.getProxyPort()}｜标签上限：${MAX_TABS}｜恐慌快捷键：${PANIC_SHORTCUT}`,
+      `代理端口：${sessions.getProxyPort()}｜标签上限：${MAX_TABS}｜恐慌快捷键：${runtime.panicShortcut || '（注册失败）'}`,
   );
 }
 
@@ -7399,6 +7409,13 @@ async function installExtensionFromUpdateSource(entry) {
  * 改成主进程落一份小配置，两边都读它——面板仍然保留 localStorage 兜底，
  * 老版本写进去的值第一次启动时会被读上来当默认。
  */
+const {
+  NAVIGATE_BUDGET_DEFAULT,
+  NAVIGATE_BUDGET_MAX,
+  NAVIGATE_BUDGET_MIN,
+  describeNavigateBudget,
+} = require('./core/navigate-budget');
+
 const NET_SLOW_DEFAULT = 1000;
 const NET_SLOW_MIN = 50;
 const NET_SLOW_MAX = 10000;
@@ -7414,15 +7431,31 @@ function normalizeSlowMs(value) {
   return num;
 }
 
+/**
+ * agent 导航预算（v1.17.17）：慢站合法地会把 15 秒用光，写死就会"明明打开了却报超时"。
+ * 范围 3–60 秒，非法值一律回默认（见 src/core/navigate-budget.js）。
+ */
+function normalizeNavigateTimeout(value) {
+  const num = Number(value);
+  if (!Number.isInteger(num)) return null;
+  if (num < NAVIGATE_BUDGET_MIN || num > NAVIGATE_BUDGET_MAX) return null;
+  return num;
+}
+
 function readToolboxPrefs() {
   try {
     const file = toolboxPrefsPath();
-    if (!fs.existsSync(file)) return { slowMs: NET_SLOW_DEFAULT };
+    const fallback = { slowMs: NET_SLOW_DEFAULT, navigateTimeoutMs: NAVIGATE_BUDGET_DEFAULT };
+    if (!fs.existsSync(file)) return fallback;
     const raw = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
     const slow = normalizeSlowMs(raw && raw.slowMs);
-    return { slowMs: slow == null ? NET_SLOW_DEFAULT : slow };
+    const nav = normalizeNavigateTimeout(raw && raw.navigateTimeoutMs);
+    return {
+      slowMs: slow == null ? NET_SLOW_DEFAULT : slow,
+      navigateTimeoutMs: nav == null ? NAVIGATE_BUDGET_DEFAULT : nav,
+    };
   } catch {
-    return { slowMs: NET_SLOW_DEFAULT };
+    return { slowMs: NET_SLOW_DEFAULT, navigateTimeoutMs: NAVIGATE_BUDGET_DEFAULT };
   }
 }
 
@@ -8801,6 +8834,36 @@ function registerToolboxIpc() {
     return { ok: true, slowMs: prefs.slowMs };
   });
 
+  /* ---- agent 导航预算（v1.17.17）：设置页读写，动作通道每次导航前问它 ---- */
+
+  ipcMain.handle('nyx:tb:navigate-timeout', () => {
+    const prefs = readToolboxPrefs();
+    return {
+      ok: true,
+      navigateTimeoutMs: prefs.navigateTimeoutMs,
+      min: NAVIGATE_BUDGET_MIN,
+      max: NAVIGATE_BUDGET_MAX,
+      fallback: NAVIGATE_BUDGET_DEFAULT,
+      example: describeNavigateBudget(prefs.navigateTimeoutMs),
+    };
+  });
+
+  ipcMain.handle('nyx:tb:navigate-timeout-set', (_event, payload) => {
+    const value = normalizeNavigateTimeout(payload && payload.navigateTimeoutMs);
+    if (value == null) {
+      return {
+        ok: false,
+        error: `导航预算需要是 ${NAVIGATE_BUDGET_MIN / 1000}–${NAVIGATE_BUDGET_MAX / 1000} 秒之间的整数毫秒数`,
+      };
+    }
+    const prefs = writeToolboxPrefs({ navigateTimeoutMs: value });
+    if (!prefs) return { ok: false, error: '写入失败' };
+    diagnostics.info('NAVIGATE_BUDGET_UPDATED', `agent 导航预算改成 ${describeNavigateBudget(value)}`, {
+      navigateTimeoutMs: value,
+    });
+    return { ok: true, navigateTimeoutMs: prefs.navigateTimeoutMs, example: describeNavigateBudget(value) };
+  });
+
   ipcMain.handle('nyx:tb:set-open', (_event, payload) =>
     setToolboxOpen(payload && payload.open, payload && payload.width));
 
@@ -9787,7 +9850,7 @@ function createTray() {
     },
     { label: '打开升级包文件夹', click: () => openUpdateFolder() },
     { label: `关于 Nyx（当前版本 ${app.getVersion()}）`, click: () => showAboutDialog() },
-    { label: `恐慌清场（${PANIC_SHORTCUT}）`, click: () => panic() },
+    { label: `恐慌清场（${runtime.panicShortcut || PANIC_SHORTCUT}）`, click: () => panic() },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() },
   ]);
@@ -9801,9 +9864,52 @@ function createTray() {
 /* ------------------------------------------------------------------ */
 
 function registerPanicShortcut() {
-  const ok = globalShortcut.register(PANIC_SHORTCUT, () => panic());
-  if (!ok) {
-    console.warn(`[Nyx] 恐慌快捷键注册失败（${PANIC_SHORTCUT}），可能已被其他程序占用`);
+  // 与 agent 急停同一套口径：首选被占用就依次试备用键，换了谁就说谁。
+  // 恐慌清场是"出事时唯一还来得及的那一下"，默默失效比没有更危险。
+  const candidates = shortcutCandidates(PANIC_SHORTCUT, PANIC_FALLBACKS);
+  const tried = [];
+  let effective = '';
+
+  for (const candidate of candidates) {
+    tried.push(candidate);
+    let ok = false;
+    try {
+      ok = globalShortcut.register(candidate, () => panic());
+    } catch (err) {
+      console.warn(`[Nyx] 恐慌快捷键 ${candidate} 注册时抛错：`, err.message);
+      ok = false;
+    }
+    if (ok) {
+      effective = candidate;
+      break;
+    }
+  }
+
+  runtime.panicShortcut = effective;
+  const verdict = describeShortcutResult({ preferred: PANIC_SHORTCUT, effective, tried });
+  if (verdict.code === 'PREFERRED') {
+    console.log(`[Nyx] ${verdict.message}`);
+  } else if (verdict.code === 'FALLBACK') {
+    console.warn(`[Nyx] 恐慌快捷键换了（首选 ${PANIC_SHORTCUT} 被占用）：${effective}`);
+    diagnostics.warn('PANIC_SHORTCUT_FALLBACK', '首选恐慌快捷键被占用，已换成备用键', {
+      preferred: PANIC_SHORTCUT,
+      effective,
+    });
+    notifyNotice({
+      level: 'warn',
+      code: 'PANIC_SHORTCUT_FALLBACK',
+      title: `恐慌清场改用 ${effective}`,
+      message: `首选键 ${PANIC_SHORTCUT} 已被其他程序占用，所以换成了 ${effective}。这个键按下会立刻关窗并清场。`,
+    });
+  } else {
+    console.warn(`[Nyx] ${verdict.message}`);
+    diagnostics.warn('PANIC_SHORTCUT_FAILED', '恐慌快捷键一个都注册不上', { tried });
+    notifyNotice({
+      level: 'error',
+      code: 'PANIC_SHORTCUT_FAILED',
+      title: '恐慌快捷键不可用',
+      message: `试过的键都被别的程序占着（${tried.join('、') || '无'}）。暂时只能用托盘菜单里的「恐慌清场」。`,
+    });
   }
 }
 
@@ -9811,22 +9917,50 @@ function registerPanicShortcut() {
  * agent 急停快捷键（清单 D）。
  *
  * 注册失败不能静默：那样用户以为有热键、按下去没反应，比没有更糟。
- * 所以失败时既打日志、也记诊断、还在工具栏按钮的 title 里去掉热键提示（由界面读 status）。
+ * 所以：首选被占用时**先按顺序试备用键**，换成了谁就明说（日志 + 诊断 + 前台提示）；
+ * 一个都注册不上才退到"只有工具栏按钮"，同样当面告知。
  */
 function registerAgentStopShortcut() {
-  const ok = globalShortcut.register(AGENT_STOP_SHORTCUT, () => {
-    stopAgent('快捷键紧急停止');
-  });
-  runtime.agentStopShortcutOk = ok;
-  if (ok) {
-    console.log(`[Nyx] agent 急停快捷键：${AGENT_STOP_SHORTCUT}`);
-  } else {
-    console.warn(`[Nyx] agent 急停快捷键注册失败（${AGENT_STOP_SHORTCUT}），可能已被其他程序占用；工具栏按钮仍可用`);
-    diagnostics.warn('AGENT_STOP_SHORTCUT_FAILED', 'agent 急停快捷键注册失败', {
-      shortcut: AGENT_STOP_SHORTCUT,
-    });
+  const candidates = shortcutCandidates(AGENT_STOP_SHORTCUT);
+  const tried = [];
+  let effective = '';
+
+  for (const candidate of candidates) {
+    tried.push(candidate);
+    let ok = false;
+    try {
+      ok = globalShortcut.register(candidate, () => {
+        stopAgent('快捷键紧急停止');
+      });
+    } catch (err) {
+      console.warn(`[Nyx] 急停快捷键 ${candidate} 注册时抛错：`, err.message);
+      ok = false;
+    }
+    if (ok) {
+      effective = candidate;
+      break;
+    }
   }
-  return ok;
+
+  const verdict = describeShortcutResult({ preferred: AGENT_STOP_SHORTCUT, effective, tried });
+  runtime.agentStopShortcut = effective;
+  runtime.agentStopShortcutOk = Boolean(effective);
+
+  console.log(`[Nyx] ${verdict.message}`);
+  if (verdict.code === 'FALLBACK') {
+    console.warn(`[Nyx] agent 急停快捷键换了（首选 ${AGENT_STOP_SHORTCUT} 被占用）：${effective}`);
+    diagnostics.warn('AGENT_STOP_SHORTCUT_FALLBACK', '首选急停快捷键被占用，已换成备用键', {
+      preferred: AGENT_STOP_SHORTCUT,
+      effective,
+    });
+  } else if (verdict.code === 'NONE') {
+    diagnostics.warn('AGENT_STOP_SHORTCUT_FAILED', 'agent 急停快捷键一个都注册不上', { tried });
+  }
+
+  if (verdict.notice) {
+    notifyNotice({ level: verdict.ok ? 'warn' : 'error', code: 'AGENT_STOP_SHORTCUT_' + verdict.code, ...verdict.notice });
+  }
+  return Boolean(effective);
 }
 
 /**
@@ -10306,7 +10440,7 @@ function agentStatusPayload() {
     stopped: runtime.agentStopped === true,
     stopReason: runtime.agentStopReason || '',
     stopAt: runtime.agentStopAt || 0,
-    stopShortcut: AGENT_STOP_SHORTCUT,
+    stopShortcut: runtime.agentStopShortcut || AGENT_STOP_SHORTCUT,
     mode: runtime.agentMode || 'builtin',
     // 内部接入模式的完整状态（清单 A）：审计是否完整、要不要重启、外部模式的端点
     modeInfo: agentModeStatus(),
@@ -10805,7 +10939,7 @@ function agentDocOptions() {
     modeLabel: modeInfo.label,
     auditComplete: modeInfo.auditComplete !== false,
     stopped: runtime.agentStopped === true,
-    stopShortcut: AGENT_STOP_SHORTCUT,
+    stopShortcut: runtime.agentStopShortcut || AGENT_STOP_SHORTCUT,
     stopShortcutOk: runtime.agentStopShortcutOk !== false,
     cdpPort: runtime.agentDebugPort,
     allowCount: Array.isArray(policy.allow) ? policy.allow.length : 0,
@@ -11330,7 +11464,7 @@ function registerDigestIpc() {
       gap: DIGEST_PANEL_GAP,
       lamp: buildAgentLamp(),
       stopped: runtime.agentStopped === true,
-      stopShortcut: AGENT_STOP_SHORTCUT,
+      stopShortcut: runtime.agentStopShortcut || AGENT_STOP_SHORTCUT,
       auditComplete: (runtime.agentMode || 'builtin') === 'builtin',
       recent,
       inset: applyRightInsets(),
