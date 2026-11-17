@@ -21,6 +21,13 @@
 /* ---------------- 墨夜 Ink Night（默认）---------------- */
 :root,
 [data-theme="ink"] {
+  /*
+    界面字号倍数（清单 D3 遗留项）。两份界面样式里所有 font-size 都写成
+    calc(Npx * var(--font-scale))，所以改这一个变量就能整体放大/缩小文字，
+    而图标尺寸与间距仍是固定 px——缩放布局会牵动 WebContentsView 的几何，那是另一件事。
+    取值由 src/core/font-scale.js 决定，渲染层只负责写到 <html> 上。
+  */
+  --font-scale: 1;
   /* 底层：墨色五阶，全部偏暖（R≥G≥B），避免冷灰发脏 */
   --bg: #0c0a09;
   --bg-shell: #0c0a09;

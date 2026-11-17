@@ -1409,6 +1409,8 @@
     byId('pref-show-mode-switch').checked = uiPrefs.showModeSwitch !== false;
     if (byId('pref-toolbar-labels')) byId('pref-toolbar-labels').checked = uiPrefs.toolbarLabels !== false;
     if (byId('pref-motion-level')) byId('pref-motion-level').value = uiPrefs.motionLevel === 'lively' ? 'lively' : 'calm';
+    if (byId('pref-font-scale')) byId('pref-font-scale').value = uiPrefs.fontScale || 'normal';
+    applyFontScale(uiPrefs);
   if (byId('pref-mode-transition')) byId('pref-mode-transition').checked = uiPrefs.modeTransition !== false;
     applySettingsMotion(uiPrefs);
     // 主题回填 + 设置窗口自身立即换肤（主窗口由主进程 pushState 同步）
@@ -1465,6 +1467,24 @@
     root.classList.toggle('motion-reduced', Boolean(motion.reduced));
   }
 
+  /**
+   * 界面字号档位（清单 D3 遗留项）：设置页自己也吃这一套。
+   * 倍率唯一来源是 src/core/font-scale.js（经 preload 同步取），这里只写 CSS 变量。
+   */
+  function fontScaleLabel(key) {
+    if (window.nyx && window.nyx.fontScaleLabel) return window.nyx.fontScaleLabel(key);
+    return key === 'small' ? '小' : key === 'large' ? '大' : key === 'huge' ? '特大' : '标准';
+  }
+
+  function applyFontScale(ui) {
+    const root = document.documentElement;
+    if (!root) return;
+    const key = (ui && ui.fontScale) || 'normal';
+    const factor = (window.nyx && window.nyx.fontScaleFactor) ? window.nyx.fontScaleFactor(key) : 1;
+    root.style.setProperty('--font-scale', String(factor));
+    root.dataset.fontScale = key;
+  }
+
   async function saveUiPref(key, value) {
     const res = await window.nyx.setUiPref(key, value);
     if (!res || !res.ok) {
@@ -1507,6 +1527,22 @@
   if (byId('pref-motion-level')) {
     byId('pref-motion-level').addEventListener('change', (event) => {
       saveUiPref('motionLevel', event.target.value === 'lively' ? 'lively' : 'calm');
+    });
+  }
+
+  // 界面字号档位：只缩放文字（倍率来自 src/core/font-scale.js），本页立即生效
+  if (byId('pref-font-scale')) {
+    byId('pref-font-scale').addEventListener('change', async (event) => {
+      const key = event.target.value;
+      const res = await window.nyx.setUiPref('fontScale', key);
+      if (!res || !res.ok) {
+        setStatus(`字号没改成：${(res && res.error) || '未知原因'}`);
+        await loadUiPrefs();
+        return;
+      }
+      uiPrefs = res.ui;
+      applyFontScale(uiPrefs);
+      setStatus(`界面字号已改为${fontScaleLabel(key)}`);
     });
   }
 

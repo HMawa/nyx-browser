@@ -549,6 +549,21 @@ function applyUiPrefs() {
   for (const label of els.toolbarLabels || []) label.hidden = !showLabels;
   document.documentElement.classList.toggle('tb-labels', showLabels);
   applyMotionPrefs(ui);
+  applyFontScale(ui);
+}
+
+/**
+ * 界面字号档位（清单 D3 遗留项）。
+ * 样式侧所有 font-size 都是 calc(Npx * var(--font-scale))，这里只把倍数写到根元素上；
+ * 倍率的唯一来源是 src/core/font-scale.js（主进程给 snapshot，界面上不另写一份数字）。
+ */
+function applyFontScale(ui) {
+  const root = document.documentElement;
+  if (!root) return;
+  const key = (ui && ui.fontScale) || 'normal';
+  const factor = (window.nyx && window.nyx.fontScaleFactor) ? window.nyx.fontScaleFactor(key) : 1;
+  root.style.setProperty('--font-scale', String(factor));
+  root.dataset.fontScale = key;
 }
 
 /**

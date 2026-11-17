@@ -32,6 +32,12 @@ const UI_PREF_DEFAULTS = {
    * 关掉之后切换是瞬时的——有人嫌动画碍事，也有人机器带不动透明窗口，这是他们该有的开关。
    */
   modeTransition: true,
+  /**
+   * 界面字号档位（清单 D3 里"属独立改造"的那一项）：small 小 / normal 标准（默认）/
+   * large 大 / huge 特大，倍率见 src/core/font-scale.js。
+   * 只缩放文字，不动图标与间距——缩放布局会牵动 WebContentsView 的几何，那是另一件事。
+   */
+  fontScale: 'normal',
   /** 界面主题：ink 墨夜 / aurora 极光 / paper 素纸 / quiet 静谧 / cream 奶白 / sea 海盐 */
   theme: 'ink',
   /** 下载保存目录；空字符串 = 跟随系统下载目录 */
@@ -128,6 +134,8 @@ const UI_PREF_ENUMS = {
   privateSiteMode: ['all', 'allowlist'],
   /** 动效档位（清单 B2）；系统「减少动效」在渲染层再降一档，不改这里存的值 */
   motionLevel: ['calm', 'lively'],
+  /** 界面字号档位（清单 D3 遗留项）；倍率见 src/core/font-scale.js */
+  fontScale: ['small', 'normal', 'large', 'huge'],
 };
 
 class UiStore {

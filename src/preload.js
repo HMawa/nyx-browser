@@ -10,6 +10,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 // 动效档位的时长与缓动只有一份（src/core/motion.js）；界面侧同步取用，避免两处各写一套数字
 const motionCore = require('./core/motion');
+const fontScaleCore = require('./core/font-scale');
 
 /**
  * 主题启动前置：渲染层要等 getState() 回调才知道主题，
@@ -46,6 +47,14 @@ contextBridge.exposeInMainWorld('nyx', {
 
   /** 动效档位解析（清单 B2）：同步返回时长/缓动/按压，系统减少动效时自动降级 */
   motionResolve: (payload) => motionCore.resolveMotion(payload || {}),
+
+  /**
+   * 界面字号档位（清单 D3 遗留项）：倍率与中文名的唯一来源是 src/core/font-scale.js，
+   * 界面侧只读结果，不另写一份数字。
+   */
+  fontScaleFactor: (key) => fontScaleCore.fontScaleFactor(key),
+  fontScaleLabel: (key) => fontScaleCore.describeFontScale(key),
+  fontScaleOptions: () => fontScaleCore.fontScaleOptions(),
 
   /* ---------------- 首次安装引导（清单 D2） ---------------- */
 

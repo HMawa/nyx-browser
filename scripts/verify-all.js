@@ -49,6 +49,7 @@
  * 43. scripts/verify-transition.js（切换动画：牛奶桶素材有效、页面无外联、进入＝从中心向外的黑色扩散、两套动画各 1 秒且时长与格子有上下限、减少动效降级、透明子窗口不抢焦点不开沙箱口子、开关默认开且可关，20 项；纯 Node，不启动 Electron）
  * 44. scripts/verify-agent-stop.js（agent 急停与恐慌快捷键：首选被占用时按候选列表换备用键并当面说明、三处状态显示实际注册上的键、全失败只剩按钮，12 项；纯 Node，不启动 Electron）
  * 45. scripts/verify-navigate-budget.js（agent 导航预算：默认 15 秒、3–60 秒边界、越界与小数一律拒绝不夹值、动作执行器从设置读取、主进程读写与留痕、设置页按秒填，14 项；纯 Node，不启动 Electron）
+ * 46. scripts/verify-font-scale.js（界面字号档位：四档倍率与中文名、未知值回标准档、两份界面样式里字号全部乘 --font-scale 且不留裸 px、主窗口与设置页都会写到根元素、preload 三条同步 API、模块保持纯逻辑，13 项；纯 Node，不启动 Electron）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -370,6 +371,12 @@ const STEPS = [
     label: 'agent 导航预算回归',
     script: 'verify-navigate-budget.js',
     items: '14 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '界面字号档位回归',
+    script: 'verify-font-scale.js',
+    items: '13 项',
     timeoutMs: 60000,
   },
 ];
