@@ -500,6 +500,17 @@
    * 留着它就会把正文裁掉一半——卡片铺开着却只露出前几行。
    * @param {Element|null} root
    */
+  /**
+   * 按偏好把这个分区里的卡片折叠状态定一次（面板可见时调用）。
+   * 只切 class 与内联高度，不写偏好、不动焦点，重复调用是安全的。
+   */
+  function applyFoldStateOfPanel(panel) {
+    if (!panel) return;
+    for (const card of panel.querySelectorAll('.info-card[data-fold-id]')) {
+      applyFold(card, foldStateOf(card), false);
+    }
+  }
+
   function revealCards(root) {
     if (!root || !root.querySelectorAll) return;
     // 这一页在后台时，CSS 过渡会被浏览器冻在起始帧（opacity 0），连兜底计时器也被节流
@@ -833,6 +844,11 @@
     // 兜底：滚动渐显靠 IntersectionObserver，面板从 display:none 变可见时它不一定重算，
     // 结果就是"分区里明明有卡片却一片空白"。这里直接把当前分区的卡片点亮，内容不许看不见。
     revealCards(panelOf(section));
+
+    // 折叠状态在这里再落实一次：init() 里增强卡片时各分区还是 display:none，
+    // body 的高度量不出来，收起/铺开就定不准（表现为"默认该收起的隐私卡片全是铺开的"）。
+    // 面板刚变可见时按记过的偏好重新定一次，代价只是几十次 class 切换。
+    applyFoldStateOfPanel(panelOf(section));
 
     setStatus(`已进入「${SEC_LABELS[section]}」`);
 
@@ -4814,62 +4830,28 @@ async function loadFootprint() {
   }
 
   /**
-   * 卡片该住哪一页。
-   * 历史原因（v1.12～1.17.10 几次插入新分区）：「外观」那 5 张卡片掉到了面板外面，
-   * 于是它们对任何分区都永远可见；「隐私与安全」的 4 张卡片也落在滚动区之外。
-   * 标记结构的问题要改标记（已记在台账），但在那之前界面不能是坏的——
-   * 这里按卡片标题把住错页的卡片搬回去，只搬这 9 张，别的卡片一概不碰。
+   * 只体检、不动手。
+   *
+   * v1.12～1.17.17 这段时间里 settings.html 的面板开闭标签是不配平的，浏览器解析时
+   * 会把 8 个面板踢出 main、把 9 张卡片挤到面板外面，于是"点结构图右侧不动"。
+   * 当时用 normalizePanels()+CARD_HOME 在运行时搬家兜住界面。标记层已经修好
+   * （section 开闭配平、卡片各自待在自己的分区里），所以这里只留一条体检：
+   * 真出了结构问题要**叫出来**，而不是悄悄搬走——搬家会让"坏掉"永远没人知道。
    */
-  const CARD_HOME = {
-    地址栏置顶: 'appearance',
-    抓包慢请求阈值: 'appearance',
-    图形性能: 'appearance',
-    硬件加速: 'appearance',
-    标签休眠: 'appearance',
-    离线阅读缓存: 'privacy',
-    加固状态: 'privacy',
-    站点授权决策轨迹: 'privacy',
-    密码与表单记忆: 'privacy',
-  };
-
-  /**
-   * 把卡片搬回它该在的那一页（放进该页的 .sec-scroll 里）。
-   * 只处理 CARD_HOME 里点名的标题，返回搬动张数。
-   */
-  function normalizeCards() {
-    let moved = 0;
-    const cards = Array.from(document.querySelectorAll('.info-card'));
-    for (const card of cards) {
-      const title = (card.querySelector('.info-title, h3, h2')?.textContent || '').trim();
-      const home = Object.keys(CARD_HOME).find((key) => title.includes(key));
-      if (!home) continue;
-      const host = document.querySelector(`.sec-panel[data-sec="${CARD_HOME[home]}"] .sec-scroll`);
-      if (!host || card.parentElement === host) continue;
-      host.appendChild(card);
-      moved += 1;
-    }
-    return moved;
-  }
-
-  /**
-   * 把跑丢的分区面板收回内容区（真 bug 兜底）：
-   * 只要有一个 `.sec-panel` 不在 `main.settings-main` 里，它就是 `body` 的直接子节点，
-   * 于是"点结构图上的节点，右侧不动"——面板在自己的位置上显示，而不是在内容区里换。
-   * 这里按文档顺序统一搬进来，一处修好所有分区；顺序不变，事件绑定不受影响。
-   */
-  function normalizePanels() {
+  function auditPanels() {
     const main = document.querySelector('.settings-main');
-    if (!main) return 0;
-    const all = Array.from(document.querySelectorAll('.sec-panel'));
-    let moved = 0;
-    for (const panel of all) {
-      if (panel.parentElement !== main) {
-        main.appendChild(panel);
-        moved += 1;
-      }
+    if (!main) {
+      console.warn('[Nyx] 设置页找不到内容区 .settings-main，所有分区都无法切换。');
+      return [];
     }
-    moved += normalizeCards();
-    return moved;
+    const stray = Array.from(document.querySelectorAll('.sec-panel')).filter(
+      (panel) => panel.parentElement !== main
+    );
+    if (stray.length) {
+      const names = stray.map((panel) => panel.dataset.sec || '(未知)').join('、');
+      console.warn(`[Nyx] 有 ${stray.length} 个分区面板不在内容区里（${names}）：设置页标记结构坏了，请报这个现象。`);
+    }
+    return stray;
   }
 
   async function init() {
@@ -4877,8 +4859,7 @@ async function loadFootprint() {
     // 折叠只依赖界面偏好，所以先把偏好等到手、立刻增强卡片，再让另外两件慢慢来。
     // （硬件探测在部分驱动/远程会话下会挂住；把它排在折叠前面就等于"一颗钉子钉住整页"。）
     await settleInit('界面偏好', 8000, loadUiPrefs);
-    const moved = normalizePanels();
-    if (moved) console.warn(`[Nyx] 有 ${moved} 个分区面板不在内容区里，已收回去。`);
+    auditPanels();
     setupCardFolding();
     // 结构图：入口先画出来，用户一进来就能点（不依赖任何网络/硬件信息）
     setupMindmap();

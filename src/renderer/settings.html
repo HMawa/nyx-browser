@@ -64,18 +64,17 @@
       </aside>
 
       <main class="settings-main">
-        <!-- ============ 外观 ============ -->
-        <section class="sec-panel active" data-sec="appearance">
-          <header class="sec-head">
+            <section class="sec-panel active" data-sec="appearance">
+<header class="sec-head">
             <h2>外观</h2>
             <p>控制主窗口顶栏显示哪些元素。浏览器级功能入口已统一收进设置中心，顶栏只保留导航、地址栏与设置。</p>
-          </header>
+          <div class="sec-fold-tools"><button type="button" class="btn btn-mini" data-fold-all="open">全部铺开</button><button type="button" class="btn btn-mini" data-fold-all="close">全部收回</button></div></header>
 
-          <div class="sec-scroll">
-            <section class="info-card">
-              <div class="info-head">
+          <div class="sec-scroll" data-fx-progress="1">
+            <section class="info-card fx-reveal">
+              <div class="info-head" role="button" tabindex="0" title="顶栏元素：点击铺开或收回">
                 <h3>顶栏元素</h3>
-                <span class="badge" id="appearance-state">—</span>
+                <span class="badge" id="appearance-state">已生效</span>
               </div>
               <div class="info-body">
                 <div class="set-row">
@@ -87,7 +86,7 @@
                   </div>
                   <div class="set-row-ctl">
                     <label class="set-switch">
-                      <input type="checkbox" id="pref-show-link-badge" />
+                      <input type="checkbox" id="pref-show-link-badge">
                       <span>显示</span>
                     </label>
                   </div>
@@ -102,7 +101,7 @@
                   </div>
                   <div class="set-row-ctl">
                     <label class="set-switch">
-                      <input type="checkbox" id="pref-show-mode-switch" />
+                      <input type="checkbox" id="pref-show-mode-switch">
                       <span>显示</span>
                     </label>
                   </div>
@@ -113,26 +112,149 @@
                   它们互相关联（换深色/浅色会连带改按钮对比），分开放容易只改一半。
                 </p>
               </div>
-            </div>
+            </section><section class="info-card fx-reveal">
+              <div class="info-head" role="button" tabindex="0" title="地址栏置顶：点击铺开或收回">
+                <h3>地址栏置顶</h3>
+                <span class="badge" id="pinned-count">0 / 15</span>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  在地址栏建议里右键任意一条即可置顶 / 取消置顶（每组最多 5 条）。
+                  置顶项在命中的查询里排最前；按「工作 / 学习 / 其他」分组管理，
+                  组内可用拖动或 ↑ ↓ 调顺序，跨组请用行首的分组下拉。
+                </p>
+                <div class="ext-list" id="pinned-list"><p class="hint">还没有置顶项。在地址栏建议里右键任意一条即可置顶。</p></div>
+                <!-- 导入 / 导出（v1.15.0）：换机器时把置顶习惯带走 -->
+                <div class="sec-actions" id="pinned-io-row">
+                  <button class="btn btn-mini" type="button" id="btn-pinned-export">导出 JSON</button>
+                  <button class="btn btn-mini" type="button" id="btn-pinned-import">导入 JSON</button>
+                  <span class="hint" id="pinned-io-hint">导入按地址合并去重，每组最多 5 条。</span>
+                </div>
+              </div>
+            </section><section class="info-card fx-reveal">
+              <div class="info-head" role="button" tabindex="0" title="抓包慢请求阈值：点击铺开或收回">
+                <h3>抓包慢请求阈值</h3>
+                <span class="badge" id="net-slow-badge">1000 ms</span>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  工具箱抓包列表的「只看慢请求」开关、每行后面的「慢」标记，以及详情里的瀑布统计，
+                  都按这个阈值判断。保存后立即生效，已经打开的抓包面板下一次刷新就会用新阈值。
+                </p>
+                <div class="sec-actions net-slow-row">
+                  <input type="number" id="net-slow-ms" class="text-input net-slow-input" aria-label="抓包慢请求阈值（毫秒）" min="50" max="10000" step="50" inputmode="numeric" spellcheck="false">
+                  <span class="net-slow-unit">毫秒</span>
+                  <button type="button" class="btn" id="btn-net-slow-save">保存</button>
+                  <span class="hint" id="net-slow-hint">当前阈值 1000 ms（默认 1000 ms）</span>
+                </div>
+              </div>
             </section>
 
-            <!-- 主题与显示（清单 D3）：主题 / 动效 / 顶栏小字 / 恢复默认外观 -->
+            <section class="info-card fx-reveal">
+              <div class="info-head">
+                <h3>导航等待上限</h3>
+                <span class="badge" id="nav-budget-badge">— 秒</span>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  agent 让标签打开一个地址时，最多等这么久。慢站（跨境、带大量脚本的页面）常常十几秒才出来，
+                  等不到会明确报「打开这个地址超过 N 秒还没完成」，不会假装成功。
+                </p>
+                <div class="sec-actions net-slow-row">
+                  <input type="number" id="nav-budget-ms" class="text-input net-slow-input" aria-label="导航等待上限（秒）" min="3" max="60" step="1" inputmode="numeric" spellcheck="false">
+                  <span class="net-slow-unit">秒</span>
+                  <button type="button" class="btn" id="btn-nav-budget-save">保存</button>
+                  <span class="hint" id="nav-budget-hint">正在读取…</span>
+                </div>
+              </div>
+            </section><section class="info-card fx-reveal">
+              <div class="info-head" role="button" tabindex="0" title="图形性能：点击铺开或收回">
+                <h3>图形性能</h3>
+                <span class="badge ok" id="gpu-policy-badge">节能（核显优先）</span>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  双显卡机器上，Chromium 默认可能一直抓着独立显卡跑，代价是发热、耗电和风扇噪音。
+                  这里默认选「核显优先」：浏览网页不需要独显，需要时再切「独显优先」。
+                </p>
+                <div class="radio-row" id="gpu-policy-row" role="radiogroup" aria-label="图形性能策略">
+                  <label class="radio-item">
+                    <input type="radio" name="gpu-policy" id="gpu-policy-low-power" value="low-power">
+                    <span class="radio-text">
+                      <strong>节能（核显优先）</strong>
+                      <em>默认。不请求高性能显卡，更省电、更凉、不抢独显。</em>
+                    </span>
+                  </label>
+                  <label class="radio-item">
+                    <input type="radio" name="gpu-policy" id="gpu-policy-high-performance" value="high-performance">
+                    <span class="radio-text">
+                      <strong>高性能（独显优先）</strong>
+                      <em>向系统请求独立显卡。画面更顺，但耗电、发热与噪音都会上去。</em>
+                    </span>
+                  </label>
+                  <label class="radio-item">
+                    <input type="radio" name="gpu-policy" id="gpu-policy-auto" value="auto">
+                    <span class="radio-text">
+                      <strong>跟随系统</strong>
+                      <em>不加任何显卡偏好开关，交给 Windows 的图形设置决定。</em>
+                    </span>
+                  </label>
+                </div>
+                <div class="gpu-facts">
+                  <p class="hint" id="gpu-adapter-line">当前适配器：NVIDIA（独立显卡）｜设备 0x2d59（共 7 张）</p>
+                  <p class="hint is-ok" id="gpu-policy-hint" role="status" aria-live="polite">本次启动正在按「节能（核显优先）」运行。默认。不请求高性能显卡，尽量让集显合成画面：更省电、更凉、不抢独显。</p>
+                </div>
+                <div class="sec-actions">
+                  <button type="button" class="btn" id="btn-gpu-restart">立即重启让设置生效</button>
+                  <span class="hint" id="gpu-restart-hint"></span>
+                </div>
+              </div>
+            </section><section class="info-card fx-reveal">
+              <div class="info-head" role="button" tabindex="0" title="硬件加速：点击铺开或收回">
+                <h3>硬件加速</h3>
+                <span class="badge" id="hw-badge">探测中…</span>
+              </div>
+              <div class="info-body" id="hw-body"></div>
+            </section><section class="info-card fx-reveal">
+              <div class="info-head" role="button" tabindex="0" title="标签休眠：点击铺开或收回">
+                <h3>标签休眠</h3>
+                <span class="badge ok" id="tab-sleep-badge">30 分钟</span>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  后台标签闲置一段时间后会被卸载，释放它占的内存；点回来时按原地址重新加载。
+                  当前标签、被 agent 操作过的标签、以及设置页本身永不参与休眠。
+                </p>
+                <div class="radio-row" id="tab-sleep-row" role="radiogroup" aria-label="标签休眠时长"><label class="radio-item"><input type="radio" name="tab-sleep" value="0"><span><strong>不自动休眠</strong></span></label><label class="radio-item"><input type="radio" name="tab-sleep" value="5"><span><strong>5 分钟</strong></span></label><label class="radio-item"><input type="radio" name="tab-sleep" value="10"><span><strong>10 分钟</strong></span></label><label class="radio-item"><input type="radio" name="tab-sleep" value="15"><span><strong>15 分钟</strong></span></label><label class="radio-item"><input type="radio" name="tab-sleep" value="30"><span><strong>30 分钟</strong></span></label><label class="radio-item"><input type="radio" name="tab-sleep" value="60"><span><strong>60 分钟</strong></span></label><label class="radio-item"><input type="radio" name="tab-sleep" value="120"><span><strong>120 分钟</strong></span></label><label class="radio-item"><input type="radio" name="tab-sleep" value="240"><span><strong>240 分钟</strong></span></label></div>
+                <div class="gpu-facts">
+                  <p class="hint" id="tab-sleep-hint" role="status" aria-live="polite">后台标签闲置 30 分钟后释放内存，点回来时按原地址重新加载</p>
+                </div>
+                <div class="sec-actions">
+                  <label class="hint" for="tab-sleep-custom">自定义分钟数（1–240）：</label>
+                  <input type="number" id="tab-sleep-custom" min="1" max="240" step="1" style="width: 88px" placeholder="分钟">
+                  <button type="button" class="btn" id="btn-tab-sleep-save">保存</button>
+                  <span class="hint" id="tab-sleep-status"></span>
+                </div>
+              </div>
+            </section><div class="fx-progress" style="--fx-progress: 0.0000;"></div></div>
+            </section>
+
             <section class="sec-panel" data-sec="display">
-              <div class="sec-head">
+<div class="sec-head">
                 <h2>主题与显示</h2>
-                <span class="badge" id="display-badge">—</span>
+                <span class="badge" id="display-badge">墨夜</span>
                 <div class="sec-fold-tools" data-fold-tools="display"></div>
               </div>
-              <div class="sec-scroll">
+              <div class="sec-scroll" data-fx-progress="1">
                 <p class="hint">
                   只影响外观，不改任何隐私与网络行为。字体大小跟随系统缩放；
                   这一页暂时没有单独的「字号档位」——那需要先把整站 px 排版改成字级变量，属于独立改造，不在这儿顺手做。
                 </p>
 
-                <section class="info-card">
-                  <div class="info-head">
+                <section class="info-card fx-reveal" style="--fx-delay: 0s;">
+                  <div class="info-head" role="button" tabindex="0" title="主题：点击铺开或收回">
                     <h3>主题</h3>
-                    <span class="badge" id="display-theme-badge">—</span>
+                    <span class="badge" id="display-theme-badge">墨夜</span>
                   </div>
                   <div class="info-body">
                     <div class="set-row">
@@ -157,10 +279,10 @@
                   </div>
                 </section>
 
-                <section class="info-card">
-                  <div class="info-head">
+                <section class="info-card fx-reveal" style="--fx-delay: 0.04s;">
+                  <div class="info-head" role="button" tabindex="0" title="动效与顶栏：点击铺开或收回">
                     <h3>动效与顶栏</h3>
-                    <span class="badge" id="display-motion-badge">—</span>
+                    <span class="badge" id="display-motion-badge">克制 · 顶栏小字开</span>
                   </div>
                   <div class="info-body">
                     <div class="set-row">
@@ -172,7 +294,7 @@
                       </div>
                       <div class="set-row-ctl">
                         <select id="pref-motion-level" class="set-select">
-                          <option value="calm" selected>克制</option>
+                          <option value="calm" selected="">克制</option>
                           <option value="lively">活泼</option>
                         </select>
                       </div>
@@ -188,7 +310,7 @@
                       </div>
                       <div class="set-row-ctl">
                         <label class="set-switch">
-                          <input type="checkbox" id="pref-toolbar-labels" />
+                          <input type="checkbox" id="pref-toolbar-labels">
                           <span>显示</span>
                         </label>
                       </div>
@@ -204,7 +326,7 @@
                       </div>
                       <div class="set-row-ctl">
                         <label class="set-switch">
-                          <input type="checkbox" id="pref-mode-transition" />
+                          <input type="checkbox" id="pref-mode-transition">
                           <span>播放</span>
                         </label>
                       </div>
@@ -216,196 +338,24 @@
                   <button type="button" class="btn" id="btn-appearance-reset">恢复默认外观</button>
                 </div>
                 <p class="hint" id="appearance-hint">开关改动会立即同步到主窗口顶栏。</p>
-              </div>
+              <div class="fx-progress" style="--fx-progress: 0.0000;"></div></div>
             </section>
 
-            <!-- 地址栏置顶（v1.12.0）：右键建议即可置顶，这里管理顺序与删除 -->
-            <section class="info-card">
-              <div class="info-head">
-                <h3>地址栏置顶</h3>
-                <span class="badge" id="pinned-count">— 个</span>
-              </div>
-              <div class="info-body">
-                <p class="hint">
-                  在地址栏建议里右键任意一条即可置顶 / 取消置顶（每组最多 5 条）。
-                  置顶项在命中的查询里排最前；按「工作 / 学习 / 其他」分组管理，
-                  组内可用拖动或 ↑ ↓ 调顺序，跨组请用行首的分组下拉。
-                </p>
-                <div class="ext-list" id="pinned-list">
-                  <p class="hint">正在读取置顶列表…</p>
-                </div>
-                <!-- 导入 / 导出（v1.15.0）：换机器时把置顶习惯带走 -->
-                <div class="sec-actions" id="pinned-io-row">
-                  <button class="btn btn-mini" type="button" id="btn-pinned-export">导出 JSON</button>
-                  <button class="btn btn-mini" type="button" id="btn-pinned-import">导入 JSON</button>
-                  <span class="hint" id="pinned-io-hint">导入按地址合并去重，每组最多 5 条。</span>
-                </div>
-              </div>
-            </section>
-
-            <!-- 抓包慢请求阈值（v1.16.0）：与工具箱「只看慢请求」共用主进程里的同一份偏好 -->
-            <section class="info-card">
-              <div class="info-head">
-                <h3>抓包慢请求阈值</h3>
-                <span class="badge" id="net-slow-badge">— ms</span>
-              </div>
-              <div class="info-body">
-                <p class="hint">
-                  工具箱抓包列表的「只看慢请求」开关、每行后面的「慢」标记，以及详情里的瀑布统计，
-                  都按这个阈值判断。保存后立即生效，已经打开的抓包面板下一次刷新就会用新阈值。
-                </p>
-                <div class="sec-actions net-slow-row">
-                  <input
-                    type="number"
-                    id="net-slow-ms"
-                    class="text-input net-slow-input"
-                    aria-label="抓包慢请求阈值（毫秒）"
-                    min="50"
-                    max="10000"
-                    step="50"
-                    inputmode="numeric"
-                    spellcheck="false"
-                  />
-                  <span class="net-slow-unit">毫秒</span>
-                  <button type="button" class="btn" id="btn-net-slow-save">保存</button>
-                  <span class="hint" id="net-slow-hint">正在读取…</span>
-                </div>
-              </div>
-            </section>
-
-            <!-- agent 导航预算（v1.17.17）：慢站合法地会超过 15 秒，写死就会"明明打开了却报超时" -->
-            <section class="info-card">
-              <div class="info-head">
-                <h3>agent 打开网页的等待上限</h3>
-                <span class="badge" id="nav-budget-badge">— 秒</span>
-              </div>
-              <div class="info-body">
-                <p class="hint">
-                  agent 让浏览器打开一个地址时，最多等这么久；超过就如实报「超时」，不会再无限期挂着。
-                  站点很慢、或者要等后端渲染时，可以调大——但它也是「卡住多久才算失败」的界线。
-                </p>
-                <div class="sec-actions net-slow-row">
-                  <input
-                    type="number"
-                    id="nav-budget-ms"
-                    class="text-input net-slow-input"
-                    aria-label="agent 导航等待上限（秒）"
-                    min="3"
-                    max="60"
-                    step="1"
-                    inputmode="numeric"
-                    spellcheck="false"
-                  />
-                  <span class="net-slow-unit">秒</span>
-                  <button type="button" class="btn" id="btn-nav-budget-save">保存</button>
-                  <span class="hint" id="nav-budget-hint">正在读取…</span>
-                </div>
-              </div>
-            </section>
-
-            <!-- 图形性能（清单 A5）：默认核显优先，可显式切独显/跟随系统 -->
-            <section class="info-card">
-              <div class="info-head">
-                <h3>图形性能</h3>
-                <span class="badge" id="gpu-policy-badge">读取中…</span>
-              </div>
-              <div class="info-body">
-                <p class="hint">
-                  双显卡机器上，Chromium 默认可能一直抓着独立显卡跑，代价是发热、耗电和风扇噪音。
-                  这里默认选「核显优先」：浏览网页不需要独显，需要时再切「独显优先」。
-                </p>
-                <div class="radio-row" id="gpu-policy-row" role="radiogroup" aria-label="图形性能策略">
-                  <label class="radio-item">
-                    <input type="radio" name="gpu-policy" id="gpu-policy-low-power" value="low-power" />
-                    <span class="radio-text">
-                      <strong>节能（核显优先）</strong>
-                      <em>默认。不请求高性能显卡，更省电、更凉、不抢独显。</em>
-                    </span>
-                  </label>
-                  <label class="radio-item">
-                    <input type="radio" name="gpu-policy" id="gpu-policy-high-performance" value="high-performance" />
-                    <span class="radio-text">
-                      <strong>高性能（独显优先）</strong>
-                      <em>向系统请求独立显卡。画面更顺，但耗电、发热与噪音都会上去。</em>
-                    </span>
-                  </label>
-                  <label class="radio-item">
-                    <input type="radio" name="gpu-policy" id="gpu-policy-auto" value="auto" />
-                    <span class="radio-text">
-                      <strong>跟随系统</strong>
-                      <em>不加任何显卡偏好开关，交给 Windows 的图形设置决定。</em>
-                    </span>
-                  </label>
-                </div>
-                <div class="gpu-facts">
-                  <p class="hint" id="gpu-adapter-line">当前适配器：读取中…</p>
-                  <p class="hint" id="gpu-policy-hint" role="status" aria-live="polite">正在读取…</p>
-                </div>
-                <div class="sec-actions">
-                  <button type="button" class="btn" id="btn-gpu-restart" hidden>立即重启让设置生效</button>
-                  <span class="hint" id="gpu-restart-hint"></span>
-                </div>
-              </div>
-            </section>
-
-            <!-- 硬件加速：GPU 只读探测 -->
-            <section class="info-card">
-              <div class="info-head">
-                <h3>硬件加速</h3>
-                <span class="badge" id="hw-badge">探测中…</span>
-              </div>
-              <div class="info-body" id="hw-body"></div>
-            </section>
-
-            <!-- 标签休眠（清单 G）：后台标签闲置到点释放内存，改完立刻生效 -->
-            <section class="info-card">
-              <div class="info-head">
-                <h3>标签休眠</h3>
-                <span class="badge" id="tab-sleep-badge">读取中…</span>
-              </div>
-              <div class="info-body">
-                <p class="hint">
-                  后台标签闲置一段时间后会被卸载，释放它占的内存；点回来时按原地址重新加载。
-                  当前标签、被 agent 操作过的标签、以及设置页本身永不参与休眠。
-                </p>
-                <div class="radio-row" id="tab-sleep-row" role="radiogroup" aria-label="标签休眠时长"></div>
-                <div class="gpu-facts">
-                  <p class="hint" id="tab-sleep-hint" role="status" aria-live="polite">正在读取…</p>
-                </div>
-                <div class="sec-actions">
-                  <label class="hint" for="tab-sleep-custom">自定义分钟数（1–240）：</label>
-                  <input type="number" id="tab-sleep-custom" min="1" max="240" step="1" style="width: 88px" />
-                  <button type="button" class="btn" id="btn-tab-sleep-save">保存</button>
-                  <span class="hint" id="tab-sleep-status"></span>
-                </div>
-              </div>
-            </section>
-          </div>
-        </section>
-
-        <!-- ============ 启动与主页 ============ -->
-        <section class="sec-panel" data-sec="startup">
-          <header class="sec-head">
+            <section class="sec-panel" data-sec="startup">
+<header class="sec-head">
             <h2>启动与主页</h2>
             <p>配置新标签页打开什么、浏览器启动时打开哪些页面。地址改动即时保存、新标签立即生效；启动方式改动在下次启动生效。</p>
-          </header>
+          <div class="sec-fold-tools"><button type="button" class="btn btn-mini" data-fold-all="open">全部铺开</button><button type="button" class="btn btn-mini" data-fold-all="close">全部收回</button></div></header>
 
-          <div class="sec-scroll">
-            <section class="info-card">
-              <div class="info-head">
+          <div class="sec-scroll" data-fx-progress="1">
+            <section class="info-card fx-reveal" style="--fx-delay: 0s;">
+              <div class="info-head" role="button" tabindex="0" title="新标签页：点击铺开或收回">
                 <h3>新标签页</h3>
-                <span class="badge" id="home-newtab-badge">—</span>
+                <span class="badge" id="home-newtab-badge">空白页</span>
               </div>
               <div class="info-body">
                 <div class="field-row">
-                  <input
-                    type="text"
-                    id="home-newtab-url"
-                    class="text-input"
-                    placeholder="留空 = 空白页；也可填 https://example.com"
-                    autocomplete="off"
-                    spellcheck="false"
-                  />
+                  <input type="text" id="home-newtab-url" class="text-input" placeholder="留空 = 空白页；也可填 https://example.com" autocomplete="off" spellcheck="false">
                 </div>
                 <p class="hint">
                   新建标签、以及启动方式选「打开新标签页」时使用的地址。不写协议时按域名自动补 https，写关键词则交给默认搜索引擎。
@@ -413,35 +363,29 @@
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card fx-reveal" style="--fx-delay: 0.04s;">
+              <div class="info-head" role="button" tabindex="0" title="启动时：点击铺开或收回">
                 <h3>启动时</h3>
-                <span class="badge" id="home-startup-badge">—</span>
+                <span class="badge" id="home-startup-badge">新标签页</span>
               </div>
               <div class="info-body">
                 <div class="radio-row">
                   <label class="radio-opt">
-                    <input type="radio" name="startup-mode" value="newTab" id="startup-mode-newtab" />
+                    <input type="radio" name="startup-mode" value="newTab" id="startup-mode-newtab">
                     <span>打开新标签页</span>
                   </label>
                   <label class="radio-opt">
-                    <input type="radio" name="startup-mode" value="blank" id="startup-mode-blank" />
+                    <input type="radio" name="startup-mode" value="blank" id="startup-mode-blank">
                     <span>打开空白页</span>
                   </label>
                   <label class="radio-opt">
-                    <input type="radio" name="startup-mode" value="custom" id="startup-mode-custom" />
+                    <input type="radio" name="startup-mode" value="custom" id="startup-mode-custom">
                     <span>打开指定网页</span>
                   </label>
                 </div>
 
-                <div class="field-row" id="startup-urls-row" hidden>
-                  <textarea
-                    id="home-startup-urls"
-                    class="text-area"
-                    rows="4"
-                    placeholder="每行一个地址，最多 20 条"
-                    spellcheck="false"
-                  ></textarea>
+                <div class="field-row" id="startup-urls-row">
+                  <textarea id="home-startup-urls" class="text-area" rows="4" placeholder="每行一个地址，最多 20 条" spellcheck="false"></textarea>
                 </div>
 
                 <div class="sec-actions">
@@ -452,31 +396,30 @@
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card card-wide fx-reveal" style="--fx-delay: 0.08s;">
+              <div class="info-head" role="button" tabindex="0" title="当前生效：点击铺开或收回">
                 <h3>当前生效</h3>
-                <span class="badge" id="startup-badge">—</span>
+                <span class="badge" id="startup-badge">已生效</span>
               </div>
               <div class="info-body">
-                <div class="kv-grid" id="startup-grid"></div>
+                <div class="kv-grid" id="startup-grid"><div class="kv-item"><span class="k">新标签页实际地址</span><span class="v" title="file:///D:/Nyx-src/src/renderer/start.html">file:///D:/Nyx-src/src/renderer/start.html</span></div><div class="kv-item"><span class="k">启动方式</span><span class="v" title="打开新标签页">打开新标签页</span></div><div class="kv-item"><span class="k">启动时打开</span><span class="v" title="file:///D:/Nyx-src/src/renderer/start.html">file:///D:/Nyx-src/src/renderer/start.html</span></div><div class="kv-item"><span class="k">地址来源</span><span class="v" title="环境变量 / 空白页">环境变量 / 空白页</span></div><div class="kv-item"><span class="k">标签上限</span><span class="v" title="— 个">— 个</span></div></div>
                 <p class="hint">
                   这里显示主进程实际使用的地址（按地址栏规则规范化）。环境变量 NYX_HOME_URL 仅在新标签页地址留空时作为兜底。
                 </p>
               </div>
             </section>
-          </div>
-        </section>
+          <div class="fx-progress" style="--fx-progress: 0.0000;"></div></div>
+            </section>
 
-        <!-- ============ 隐私与安全 ============ -->
-        <section class="sec-panel" data-sec="privacy">
-          <header class="sec-head">
+            <section class="sec-panel" data-sec="privacy">
+<header class="sec-head">
             <h2>隐私与安全</h2>
             <p>隐私模式加固现状、站点授权决策轨迹，以及本机密码与表单记忆。这里只读展示与清理，不改动任何站点数据。</p>
-          </header>
+          <div class="sec-fold-tools"><button type="button" class="btn btn-mini" data-fold-all="open">全部铺开</button><button type="button" class="btn btn-mini" data-fold-all="close">全部收回</button></div></header>
 
-          <div class="sec-scroll">
-            <section class="info-card">
-              <div class="info-head">
+          <div class="sec-scroll" data-fx-progress="1">
+            <section class="info-card fx-reveal" style="--fx-delay: 0s;">
+              <div class="info-head" role="button" tabindex="0" title="隐私模式的出站方式：点击铺开或收回">
                 <h3>隐私模式的出站方式</h3>
                 <span class="badge" id="privacy-link-badge">—</span>
               </div>
@@ -487,31 +430,31 @@
                 </p>
                 <div class="radio-row" role="radiogroup" aria-label="隐私模式的出站方式">
                   <label class="radio-item">
-                    <input type="radio" name="privacy-link" id="privacy-link-proxy" value="proxy" checked />
+                    <input type="radio" name="privacy-link" id="privacy-link-proxy" value="proxy" checked="">
                     <span>
                       <strong>经代理</strong>
                       <em>出站流量强制走本机代理，站点看不到你的真实公网 IP。</em>
                     </span>
                   </label>
                   <label class="radio-item">
-                    <input type="radio" name="privacy-link" id="privacy-link-direct" value="direct" />
+                    <input type="radio" name="privacy-link" id="privacy-link-direct" value="direct">
                     <span>
                       <strong>真实 IP（直连）</strong>
                       <em>不经过代理，直接用本机网络出口访问站点。</em>
                     </span>
                   </label>
                 </div>
-                <ul class="link-lost" id="privacy-link-lost" hidden></ul>
-                <label class="ack-row" id="privacy-link-ack-row" hidden>
-                  <input type="checkbox" id="privacy-link-ack" />
+                <ul class="link-lost" id="privacy-link-lost"></ul>
+                <label class="ack-row" id="privacy-link-ack-row">
+                  <input type="checkbox" id="privacy-link-ack">
                   <span>我已了解上述风险，仍要让隐私模式直连</span>
                 </label>
                 <p class="hint" id="privacy-link-status" role="status" aria-live="polite"></p>
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card fx-reveal" style="--fx-delay: 0.04s;">
+              <div class="info-head" role="button" tabindex="0" title="录屏与被远控检测：点击铺开或收回">
                 <h3>录屏与被远控检测</h3>
                 <span class="badge" id="screen-watch-badge">—</span>
                 <div class="info-head-actions">
@@ -519,16 +462,16 @@
                 </div>
               </div>
               <p class="hint" id="screen-watch-status" role="status" aria-live="polite"></p>
-              <ul class="screen-hits" id="screen-watch-hits" hidden></ul>
+              <ul class="screen-hits" id="screen-watch-hits"></ul>
               <p class="hint" id="screen-watch-note"></p>
-              <label class="ack-row" id="screen-watch-ack-row" hidden>
-                <input type="checkbox" id="screen-watch-ack" />
+              <label class="ack-row" id="screen-watch-ack-row">
+                <input type="checkbox" id="screen-watch-ack">
                 <span>我确认当前没有在录屏、共享屏幕或被远程控制</span>
               </label>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card card-wide fx-reveal" style="--fx-delay: 0.08s;">
+              <div class="info-head" role="button" tabindex="0" title="离线阅读缓存：点击铺开或收回">
                 <h3>离线阅读缓存</h3>
                 <span class="badge" id="offline-badge">—</span>
                 <div class="info-head-actions">
@@ -542,16 +485,16 @@
                   不存 Cookie，也不存表单内容。关掉这个开关会停止写入，并把已经保存的快照一起清掉。
                 </p>
                 <label class="ack-row">
-                  <input type="checkbox" id="offline-cache-enabled" />
+                  <input type="checkbox" id="offline-cache-enabled">
                   <span>允许保存页面正文快照（普通模式：明文存放，用于断网时查看，可随时清空）</span>
                 </label>
                 <p class="hint" id="offline-facts"></p>
                 <label class="ack-row">
-                  <input type="checkbox" id="offline-private-enabled" />
+                  <input type="checkbox" id="offline-private-enabled">
                   <span>隐私模式也保存快照（整条加密后单独存放，只有这台机器的这个账户能解开）</span>
                 </label>
                 <p class="hint" id="offline-private-facts"></p>
-                <div class="offline-broken" id="offline-private-broken" role="alert" hidden>
+                <div class="offline-broken" id="offline-private-broken" role="alert">
                   <p class="warn-text" id="offline-private-broken-text"></p>
                   <button type="button" class="btn btn-mini btn-danger" id="btn-offline-private-reset">
                     清掉解不开的快照
@@ -607,11 +550,11 @@
                   </p>
                   <div class="template-list" id="offline-private-template-list"></div>
                   <label class="ack-row">
-                    <input type="checkbox" id="offline-private-template-also-normal" />
+                    <input type="checkbox" id="offline-private-template-also-normal">
                     <span>同一份模板也套到普通模式的名单上（两份名单本来是分开的，勾上才会一起改）</span>
                   </label>
                   <div class="agent-site-tools">
-                    <input type="text" id="offline-private-template-name" maxlength="40" spellcheck="false" placeholder="给这份名单起个名字，例如「我们组的文档站」" />
+                    <input type="text" id="offline-private-template-name" maxlength="40" spellcheck="false" placeholder="给这份名单起个名字，例如「我们组的文档站」">
                     <button type="button" class="btn btn-mini" id="btn-offline-private-template-save" title="把当前名单快照成一个模板（不存模式，不会覆盖你现在的选择）">
                       存成模板
                     </button>
@@ -639,8 +582,8 @@
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card card-wide fx-reveal" style="--fx-delay: 0.12s;">
+              <div class="info-head" role="button" tabindex="0" title="加固状态：点击铺开或收回">
                 <h3>加固状态</h3>
                 <span class="badge" id="privacy-badge">—</span>
                 <div class="info-head-actions">
@@ -652,8 +595,8 @@
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card fx-reveal" style="--fx-delay: 0.16s;">
+              <div class="info-head" role="button" tabindex="0" title="站点授权决策轨迹：点击铺开或收回">
                 <h3>站点授权决策轨迹</h3>
                 <span class="badge" id="perm-badge">—</span>
                 <div class="info-head-actions">
@@ -668,8 +611,8 @@
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card fx-reveal" style="--fx-delay: 0.2s;">
+              <div class="info-head" role="button" tabindex="0" title="设备与站点权限：点击铺开或收回">
                 <h3>设备与站点权限</h3>
                 <span class="badge" id="perm-whitelist-badge">—</span>
                 <div class="info-head-actions">
@@ -686,8 +629,8 @@
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card fx-reveal" style="--fx-delay: 0.24s;">
+              <div class="info-head" role="button" tabindex="0" title="密码与表单记忆：点击铺开或收回">
                 <h3>密码与表单记忆</h3>
                 <span class="badge" id="vault-badge">—</span>
                 <div class="info-head-actions">
@@ -702,12 +645,11 @@
                 <div id="vault-table-wrap"></div>
               </div>
             </section>
-          </div>
-        </section>
+          <div class="fx-progress" style="--fx-progress: 0.0000;"></div></div>
+            </section>
 
-        <!-- ============ 网络与代理（原代理中心整页并入） ============ -->
-        <section class="sec-panel" data-sec="network">
-          <div class="layout">
+            <section class="sec-panel" data-sec="network">
+<div class="layout">
             <!-- 左栏：订阅管理 -->
             <aside class="panel panel-side">
               <div class="panel-head">
@@ -719,14 +661,8 @@
               <ul class="sub-list" id="sub-list"></ul>
 
               <form class="sub-form" id="sub-form" autocomplete="off">
-                <input type="text" id="sub-name" placeholder="备注名（可留空）" autocomplete="off" />
-                <input
-                  type="text"
-                  id="sub-url"
-                  placeholder="订阅地址，以 https:// 开头"
-                  autocomplete="off"
-                  spellcheck="false"
-                />
+                <input type="text" id="sub-name" placeholder="备注名（可留空）" autocomplete="off">
+                <input type="text" id="sub-url" placeholder="订阅地址，以 https:// 开头" autocomplete="off" spellcheck="false">
                 <button type="submit" class="btn btn-primary" id="btn-add-sub">添加订阅</button>
               </form>
             </aside>
@@ -735,7 +671,7 @@
             <section class="panel panel-main">
               <div class="kernel-bar">
                 <div class="brand">
-                  <span class="status-dot" id="kernel-dot" aria-hidden="true"></span>
+                  <span class="status-dot" id="kernel-dot" aria-></span>
                   <h2>内置代理内核</h2>
                   <span class="badge" id="kernel-badge">内核未启动</span>
                 </div>
@@ -776,11 +712,11 @@
                 <div class="iface-body">
                   <div class="iface-modes">
                     <label class="iface-mode">
-                      <input type="radio" name="iface-mode" value="auto" id="iface-mode-auto" />
+                      <input type="radio" name="iface-mode" value="auto" id="iface-mode-auto">
                       <span>自动选择</span>
                     </label>
                     <label class="iface-mode">
-                      <input type="radio" name="iface-mode" value="manual" id="iface-mode-manual" />
+                      <input type="radio" name="iface-mode" value="manual" id="iface-mode-manual">
                       <span>手动指定网卡</span>
                     </label>
                   </div>
@@ -795,13 +731,13 @@
               </section>
 
               <!-- 智能遨游调度：每 15 秒巡检当前站点，国内直连 / 被墙走代理 -->
-              <section class="info-card smart-card" id="smart-card">
+              <section class="info-card smart-card fx-reveal" id="smart-card" style="--fx-delay: 0s;">
                 <div class="info-head">
                   <h3>智能遨游调度</h3>
                   <div class="info-head-actions">
                     <span class="badge" id="smart-badge">待启动</span>
                     <label class="switch" title="遨游模式开启后自动分流：国内站点直连、被墙站点走代理，每 15 秒巡检并自动优选节点">
-                      <input type="checkbox" id="pref-smart-patrol" />
+                      <input type="checkbox" id="pref-smart-patrol">
                       <span>智能分流</span>
                     </label>
                     <button type="button" class="btn btn-mini" id="btn-smart-clear">清空规则</button>
@@ -829,9 +765,9 @@
                   <div class="group-bar" id="group-bar"></div>
 
                   <div class="node-toolbar">
-                    <input type="text" id="filter" placeholder="搜索节点名称" autocomplete="off" />
+                    <input type="text" id="filter" placeholder="搜索节点名称" autocomplete="off">
                     <label class="switch" title="只显示测速可用、以及状态未知的节点">
-                      <input type="checkbox" id="only-available" />
+                      <input type="checkbox" id="only-available">
                       <span>只看可用</span>
                     </label>
                     <select id="sort-mode" title="节点排序方式">
@@ -877,12 +813,12 @@
 
                 <!-- 线路自检：出口信息 + 直连对照 -->
                 <section class="tab-panel" data-panel="line">
-                  <section class="info-card">
+                  <section class="info-card fx-reveal" style="--fx-delay: 0s;">
                     <div class="info-head">
                       <h3>出口信息</h3>
                       <div class="info-head-actions">
                         <label class="switch" title="出口自查是真实外联请求，默认不随内核启动自动执行">
-                          <input type="checkbox" id="pref-auto-egress" />
+                          <input type="checkbox" id="pref-auto-egress">
                           <span>启动后自动刷新</span>
                         </label>
                         <button type="button" class="btn btn-mini" id="btn-egress-again">立即自查</button>
@@ -894,7 +830,7 @@
 
                 <!-- 过滤明细：广告 / 失效节点剔除报告 -->
                 <section class="tab-panel" data-panel="filter">
-                  <section class="info-card">
+                  <section class="info-card fx-reveal" style="--fx-delay: 0s;">
                     <div class="info-head">
                       <h3>广告 / 失效节点过滤</h3>
                       <span class="badge" id="filter-count">已过滤 — 个</span>
@@ -910,18 +846,17 @@
               </div>
             </section>
           </div>
-        </section>
+            </section>
 
-        <!-- ============ 下载 ============ -->
-        <section class="sec-panel" data-sec="downloads">
-          <header class="sec-head">
+            <section class="sec-panel" data-sec="downloads">
+<header class="sec-head">
             <h2>下载</h2>
             <p>下载内容保存位置与下载行为设置。隐私模式下的下载始终被拦截，不在此列。</p>
-          </header>
+          <div class="sec-fold-tools"><button type="button" class="btn btn-mini" data-fold-all="open">全部铺开</button><button type="button" class="btn btn-mini" data-fold-all="close">全部收回</button></div></header>
 
-          <div class="sec-scroll">
-            <section class="info-card">
-              <div class="info-head">
+          <div class="sec-scroll" data-fx-progress="1">
+            <section class="info-card fx-reveal" style="--fx-delay: 0s;">
+              <div class="info-head" role="button" tabindex="0" title="下载管理：点击铺开或收回">
                 <h3>下载管理</h3>
                 <span class="badge" id="download-badge">已启用</span>
               </div>
@@ -934,14 +869,7 @@
                     </div>
                   </div>
                   <div class="set-row-ctl download-dir-ctl">
-                    <input
-                      type="text"
-                      id="download-dir"
-                      class="text-input download-dir-input"
-                      placeholder="留空 = 系统下载目录"
-                      spellcheck="false"
-                      readonly
-                    />
+                    <input type="text" id="download-dir" class="text-input download-dir-input" placeholder="留空 = 系统下载目录" spellcheck="false" readonly="">
                     <button type="button" class="btn btn-mini" id="btn-download-pick">选择文件夹</button>
                     <button type="button" class="btn btn-mini" id="btn-download-open">打开目录</button>
                   </div>
@@ -956,7 +884,7 @@
                   </div>
                   <div class="set-row-ctl">
                     <label class="set-switch">
-                      <input type="checkbox" id="pref-download-ask" />
+                      <input type="checkbox" id="pref-download-ask">
                       <span>询问</span>
                     </label>
                   </div>
@@ -969,22 +897,21 @@
                 <p class="hint" id="download-hint">改动即时保存：后续下载按新设置执行。</p>
               </div>
             </section>
-          </div>
-        </section>
+          <div class="fx-progress" style="--fx-progress: 0.0000;"></div></div>
+            </section>
 
-        <!-- ============ 扩展插件 ============ -->
-        <section class="sec-panel" data-sec="extensions">
-          <header class="sec-head">
+            <section class="sec-panel" data-sec="extensions">
+<header class="sec-head">
             <h2>扩展插件</h2>
             <p>
               兼容 Edge / Chrome 扩展（同一套扩展格式，可直接导入已解压目录或 .crx 安装包）。
               扩展只装在普通模式分区：隐私模式下的页面不会被任何扩展读取或改写。
             </p>
-          </header>
+          <div class="sec-fold-tools"><button type="button" class="btn btn-mini" data-fold-all="open">全部铺开</button><button type="button" class="btn btn-mini" data-fold-all="close">全部收回</button></div></header>
 
-          <div class="sec-scroll">
-            <section class="info-card">
-              <div class="info-head">
+          <div class="sec-scroll" data-fx-progress="1">
+            <section class="info-card fx-reveal" style="--fx-delay: 0s;">
+              <div class="info-head" role="button" tabindex="0" title="导入扩展：点击铺开或收回">
                 <h3>导入扩展</h3>
                 <span class="badge" id="ext-count">— 个</span>
               </div>
@@ -1008,8 +935,8 @@
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card fx-reveal" style="--fx-delay: 0.04s;">
+              <div class="info-head" role="button" tabindex="0" title="扩展更新：点击铺开或收回">
                 <h3>扩展更新</h3>
                 <div class="info-head-actions">
                   <button type="button" class="btn btn-mini" id="btn-ext-update-all">全部更新</button>
@@ -1024,8 +951,8 @@
             </section>
 
             <!-- 扩展版本历史（v1.16.0）：更新源里保留的发布记录，可一键回滚 -->
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card fx-reveal" style="--fx-delay: 0.08s;">
+              <div class="info-head" role="button" tabindex="0" title="扩展版本历史：点击铺开或收回">
                 <h3>扩展版本历史</h3>
                 <div class="info-head-actions">
                   <span class="badge" id="ext-history-count">— 个版本</span>
@@ -1043,8 +970,8 @@
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card fx-reveal" style="--fx-delay: 0.12s;">
+              <div class="info-head" role="button" tabindex="0" title="已安装扩展：点击铺开或收回">
                 <h3>已安装扩展</h3>
                 <div class="info-head-actions">
                   <button type="button" class="btn btn-mini" id="btn-ext-refresh">刷新列表</button>
@@ -1062,21 +989,19 @@
                 </p>
               </div>
             </section>
-          </div>
-        </section>
+          <div class="fx-progress" style="--fx-progress: 0.0000;"></div></div>
+            </section>
 
-        <!-- ============ 关于与更新 ============ -->
-        <!-- 诊断（清单 C1）：所有失败必须在这里看得见，否则「静默失败」无从排查 -->
-        <section class="sec-panel" data-sec="diagnostics">
-          <header class="sec-head">
+            <section class="sec-panel" data-sec="diagnostics">
+<header class="sec-head">
             <h2>诊断</h2>
             <p>版本、运行状态与最近的错误记录。遇到打不开、下不了、连不上的情况，先来这里看一眼，或直接导出诊断包发给维护者。</p>
-          </header>
+          <div class="sec-fold-tools"><button type="button" class="btn btn-mini" data-fold-all="open">全部铺开</button><button type="button" class="btn btn-mini" data-fold-all="close">全部收回</button></div></header>
 
-          <div class="sec-scroll">
+          <div class="sec-scroll" data-fx-progress="1">
             <!-- 外壳防护现值（清单 C3）：期望值写在代码里，这里显示这台机器上的实测值 -->
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card card-wide fx-reveal" style="--fx-delay: 0s;">
+              <div class="info-head" role="button" tabindex="0" title="外壳防护现值：点击铺开或收回">
                 <h3>外壳防护现值</h3>
                 <span class="badge" id="security-switches-badge">—</span>
               </div>
@@ -1093,12 +1018,12 @@
                   <button type="button" class="btn" id="btn-security-switches-refresh">刷新</button>
                   <button type="button" class="btn btn-primary" id="btn-security-probe">试一次注入</button>
                 </div>
-                <pre class="sw-probe-out" id="security-probe-out" hidden></pre>
+                <pre class="sw-probe-out" id="security-probe-out"></pre>
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card card-wide fx-reveal" style="--fx-delay: 0.04s;">
+              <div class="info-head" role="button" tabindex="0" title="运行状态：点击铺开或收回">
                 <h3>运行状态</h3>
                 <span class="badge" id="diag-badge">—</span>
               </div>
@@ -1117,8 +1042,8 @@
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card card-wide fx-reveal" style="--fx-delay: 0.08s;">
+              <div class="info-head" role="button" tabindex="0" title="进程详情：点击铺开或收回">
                 <h3>进程详情</h3>
                 <span class="badge" id="proc-badge">—</span>
               </div>
@@ -1143,28 +1068,28 @@
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card fx-reveal" style="--fx-delay: 0.12s;">
+              <div class="info-head" role="button" tabindex="0" title="最近错误：点击铺开或收回">
                 <h3>最近错误</h3>
                 <span class="badge" id="diag-count">—</span>
               </div>
               <div class="info-body">
-                <p class="hint" id="diag-empty" hidden>暂无记录。下次出现异常时会自动记到这里。</p>
+                <p class="hint" id="diag-empty">暂无记录。下次出现异常时会自动记到这里。</p>
                 <div class="diag-list" id="diag-list"></div>
               </div>
             </section>
-          </div>
-        </section>
+          <div class="fx-progress" style="--fx-progress: 0.0000;"></div></div>
+            </section>
 
-        <section class="sec-panel" data-sec="agent">
-          <header class="sec-head">
+            <section class="sec-panel" data-sec="agent">
+<header class="sec-head">
             <h2>Agent 访问</h2>
             <p>agent 的每一次动作都会过同一条通道：先判权限、再问人、然后留痕、最后执行。这里是留痕的去处，也是刹车。</p>
-          </header>
+          <div class="sec-fold-tools"><button type="button" class="btn btn-mini" data-fold-all="open">全部铺开</button><button type="button" class="btn btn-mini" data-fold-all="close">全部收回</button></div></header>
 
-          <div class="sec-scroll">
-            <section class="info-card">
-              <div class="info-head">
+          <div class="sec-scroll" data-fx-progress="1">
+            <section class="info-card card-wide fx-reveal" style="--fx-delay: 0s;">
+              <div class="info-head" role="button" tabindex="0" title="站点授权：点击铺开或收回">
                 <h3>站点授权</h3>
                 <span class="badge" id="agent-sites-badge">—</span>
                 <div class="info-head-actions">
@@ -1227,8 +1152,8 @@
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card fx-reveal" style="--fx-delay: 0.04s;">
+              <div class="info-head" role="button" tabindex="0" title="接入说明：点击铺开或收回">
                 <h3>接入说明</h3>
                 <span class="badge" id="agent-doc-badge">—</span>
               </div>
@@ -1247,8 +1172,8 @@
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card fx-reveal" style="--fx-delay: 0.08s;">
+              <div class="info-head" role="button" tabindex="0" title="接入模式：点击铺开或收回">
                 <h3>接入模式</h3>
                 <span class="badge" id="agent-mode-badge">—</span>
               </div>
@@ -1259,14 +1184,14 @@
                 </p>
                 <div class="radio-row" id="agent-mode-row" role="radiogroup" aria-label="agent 接入模式">
                   <label class="radio-item">
-                    <input type="radio" name="agent-mode" id="agent-mode-builtin" value="builtin" />
+                    <input type="radio" name="agent-mode" id="agent-mode-builtin" value="builtin">
                     <span>
                       <strong>内置（推荐）</strong>
                       <em>进程内 MCP 接口，权限判定、人工确认、留痕、急停全都生效。</em>
                     </span>
                   </label>
                   <label class="radio-item">
-                    <input type="radio" name="agent-mode" id="agent-mode-external" value="external" />
+                    <input type="radio" name="agent-mode" id="agent-mode-external" value="external">
                     <span>
                       <strong>外部接入（CDP）</strong>
                       <em>外部程序直接连浏览器调试端口，审计不完整，切换后需要重启。</em>
@@ -1275,16 +1200,16 @@
                 </div>
                 <div class="gpu-facts">
                   <p class="hint" id="agent-mode-facts"></p>
-                  <p class="hint" id="agent-mode-banner" hidden></p>
+                  <p class="hint" id="agent-mode-banner"></p>
                 </div>
-                <div id="agent-mode-step2" hidden>
+                <div id="agent-mode-step2">
                   <p class="hint" id="agent-mode-step2-title">
                     再确认一次：外部接入会让审计变得不完整
                   </p>
                   <ul class="link-lost" id="agent-mode-risks"></ul>
                   <div class="ack-row">
                     <label>
-                      <input type="checkbox" id="agent-mode-ack" />
+                      <input type="checkbox" id="agent-mode-ack">
                       我已了解外部接入会让审计不完整，后果由我自己承担
                     </label>
                   </div>
@@ -1292,15 +1217,15 @@
                 </div>
                 <div class="sec-actions">
                   <button type="button" class="btn btn-primary" id="btn-agent-mode-apply">切换接入模式</button>
-                  <button type="button" class="btn" id="btn-agent-mode-cancel" hidden>取消</button>
-                  <button type="button" class="btn" id="btn-agent-mode-restart" hidden>立即重启</button>
+                  <button type="button" class="btn" id="btn-agent-mode-cancel">取消</button>
+                  <button type="button" class="btn" id="btn-agent-mode-restart">立即重启</button>
                 </div>
                 <p class="hint" id="agent-mode-status" role="status" aria-live="polite"></p>
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card fx-reveal" style="--fx-delay: 0.12s;">
+              <div class="info-head" role="button" tabindex="0" title="页面摘要：点击铺开或收回">
                 <h3>页面摘要</h3>
                 <span class="badge" id="digest-badge">—</span>
               </div>
@@ -1311,7 +1236,7 @@
                 </p>
                 <div class="ack-row">
                   <label class="checkbox">
-                    <input type="checkbox" id="digest-setting-enabled" />
+                    <input type="checkbox" id="digest-setting-enabled">
                     允许读取我打开的页面来生成摘要（默认关闭）
                   </label>
                 </div>
@@ -1319,8 +1244,8 @@
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card card-wide fx-reveal" style="--fx-delay: 0.16s;">
+              <div class="info-head" role="button" tabindex="0" title="让 agent 改设置：点击铺开或收回">
                 <h3>让 agent 改设置</h3>
                 <span class="badge" id="agent-settings-badge">—</span>
               </div>
@@ -1358,15 +1283,15 @@
                   <div class="agent-site-tools">
                     <label class="agent-audit-range">
                       时间范围
-                      <select id="agent-audit-range">
+                      <select id="agent-audit-range" data-wired="true">
                         <option value="0">全部</option>
                         <option value="1">最近 24 小时</option>
                         <option value="7">最近 7 天</option>
                       </select>
                     </label>
-                    <button class="btn btn-mini" id="btn-agent-audit-export" title="导出聚合后的表格（每个设置项一行，CSV）">导出 CSV</button>
+                    <button class="btn btn-mini" id="btn-agent-audit-export" title="导出聚合后的表格（每个设置项一行，CSV）" data-wired="true">导出 CSV</button>
                   </div>
-                  <table class="agent-audit-table" id="agent-settings-audit-table" hidden>
+                  <table class="agent-audit-table" id="agent-settings-audit-table">
                     <thead>
                       <tr><th>设置项</th><th>改过</th><th>最近一次</th><th>改成</th><th>谁改的</th></tr>
                     </thead>
@@ -1382,9 +1307,9 @@
                   </p>
                   <p class="hint" id="agent-actions-audit-note" role="status" aria-live="polite"></p>
                   <div class="agent-site-tools">
-                    <button class="btn btn-mini" id="btn-agent-actions-export" title="导出这张表（每个动作一行，CSV）">导出 CSV</button>
+                    <button class="btn btn-mini" id="btn-agent-actions-export" title="导出这张表（每个动作一行，CSV）" data-wired="true">导出 CSV</button>
                   </div>
-                  <table class="agent-audit-table" id="agent-actions-audit-table" hidden>
+                  <table class="agent-audit-table" id="agent-actions-audit-table">
                     <thead>
                       <tr><th>动作</th><th>次数</th><th>最近一次</th><th>站点</th></tr>
                     </thead>
@@ -1396,8 +1321,8 @@
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card fx-reveal" style="--fx-delay: 0.2s;">
+              <div class="info-head" role="button" tabindex="0" title="紧急停止：点击铺开或收回">
                 <h3>紧急停止</h3>
                 <span class="badge" id="agent-badge">—</span>
               </div>
@@ -1414,8 +1339,8 @@
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card fx-reveal" style="--fx-delay: 0.24s;">
+              <div class="info-head" role="button" tabindex="0" title="动作留痕：点击铺开或收回">
                 <h3>动作留痕</h3>
                 <span class="badge" id="agent-audit-count">—</span>
               </div>
@@ -1452,15 +1377,15 @@
                   </label>
                   <label class="agent-field">
                     <span>站点</span>
-                    <input type="text" id="agent-filter-site" placeholder="域名，可留空" />
+                    <input type="text" id="agent-filter-site" placeholder="域名，可留空">
                   </label>
                   <label class="agent-field">
                     <span>关键词</span>
-                    <input type="text" id="agent-filter-keyword" placeholder="目标或错误" />
+                    <input type="text" id="agent-filter-keyword" placeholder="目标或错误">
                   </label>
                   <label class="agent-field">
                     <span>只看失败</span>
-                    <input type="checkbox" id="agent-filter-failed" />
+                    <input type="checkbox" id="agent-filter-failed">
                   </label>
                 </div>
                 <div class="sec-actions">
@@ -1469,24 +1394,24 @@
                   <button type="button" class="btn" id="btn-agent-export-json">导出 JSON</button>
                   <button type="button" class="btn btn-ghost" id="btn-agent-clear">清空（仅内存）</button>
                 </div>
-                <p class="hint" id="agent-audit-empty" hidden>还没有动作记录。agent 一动手就会出现在这里。</p>
+                <p class="hint" id="agent-audit-empty">还没有动作记录。agent 一动手就会出现在这里。</p>
                 <div class="diag-list" id="agent-audit-list"></div>
                 <p class="hint" id="agent-audit-status" role="status" aria-live="polite"></p>
               </div>
             </section>
-          </div>
-        </section>
+          <div class="fx-progress" style="--fx-progress: 0.0000;"></div></div>
+            </section>
 
-        <section class="sec-panel" data-sec="about">
-          <header class="sec-head">
+            <section class="sec-panel" data-sec="about">
+<header class="sec-head">
             <h2>关于与更新</h2>
             <p>版本信息与升级包安装。升级为覆盖安装：订阅、偏好、密码库都会保留。</p>
-          </header>
+          <div class="sec-fold-tools"><button type="button" class="btn btn-mini" data-fold-all="open">全部铺开</button><button type="button" class="btn btn-mini" data-fold-all="close">全部收回</button></div></header>
 
-          <div class="sec-scroll">
+          <div class="sec-scroll" data-fx-progress="1">
             <!-- 使用许可（v1.17.8）：这条边界必须让用户在自己机器上看得到，而不只是躺在仓库某个文件里 -->
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card fx-reveal" style="--fx-delay: 0s;">
+              <div class="info-head" role="button" tabindex="0" title="使用许可：点击铺开或收回">
                 <h3>使用许可</h3>
               </div>
               <div class="info-body">
@@ -1502,31 +1427,29 @@
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card fx-reveal" style="--fx-delay: 0.04s;">
+              <div class="info-head" role="button" tabindex="0" title="软件更新：点击铺开或收回">
                 <h3>软件更新</h3>
-                <span class="badge" id="update-badge">当前版本 —</span>
+                <span class="badge" id="update-badge">当前版本 v1.17.17</span>
               </div>
               <div class="info-body">
-                <p class="hint" id="update-hint">
-                  点「检查更新」查看是否有新版本。升级为覆盖安装：订阅、偏好与密码库都会保留。
-                </p>
+                <p class="hint" id="update-hint">更新源：C:\Users\awa\AppData\Local\Temp\nyx-dump-1794917952240\updates</p>
                 <div class="update-actions">
                   <button type="button" class="btn" id="btn-check-update">检查更新</button>
-                  <button type="button" class="btn btn-primary" id="btn-install-update" hidden>
+                  <button type="button" class="btn btn-primary" id="btn-install-update">
                     立即重启安装
                   </button>
                   <button type="button" class="btn" id="btn-update-folder">打开升级包文件夹</button>
                 </div>
-                <div class="progress" id="update-progress" hidden>
+                <div class="progress" id="update-progress">
                   <div class="progress-bar" id="update-progress-bar"></div>
                 </div>
               </div>
             </section>
 
             <!-- 更新源占用（v1.16.0）：升级包与历史留档占用的磁盘空间 -->
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card card-wide fx-reveal" style="--fx-delay: 0.08s;">
+              <div class="info-head" role="button" tabindex="0" title="更新源占用：点击铺开或收回">
                 <h3>更新源占用</h3>
                 <span class="badge" id="footprint-badge">—</span>
               </div>
@@ -1542,15 +1465,15 @@
                 <div class="sec-actions">
                   <button type="button" class="btn" id="btn-footprint-open">打开更新源文件夹</button>
                   <button type="button" class="btn btn-mini" id="btn-footprint-copy">复制清理命令</button>
-                  <button type="button" class="btn btn-mini" id="btn-delta-check" title="用留档里的上一版与当前版本各切一遍块，算命中率；要读两个约 120 MB 的包，可能要十几秒">重新量一次</button>
+                  <button type="button" class="btn btn-mini" id="btn-delta-check" title="用留档里的上一版与当前版本各切一遍块，算命中率；要读两个约 120 MB 的包，可能要十几秒" data-wired="1">重新量一次</button>
                 </div>
                 <p class="hint footprint-cmd" id="footprint-hint">点「复制清理命令」把发版机上的清理命令复制到剪贴板。</p>
               </div>
             </section>
 
             <!-- 安全基线（C2）：声明版本 vs 机器上跑的版本，不一致就显红 -->
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card card-wide fx-reveal" style="--fx-delay: 0.12s;">
+              <div class="info-head" role="button" tabindex="0" title="安全基线：点击铺开或收回">
                 <h3>安全基线</h3>
                 <span class="badge" id="security-baseline-badge">—</span>
               </div>
@@ -1580,8 +1503,8 @@
             </section>
 
             <!-- 安装包签名（第五轮 ②）：自身 exe 的签名状态与证书有效期 -->
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card card-wide fx-reveal" style="--fx-delay: 0.16s;">
+              <div class="info-head" role="button" tabindex="0" title="安装包签名：点击铺开或收回">
                 <h3>安装包签名</h3>
                 <span class="badge" id="signing-badge">—</span>
               </div>
@@ -1602,8 +1525,8 @@
             </section>
 
             <!-- 夜间安装器 e2e（第八轮 ③）：最近一次真机跑升级路径的结果 -->
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card card-wide fx-reveal" style="--fx-delay: 0.2s;">
+              <div class="info-head" role="button" tabindex="0" title="夜间安装器 e2e：点击铺开或收回">
                 <h3>夜间安装器 e2e</h3>
                 <span class="badge" id="nightly-badge">—</span>
               </div>
@@ -1619,8 +1542,7 @@
                 <p class="hint" id="nightly-summary" role="status" aria-live="polite">读取中…</p>
                 <div class="agent-site-tools nightly-task-tools">
                   <label class="agent-audit-range" for="nightly-time">每天几点跑</label>
-                  <input type="text" id="nightly-time" class="nightly-time" value="03:30" maxlength="5"
-                         inputmode="numeric" aria-describedby="nightly-task-hint" placeholder="03:30">
+                  <input type="text" id="nightly-time" class="nightly-time" value="03:30" maxlength="5" inputmode="numeric" aria-describedby="nightly-task-hint" placeholder="03:30">
                   <button type="button" class="btn btn-mini" id="btn-nightly-register">注册 / 改时间</button>
                   <button type="button" class="btn btn-mini" id="btn-nightly-remove">删掉任务</button>
                   <button type="button" class="btn btn-mini" id="btn-nightly-refresh">重新读取</button>
@@ -1634,20 +1556,20 @@
               </div>
             </section>
 
-            <section class="info-card">
-              <div class="info-head">
+            <section class="info-card card-wide fx-reveal" style="--fx-delay: 0.24s;">
+              <div class="info-head" role="button" tabindex="0" title="关于 Nyx：点击铺开或收回">
                 <h3>关于 Nyx</h3>
                 <div class="info-head-actions">
                   <button type="button" class="btn btn-mini" id="btn-about">查看详细信息</button>
                 </div>
               </div>
               <div class="info-body">
-                <div class="kv-grid" id="about-grid"></div>
+                <div class="kv-grid" id="about-grid"><div class="kv-item"><span class="k">版本</span><span class="v" title="v1.17.17">v1.17.17</span></div><div class="kv-item"><span class="k">内核</span><span class="v" title="Electron 45.3.2 / Chromium 156.0.8078.100">Electron 45.3.2 / Chromium 156.0.8078.100</span></div><div class="kv-item"><span class="k">Node</span><span class="v" title="24.22.2">24.22.2</span></div><div class="kv-item"><span class="k">运行平台</span><span class="v" title="win32 x64">win32 x64</span></div><div class="kv-item"><span class="k">用户数据目录</span><span class="v" title="C:\Users\awa\AppData\Local\Temp\nyx-dump-1794917952240">C:\Users\awa\AppData\Local\Temp\nyx-dump-1794917952240</span></div><div class="kv-item"><span class="k">安装目录</span><span class="v" title="D:\Nyx-src\node_modules\electron\dist">D:\Nyx-src\node_modules\electron\dist</span></div></div>
               </div>
             </section>
-          </div>
-        </section>
-      </main>
+          <div class="fx-progress" style="--fx-progress: 0.0000;"></div></div>
+            </section>
+          </main>
     </div>
 
     <footer class="statusbar" id="statusbar">就绪</footer>
