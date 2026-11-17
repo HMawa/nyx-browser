@@ -93,13 +93,44 @@ async function main() {
     const wrong = await call('/state', { 'x-nyx-token': 'b'.repeat(64) });
     check('错 Token 一样被拒（P2）', wrong.status === 401, JSON.stringify({ status: wrong.status }));
 
-    // 7. 静态守卫：接口模块里不许再出现 query 取 Token 或硬编码版本号
+    // 7. 请求体超限：要回 413 与中文原因，不是把连接掐掉（客户端只看到 fetch failed）
+    const bigBody = JSON.stringify({ type: 'navigate', params: { url: 'https://example.com/' + 'x'.repeat(2 * 1024 * 1024) } });
+    let tooLarge;
+    try {
+      const res = await fetch(base + '/action', {
+        method: 'POST',
+        headers: { 'x-nyx-token': TOKEN, 'content-type': 'application/json' },
+        body: bigBody,
+        signal: AbortSignal.timeout(8000),
+      });
+      let body = null;
+      try {
+        body = await res.json();
+      } catch {
+        body = null;
+      }
+      tooLarge = { status: res.status, body };
+    } catch (err) {
+      tooLarge = { status: 0, body: null, error: String((err && err.message) || err) };
+    }
+    check(
+      '请求体超限回 413 并说清怎么办，不是直接断连接（F-04）',
+      tooLarge.status === 413 && tooLarge.body && /KB|请求体/.test(String(tooLarge.body.error || tooLarge.body.message)),
+      JSON.stringify(tooLarge),
+    );
+
+    // 8. 静态守卫：接口模块里不许再出现 query 取 Token 或硬编码版本号
     const fs = require('node:fs');
     const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'api', 'http-api.js'), 'utf8');
     check(
       '接口里不再有 ?token= 回退，也没有硬编码的 0.1.0（P2）',
       !/searchParams\.get\('token'\)/.test(src) && !/'0\.1\.0'/.test(src),
       JSON.stringify({ queryToken: /searchParams\.get\('token'\)/.test(src), hardVersion: /'0\.1\.0'/.test(src) }),
+    );
+    check(
+      '超限不再 req.destroy()，改成回话后再把剩余数据丢掉（F-04）',
+      !/req\.destroy\(\)/.test(src) && /BODY_TOO_LARGE/.test(src) && /BODY_TOO_LARGE: 413/.test(src),
+      JSON.stringify({ destroyed: /req\.destroy\(\)/.test(src), code: /BODY_TOO_LARGE/.test(src) }),
     );
   } finally {
     await new Promise((resolve) => server.close(resolve));

@@ -37,6 +37,8 @@ const CODE_STATUS = {
   MISSING_TYPE: 400,
   UNKNOWN_ACTION: 400,
   ACTION_FAILED: 400,
+  BAD_VALUE: 400,
+  BODY_TOO_LARGE: 413,
   DENIED_BY_POLICY: 403,
   CONFIRM_REJECTED: 403,
   CONFIRM_TIMEOUT: 408,
@@ -44,6 +46,18 @@ const CODE_STATUS = {
   SESSION_STOPPED: 409,
   ABORTED: 409,
 };
+
+/** 请求体读失败时该回什么：超限是 413（带一句怎么办），其它才是"不是合法 JSON" */
+function bodyErrorStatus(err) {
+  return err && err.code === 'BODY_TOO_LARGE' ? 413 : 400;
+}
+
+function bodyErrorMessage(err) {
+  if (err && err.code === 'BODY_TOO_LARGE') {
+    return `${err.message}。把参数改小一点（比如缩小 executeJS 的 code），或者拆成几次调用。`;
+  }
+  return '请求体不是合法 JSON';
+}
 
 function statusFor(result) {
   if (result && result.ok === true) return 200;
@@ -73,16 +87,28 @@ function readBody(req) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
+    let tooLarge = false;
     req.on('data', (chunk) => {
+      if (tooLarge) return;
       size += chunk.length;
       if (size > MAX_BODY_BYTES) {
-        reject(new Error('请求体过大'));
-        req.destroy();
+        // 超限要**回一句话**再停：直接 destroy 的话客户端只看到 fetch failed，
+        // 分不清是"网断了"还是"body 太大"。这里记下超限，让上层回 413。
+        tooLarge = true;
+        chunks.length = 0;
+        const error = new Error(`请求体超过 ${Math.round(MAX_BODY_BYTES / 1024)} KB 上限`);
+        error.code = 'BODY_TOO_LARGE';
+        reject(error);
+        // 不再继续读，也不再写；把剩余数据丢掉，让响应能正常发出去
+        req.resume();
         return;
       }
       chunks.push(chunk);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('end', () => {
+      if (tooLarge) return;
+      resolve(Buffer.concat(chunks).toString('utf8'));
+    });
     req.on('error', reject);
   });
 }
@@ -189,8 +215,8 @@ function startHttpApi({
       let payload;
       try {
         payload = JSON.parse((await readBody(req)) || '{}');
-      } catch {
-        return sendJson(res, 400, { ok: false, error: '请求体不是合法 JSON' });
+      } catch (err) {
+        return sendJson(res, bodyErrorStatus(err), { ok: false, code: err && err.code ? err.code : 'INVALID_JSON', error: bodyErrorMessage(err) });
       }
       const result = await dispatch(payload);
       return sendJson(res, statusFor(result), result);
@@ -210,11 +236,11 @@ function startHttpApi({
       let payload;
       try {
         payload = JSON.parse((await readBody(req)) || '{}');
-      } catch {
-        return sendJson(res, 400, {
+      } catch (err) {
+        return sendJson(res, bodyErrorStatus(err), {
           ok: false,
-          reason: 'INVALID_JSON',
-          message: '请求体不是合法 JSON',
+          reason: err && err.code === 'BODY_TOO_LARGE' ? 'BODY_TOO_LARGE' : 'INVALID_JSON',
+          message: bodyErrorMessage(err),
         });
       }
 
