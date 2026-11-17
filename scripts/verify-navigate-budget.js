@@ -24,6 +24,7 @@ const {
 } = budget;
 
 const actionsSource = fs.readFileSync(path.join(ROOT, 'src/core/actions.js'), 'utf8');
+const tabsSource = fs.readFileSync(path.join(ROOT, 'src/core/tabs.js'), 'utf8');
 const mainSource = fs.readFileSync(path.join(ROOT, 'src/main.js'), 'utf8');
 const preloadSource = fs.readFileSync(path.join(ROOT, 'src/preload.js'), 'utf8');
 const settingsHtml = fs.readFileSync(path.join(ROOT, 'src/renderer/settings.html'), 'utf8');
@@ -113,6 +114,21 @@ check(
   '超时文案改成 describeNavigateBudget（不再硬编码「Math.round(budget / 1000) 秒」）',
   /打开这个地址超过 \$\{describeNavigateBudget\(budget\)\}还没完成/.test(actionsSource)
     && !/Math\.round\(budget \/ 1000\)/.test(actionsSource),
+);
+
+/* ---------- ⑥b 应用页 navigate 也要按预算等待 ---------- */
+check(
+  '应用页 navigate 返回 tabId，执行器在 fromAppPage 时继续等加载（不再假成功）',
+  /result\.fromAppPage/.test(actionsSource)
+    && /waitForTabLoad\(result\.tabId, remaining\)/.test(actionsSource)
+    && /tabId: result\.tabId/.test(actionsSource),
+);
+check(
+  '标签层提供 waitForTabLoad：按 did-finish-load / did-fail-load 收敛，超时返回 NAVIGATE_TIMEOUT',
+  /waitForTabLoad\(tabId, timeoutMs\)/.test(tabsSource)
+    && /did-finish-load/.test(tabsSource)
+    && /did-fail-load/.test(tabsSource)
+    && /NAVIGATE_TIMEOUT/.test(tabsSource),
 );
 
 /* ---------- ⑦ 主进程：偏好读写 + 注入 + IPC ---------- */

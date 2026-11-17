@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把四十三个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把四十七个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
@@ -48,8 +48,9 @@
  * 42. scripts/verify-tab-park.js（标签停靠：切模式不再销毁标签、视图摘下但不关页面、停靠时用 CDP 真正冻结页面、恢复时先解冻再挂回、只摘自己挂的调试通道、冻结失败留痕但不断停靠、退出私密时先摘调试通道再强制销毁私密标签、超出 12 个降级成只记地址并当面告知，26 项；纯 Node，不启动 Electron）
  * 43. scripts/verify-transition.js（切换动画：牛奶桶素材有效、页面无外联、进入＝从中心向外的黑色扩散、两套动画各 1 秒且时长与格子有上下限、减少动效降级、透明子窗口不抢焦点不开沙箱口子、开关默认开且可关，20 项；纯 Node，不启动 Electron）
  * 44. scripts/verify-agent-stop.js（agent 急停与恐慌快捷键：首选被占用时按候选列表换备用键并当面说明、三处状态显示实际注册上的键、全失败只剩按钮，12 项；纯 Node，不启动 Electron）
- * 45. scripts/verify-navigate-budget.js（agent 导航预算：默认 15 秒、3–60 秒边界、越界与小数一律拒绝不夹值、按站点的规则解析与最长匹配/子域继承、坏行整条拒收并点行号、动作执行器按目标地址挑预算、主进程读写与留痕、设置页按秒填并带站点文本框，22 项；纯 Node，不启动 Electron）
- * 46. scripts/verify-font-scale.js（界面字号档位：四档倍率与中文名、未知值回标准档、两份界面样式里字号全部乘 --font-scale 且不留裸 px、主窗口与设置页都会写到根元素、preload 三条同步 API、模块保持纯逻辑，13 项；纯 Node，不启动 Electron）
+ * 45. scripts/verify-navigate-budget.js（agent 导航预算：默认 15 秒、3–60 秒边界、越界与小数一律拒绝不夹值、按站点的规则解析与最长匹配/子域继承、坏行整条拒收并点行号、动作执行器按目标地址挑预算、应用页 navigate 也按剩余预算等加载并回 tabId、主进程读写与留痕、设置页按秒填并带站点文本框，24 项；纯 Node，不启动 Electron）
+ * 46. scripts/verify-font-scale.js（界面字号档位：四档倍率与中文名、未知值回标准档、style/settings/全部 theme-*.css 里字号全部乘 --font-scale 且不留裸 px、主窗口与设置页都会写到根元素、preload 三条同步 API、模块保持纯逻辑，15 项；纯 Node，不启动 Electron）
+ * 47. scripts/verify-navigate-budget-e2e.js（应用页导航预算真机：从设置页出发，慢页按 3 秒预算返回 NAVIGATE_TIMEOUT 而不是 14ms 假成功、超时结果带 tabId、新标签确实开了、快页回 tabId/fromAppPage，7 项）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -370,14 +371,20 @@ const STEPS = [
   {
     label: 'agent 导航预算回归',
     script: 'verify-navigate-budget.js',
-    items: '22 项',
+    items: '24 项',
     timeoutMs: 60000,
   },
   {
     label: '界面字号档位回归',
     script: 'verify-font-scale.js',
-    items: '13 项',
+    items: '15 项',
     timeoutMs: 60000,
+  },
+  {
+    label: '应用页导航预算 e2e',
+    script: 'verify-navigate-budget-e2e.js',
+    items: '7 项',
+    timeoutMs: 180000,
   },
 ];
 

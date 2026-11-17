@@ -597,6 +597,10 @@ function createDispatcher(options) {
       elapsedMs: resultEntry.elapsedMs,
       interrupted: aborted,
       confirmedBy: confirmedBy || undefined,
+      // 失败时也把「地址已经交给哪个标签」带出去：navigate 超时后 agent 需要
+      // 用 state/readPage 去追这个 tabId，否则只能靠猜“是不是新开了一个标签”。
+      ...(result && result.tabId ? { tabId: result.tabId } : {}),
+      ...(!ok && result && result.url ? { url: result.url } : {}),
     };
     if (aborted && !ok && !payload.code) payload.code = CODES.ABORTED;
     return payload;

@@ -410,7 +410,10 @@ body {
   color: var(--text-main);
   /* 中文优先，等宽留给代码；西文用 Inter 若有则生效 */
   font-family: "Microsoft YaHei UI", "PingFang SC", "Segoe UI", system-ui, "Noto Sans SC", sans-serif;
-  font-size: 13px;
+  /* 界面字号档位：基准字号也必须乘 --font-scale。
+     只给具体选择器写 calc、body 却留裸 13px，会让所有“继承 body”的文字在档位下不动，
+     最容易漏的是设置页没有单独规则的 .set-row-name。 */
+  font-size: calc(13px * var(--font-scale));
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -486,7 +489,8 @@ body {
 }
 
 .tab-title {
-  font-size: 12px;
+  /* 与 style.css 的标签字号保持同一口径；这里写死 12px 会让「特大」档的标签标题不放大。 */
+  font-size: calc(12px * var(--font-scale));
 }
 
 .tab-close {
@@ -667,7 +671,7 @@ body.private-mode .shell {
 /* 标题走衬线，与"墨"的隐喻一致 */
 .tb-title {
   font-family: "Songti SC", "Source Han Serif SC", "Noto Serif SC", Georgia, "SimSun", serif;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
   letter-spacing: 3px;
   color: var(--accent-soft);
 }

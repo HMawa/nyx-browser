@@ -1195,6 +1195,74 @@ class TabManager {
     }
   }
 
+  /**
+   * 等某个标签把当前这次加载跑完（应用页 navigate 新建标签后要用）。
+   *
+   * 应用页分支会先 create() 再立刻返回，因为不能把设置页自己导航走；但 agent 需要
+   * 知道“新标签到底加载完没有”，否则导航预算在这条路径上等于没生效（实测 3 秒预算
+   * 下 6 秒慢页仍返回 ok，下一动作被拖 6 秒）。这里只等待，不重新发起加载。
+   *
+   * @param {number} tabId
+   * @param {number} timeoutMs 剩余预算；<=0 时只做一次状态快照
+   * @returns {Promise<{ok:boolean,url?:string,code?:string,error?:string}>}
+   */
+  waitForTabLoad(tabId, timeoutMs) {
+    const tab = this.tabs.find((item) => item.id === tabId);
+    if (!tab) return Promise.resolve({ ok: false, code: 'TAB_NOT_FOUND', error: '标签不存在' });
+    if (tab.loadError) {
+      return Promise.resolve({
+        ok: false,
+        code: 'NAVIGATE_FAILED',
+        error: tab.loadError.reason || tab.loadError.title || '页面加载失败',
+        url: tab.loadError.url || tab.url,
+      });
+    }
+    const wc = tab.view && tab.view.webContents;
+    if (!wc || wc.isDestroyed()) return Promise.resolve({ ok: false, code: 'TAB_CLOSED', error: '标签已关闭' });
+    if (!wc.isLoading()) return Promise.resolve({ ok: true, url: wc.getURL() || tab.url });
+
+    return new Promise((resolve) => {
+      let settled = false;
+      let timer = null;
+      const finish = (payload) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        wc.removeListener('did-finish-load', onFinish);
+        wc.removeListener('did-fail-load', onFail);
+        wc.removeListener('destroyed', onDestroyed);
+        resolve(payload);
+      };
+      const onFinish = () => finish({ ok: true, url: wc.getURL() || tab.url });
+      const onFail = (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+        if (!isMainFrame) return;
+        // -3 = ERR_ABORTED：被下一次导航打断，不是故障，继续等新的一次。
+        if (errorCode === -3) return;
+        finish({
+          ok: false,
+          code: 'NAVIGATE_FAILED',
+          error: errorDescription || '页面加载失败',
+          url: validatedURL || tab.url,
+        });
+      };
+      const onDestroyed = () => finish({ ok: false, code: 'TAB_CLOSED', error: '标签已关闭' });
+      wc.on('did-finish-load', onFinish);
+      // 用 on 而不是 once：子框架失败与 ERR_ABORTED 都会被忽略，若 once 会顺手
+      // 把监听摘掉，之后真正的主框架失败就没人接了。
+      wc.on('did-fail-load', onFail);
+      wc.once('destroyed', onDestroyed);
+      // 监听挂上后立刻再查一次：加载可能正好在 isDestroyed() 与 on() 之间完成，
+      // 不补这一下会白等到超时，把成功误报成 NAVIGATE_TIMEOUT。
+      if (!wc.isLoading()) {
+        finish({ ok: true, url: wc.getURL() || tab.url });
+        return;
+      }
+      const wait = Math.max(0, Number(timeoutMs) || 0);
+      timer = setTimeout(() => finish({ ok: false, code: 'NAVIGATE_TIMEOUT', error: '等待页面加载超时', url: tab.url }), wait);
+      if (timer.unref) timer.unref();
+    });
+  }
+
   goBack() {
     const wc = this.getActiveWebContents();
     if (!wc) return { ok: false, error: '当前没有活动标签' };

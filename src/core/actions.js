@@ -265,7 +265,52 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog, ge
               elapsedMs: Date.now() - started,
             };
           }
-          return wrap(result.ok ? { ok: true, url: result.url } : { ok: false, error: result.error });
+          // 应用页（起始页 / 设置页）上的 navigate 会新开一个标签再立刻返回，
+          // 否则设置页自身会被导航走。但“立刻返回”不能等于“导航完成”：
+          // 以前这里直接返回 ok，3 秒预算下 6 秒慢页也报成功，下一条 readPage
+          // 被拖满 6 秒。这里用剩余预算等新标签真正加载完，并把 tabId 交出去。
+          if (result && result.ok && result.fromAppPage && result.tabId) {
+            const manager = getTabManager();
+            if (manager && typeof manager.waitForTabLoad === 'function') {
+              const remaining = Math.max(0, budget - (Date.now() - started));
+              const waited = await manager.waitForTabLoad(result.tabId, remaining);
+              if (!waited.ok) {
+                if (waited.code === 'NAVIGATE_TIMEOUT') {
+                  return {
+                    ok: false,
+                    action: type,
+                    code: 'NAVIGATE_TIMEOUT',
+                    error: `打开这个地址超过 ${describeNavigateBudget(budget)}还没完成（可能站点很慢、一直在跳转，或者网络断了）。地址本身已经交给浏览器，你可以稍后用 state / readPage 看看是否已经加载好。`,
+                    url: params.url,
+                    tabId: result.tabId,
+                    elapsedMs: Date.now() - started,
+                  };
+                }
+                return wrap({
+                  ok: false,
+                  code: waited.code,
+                  error: waited.error,
+                  url: result.url,
+                  tabId: result.tabId,
+                });
+              }
+              if (waited.url) result.url = waited.url;
+            }
+            return wrap({
+              ok: true,
+              url: result.url,
+              tabId: result.tabId,
+              fromAppPage: true,
+            });
+          }
+          return wrap(result.ok
+            ? {
+              ok: true,
+              url: result.url,
+              ...(result.tabId ? { tabId: result.tabId } : {}),
+              ...(result.fromAppPage ? { fromAppPage: true } : {}),
+            }
+            : { ok: false, error: result.error });
         }
 
         case 'readPage': {

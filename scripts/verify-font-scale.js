@@ -68,14 +68,23 @@ check(
 const theme = read('src/renderer/theme-nyx.css');
 check('主题令牌里给了 --font-scale 默认值 1', /--font-scale:\s*1;/.test(theme), 'theme-nyx.css');
 
-for (const rel of ['src/renderer/style.css', 'src/renderer/settings.css']) {
+// 主题 CSS 也要扫：theme-nyx 的 body / .tab-title / .tb-title 曾用裸 px 覆盖
+// style.css 的 calc，导致“行标题、标签标题不缩放”，而只扫 style/settings 的旧断言
+// 仍是全绿。主题文件允许没有字号（继承 style.css），但一旦写 font-size 就必须带 calc。
+const cssFiles = ['src/renderer/style.css', 'src/renderer/settings.css'];
+for (const name of fs.readdirSync(path.join(ROOT, 'src/renderer'))) {
+  if (/^theme-.*\.css$/.test(name)) cssFiles.push(`src/renderer/${name}`);
+}
+for (const rel of cssFiles) {
   const css = read(rel);
+  const isTheme = /\/theme-.*\.css$/.test(rel);
   const scaled = (css.match(/font-size:\s*calc\([\d.]+px \* var\(--font-scale\)\);/g) || []).length;
   const bare = (css.match(/font-size:\s*[\d.]+px;/g) || []).length;
+  const hasFontSize = /font-size:/.test(css);
   check(
     `${rel} 的字号全部乘上 --font-scale（不留裸 px，否则档位形同虚设）`,
-    scaled > 50 && bare === 0,
-    `calc ${scaled} 处 / 裸 px ${bare} 处`
+    bare === 0 && (isTheme ? (!hasFontSize || scaled > 0) : scaled > 50),
+    `calc ${scaled} 处 / 裸 px ${bare} 处${isTheme ? '（主题可继承）' : ''}`
   );
 }
 
