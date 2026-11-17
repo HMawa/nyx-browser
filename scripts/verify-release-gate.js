@@ -651,6 +651,25 @@ check(
   '三个 IPC + 三个 preload 方法 + 四个 id + 跑一遍的通道依然不存在',
 );
 
+// 12) 安装器不许把 latest.json 指向的那一版安装包删掉
+//     （以前裸删 updates\*.exe，装完就把清单指向的包一起删了，旧机器升不上来）
+const installerNsh = read(path.join(ROOT, 'build', 'installer.nsh'));
+check(
+  '安装后保留刚装上的那一版安装包',
+  /\$\{If\} \$\{FileExists\} "\$APPDATA\\Nyx\\updates\\Nyx-Setup-\$\{VERSION\}\.exe"/.test(installerNsh),
+  '必须先在删除前把 Nyx-Setup-${VERSION}.exe 挪开，删完再挪回来'
+);
+check(
+  '不再裸删更新源里的全部 exe',
+  !/^\s*Delete "\$APPDATA\\Nyx\\updates\\\*\.exe"\s*$/m.test(installerNsh),
+  '禁止出现 Delete "$APPDATA\\Nyx\\updates\\*.exe"'
+);
+check(
+  '清旧包只按 Nyx-Setup-*.exe 通配',
+  /Delete "\$APPDATA\\Nyx\\updates\\Nyx-Setup-\*\.exe"/.test(installerNsh),
+  '不许删更新源里别的 exe（用户可能放在那里给自己看的）'
+);
+
 const failed = checks.filter((item) => !item.ok);
 console.log(`\n[Nyx] 发版门禁接线检查（${checks.length} 项）`);
 for (const item of checks) {

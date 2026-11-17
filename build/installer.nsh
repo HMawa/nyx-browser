@@ -684,7 +684,17 @@ FunctionEnd
   CreateDirectory "$APPDATA\Nyx"
   CreateDirectory "$APPDATA\Nyx\updates"
   CreateDirectory "$INSTDIR\updates"
-  Delete "$APPDATA\Nyx\updates\*.exe"
+  ; 只清更旧的更新包，**保留刚装上的这一版**：latest.json 指向的就是它。
+  ; 以前这里裸删 *.exe，装完就把清单指向的包一起删了，低于本版的机器
+  ; 点「下载」只会得到「更新源里没有找到升级包」——升不上来（2026-11-17 实测）。
+  ; 先把这一版挪开（改名不占额外空间），删完再挪回来。
+  ${If} ${FileExists} "$APPDATA\Nyx\updates\Nyx-Setup-${VERSION}.exe"
+    Rename "$APPDATA\Nyx\updates\Nyx-Setup-${VERSION}.exe" "$APPDATA\Nyx\updates\.nyx-keep-package.exe"
+    Delete "$APPDATA\Nyx\updates\Nyx-Setup-*.exe"
+    Rename "$APPDATA\Nyx\updates\.nyx-keep-package.exe" "$APPDATA\Nyx\updates\Nyx-Setup-${VERSION}.exe"
+  ${Else}
+    Delete "$APPDATA\Nyx\updates\Nyx-Setup-*.exe"
+  ${EndIf}
 
   ; 首次安装引导标记（清单 D2）：只有全新安装才置 pending=1。
   ; 升级 / 覆盖 / 降级一律 pending=0——判定不许靠"有没有配置文件"猜，

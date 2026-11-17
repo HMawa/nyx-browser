@@ -78,11 +78,12 @@
  *
  *
  * installer.nsh 到底删哪些路径（据 build/installer.nsh 第 26-35 行核对）：
- *   Delete "$APPDATA\Nyx\updates\*.exe"   ; 升级完成后删掉更新源里的旧安装包
- *   Delete "$INSTDIR\updates\*.exe"       ; 兼容旧版本的收件目录，同样只删 exe
+ *   Rename 保留 / Delete "Nyx-Setup-*.exe"   ; 升级后只清更旧的安装包，
+ *                                             ; 清单指向的那一版（刚装上的）改名保留再改回来
+ *   Delete "$INSTDIR\updates\*.exe"          ; 兼容旧版本的收件目录，同样只删 exe
  *   Exec '"$SYSDIR\cmd.exe" /c ... del /f /q "$EXEPATH"'  ; 延迟删除安装程序自身
- *   —— 两个 updates 目录都只删 *.exe，latest.json 保留；安装程序自身也会被删。
- *   所以升级一轮后：更新源里剩下 latest.json，exe 没了，应用能读到清单却下不到包。
+ *   —— 允许删除的只有更旧的 Nyx-Setup-*.exe；latest.json 与它指向的那一版必须留下
+ *   （2026-11-17 之前是裸删 *.exe，升级一轮后清单还在、exe 没了，旧机器升不上来，已修）。
  *
  * 归档目录为什么放 %APPDATA%\Nyx\updates-archive\<版本>\：
  *   - 它不是 installer.nsh 删除的那两个 updates 目录（只是同级的另一个目录名），
