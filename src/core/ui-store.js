@@ -33,6 +33,11 @@ const UI_PREF_DEFAULTS = {
    */
   modeTransition: true,
   /**
+   * 首次进隐私模式的说明横幅是否已经看过（1.18.0）。
+   * 只出现一次：用户点掉或者切出去就记下来。默认 false = 还没看过。
+   */
+  privacyBannerSeen: false,
+  /**
    * 界面字号档位（清单 D3 里"属独立改造"的那一项）：small 小 / normal 标准（默认）/
    * large 大 / huge 特大，倍率见 src/core/font-scale.js。
    * 只缩放文字，不动图标与间距——缩放布局会牵动 WebContentsView 的几何，那是另一件事。
@@ -122,6 +127,19 @@ const UI_PREF_DEFAULTS = {
   privateSiteMode: 'all',
   privateSiteAllow: [],
   privateSiteBlock: [],
+
+  /**
+   * 接入外壳身份（外部清单《VPN 接入外壳改造实现清单》§1）。
+   *
+   *   'auto'     默认。老用户（已有订阅）按 custom 走，界面与升级前逐字一致；
+   *              干净机器按 campus 走，进接入外壳。
+   *   'campus'/'enterprise'/'custom'  用户在设置里亲手选的，永远优先。
+   *
+   * 为什么默认值是 auto 而不是直接写 campus：升级的人不该在不知情的情况下
+   * 被换一套界面；而新装的人也不该一上来就看见「代理中心 / 订阅 / 节点」。
+   * 具体判定在 core/net-terms.js 的 resolveIdentity()，这里只存原值。
+   */
+  netIdentity: 'auto',
 };
 
 /** 枚举型偏好的合法取值（键 → 允许值）。
@@ -136,6 +154,8 @@ const UI_PREF_ENUMS = {
   motionLevel: ['calm', 'lively'],
   /** 界面字号档位（清单 D3 遗留项）；倍率见 src/core/font-scale.js */
   fontScale: ['small', 'normal', 'large', 'huge'],
+  /** 接入外壳身份（外部清单 VPN 外壳 §1）：auto 由 core/net-terms.js 解析成具体一档 */
+  netIdentity: ['auto', 'campus', 'enterprise', 'custom'],
 };
 
 class UiStore {

@@ -149,6 +149,21 @@
           管理
         </button>
       </div>
+
+      <!--
+        首次进隐私模式的说明横幅（1.18.0）。
+        放在 header 里是有原因的：标签内容是 WebContentsView（原生视图），永远盖在外壳 DOM 上面，
+        body 里放横幅会被页面遮住；放这里就能让外壳临时变高、把标签视图往下推。
+        只出现一次：用户点掉或切走就记进 ui-preferences 的 privacyBannerSeen。
+      -->
+      <div class="mode-banner" id="privacy-banner" hidden>
+        <span class="mode-banner-text">
+          现在是隐私模式：指纹、语言与时区会统一成一份普通浏览器的样子，页面内容不留盘。
+          想看具体伪装了什么、哪些测不到，去「设置 → 隐私与安全」跑一次<strong>隐私自检</strong>。
+        </span>
+        <button type="button" class="btn btn-mini" id="btn-privacy-banner-check">去自检</button>
+        <button type="button" class="btn btn-mini" id="btn-privacy-banner-close" aria-label="知道了，关闭这条提示">知道了</button>
+      </div>
     </header>
 
     <!--

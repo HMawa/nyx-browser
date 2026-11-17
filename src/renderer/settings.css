@@ -1998,6 +1998,84 @@
   flex: 0 0 auto;
 }
 
+/* ---------- 隐私自检（1.18.0）：一张"测到了什么"的表 ---------- */
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 6px;
+}
+
+.privacy-check-table {
+  margin: 8px 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.privacy-check-group {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm);
+  padding: 8px 10px 10px;
+  background: color-mix(in srgb, var(--bg-input) 60%, transparent);
+}
+
+.privacy-check-group > h4 {
+  margin: 0 0 6px;
+  font-size: calc(11.5px * var(--font-scale));
+  font-weight: 600;
+  letter-spacing: .04em;
+  color: var(--text-dim);
+}
+
+.privacy-check-group table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: calc(12px * var(--font-scale));
+}
+
+.privacy-check-group th {
+  text-align: left;
+  font-weight: 600;
+  padding: 3px 6px;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border-soft);
+  white-space: nowrap;
+}
+
+.privacy-check-group td {
+  padding: 4px 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-soft) 60%, transparent);
+  vertical-align: top;
+  color: var(--text);
+}
+
+.privacy-check-group tr:last-child td {
+  border-bottom: 0;
+}
+
+.privacy-check-group .pc-id {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--text-faint);
+  font-size: calc(11px * var(--font-scale));
+}
+
+.privacy-check-group .pc-level {
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.pc-level.is-bad { color: var(--danger); }
+.pc-level.is-warn { color: var(--accent); }
+.pc-level.is-neutral { color: var(--text-dim); }
+.pc-level.is-ok { color: var(--text-dim); }
+
+.privacy-check-group .pc-reason {
+  color: var(--text-dim);
+  font-size: calc(11.5px * var(--font-scale));
+}
+
 @media (prefers-reduced-motion: reduce) {
   .info-head .fold-caret,
   .info-card .info-body {

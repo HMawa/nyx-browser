@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把四十七个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把四十九个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
@@ -39,7 +39,7 @@
  * 33. scripts/verify-shell-guard.js（外壳导航守卫：只许停在自己那份文档、网络地址与伪协议全拦、弹窗只放行 http(s)、不许内嵌 webview、接线与提示，13 项；纯 Node，不启动 Electron）
  * 34. scripts/verify-update-policy.js（更新通道准入：只许 https、本地目录必须显式确认、版本必须单调、缺 sha256 一律拒绝，10 项；纯 Node，不启动 Electron）
  * 35. scripts/verify-update-signature.js（更新签名：清单 Ed25519 签名往返、改任一受保护字段即失效、安装包六种验签结果、私钥不入库，17 项；纯 Node，不启动 Electron）
- * 36. scripts/verify-privacy-surface.js（隐私指纹面：加固脚本放进假页面世界真跑一遍核对 UA/语言/时区/Canvas/WebGL、显卡与字体统一上报值、CDP 五步顺序、userAgentMetadata、两个平台分开、完整版本号、语言去 q、Worker 版脚本与 Target.setAutoAttach 接管、文档就绪补打与接线可见，55 项；纯 Node，不启动 Electron）
+ * 36. scripts/verify-privacy-surface.js（隐私指纹面：加固脚本放进假页面世界真跑一遍核对 UA/语言/时区/Canvas/WebGL、显卡与字体统一上报值、CDP 五步顺序、userAgentMetadata、两个平台分开、完整版本号、语言去 q、Worker 版脚本与 Target.setAutoAttach 接管、文档就绪补打与接线可见、应用页也走新标签回调、隐私自检的接线与口径，66 项；纯 Node，不启动 Electron）
  * 37. scripts/verify-ipc-guard.js（IPC 发送方校验：只认同项目 renderer 下的 html、子框架与网络地址全拒、三个注册口都被包上、页面上下文通道单独列，10 项；纯 Node，不启动 Electron）
  * 38. scripts/verify-http-api-auth.js（本地接口鉴权：只认请求头 token、查询串不再接受、无 token 的 health 不泄露版本、请求体超限回 413，9 项；纯 Node，不启动 Electron）
  * 39. scripts/verify-audit-p2.js（安全审计 P2 批次：隐私模式 agent 内容边界、state 只读豁免、截图重试、密码框 name 抹除、limits 传参、设置只读不确认、MCP 参数转发、回归只清理自己那棵进程树，17 项；纯 Node，不启动 Electron）
@@ -51,6 +51,8 @@
  * 45. scripts/verify-navigate-budget.js（agent 导航预算：默认 15 秒、3–60 秒边界、越界与小数一律拒绝不夹值、按站点的规则解析与最长匹配/子域继承、坏行整条拒收并点行号、动作执行器按目标地址挑预算、应用页 navigate 也按剩余预算等加载并回 tabId、主进程读写与留痕、设置页按秒填并带站点文本框，24 项；纯 Node，不启动 Electron）
  * 46. scripts/verify-font-scale.js（界面字号档位：四档倍率与中文名、未知值回标准档、style/settings/全部 theme-*.css 里字号全部乘 --font-scale 且不留裸 px、主窗口与设置页都会写到根元素、preload 三条同步 API、模块保持纯逻辑，15 项；纯 Node，不启动 Electron）
  * 47. scripts/verify-navigate-budget-e2e.js（应用页导航预算真机：从设置页出发，慢页按 3 秒预算返回 NAVIGATE_TIMEOUT 而不是 14ms 假成功、超时结果带 tabId、新标签确实开了、快页回 tabId/fromAppPage，7 项）
+ * 48. scripts/verify-net-terms.js（接入外壳词表：三档文案齐全、custom 逐字等于今天的界面、campus/enterprise 不夹旧词、缺项抛错不静默回落、老用户升级走 custom 而新装走 campus、只写 netIdentity 一个键不碰订阅与端口、预加载与主进程都接同一份词表，21 项；纯 Node，不启动 Electron）
+ * 49. scripts/verify-privacy-check.js（隐私自检判定引擎：五档各一例、矛盾即可疑、`truth=null` 一律测不到且不许拿观察值顶替、泄露与稳定画布的判定、报告里不许出现绝对化措辞与百分制评分、模块保持纯逻辑、报告 JSON 字段固定，18 项；纯 Node，不启动 Electron）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -317,7 +319,7 @@ const STEPS = [
   {
     label: '隐私指纹面回归',
     script: 'verify-privacy-surface.js',
-    items: '55 项',
+    items: '66 项',
     timeoutMs: 60000,
   },
   {
@@ -385,6 +387,18 @@ const STEPS = [
     script: 'verify-navigate-budget-e2e.js',
     items: '7 项',
     timeoutMs: 180000,
+  },
+  {
+    label: '接入外壳词表回归',
+    script: 'verify-net-terms.js',
+    items: '21 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '隐私自检判定引擎回归',
+    script: 'verify-privacy-check.js',
+    items: '18 项',
+    timeoutMs: 60000,
   },
 ];
 

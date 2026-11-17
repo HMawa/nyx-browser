@@ -418,6 +418,81 @@ check(
     /Runtime\.runIfWaitingForDebugger/.test(main) &&
     /PRIVACY_WORKER_ATTACH_FAILED/.test(main),
 );
+/* ⑨ 隐私自检（1.18.0 P1/P2）：接线、上限、口径 */
+
+const privacyCheckModule = require(path.join(ROOT, 'src', 'core', 'privacy-check.js'));
+const settingsHtml = read('src/renderer/settings.html');
+const settingsJs = read('src/renderer/settings.js');
+const preloadSource = read('src/preload.js');
+const shellHtml = read('src/renderer/index.html');
+const shellJs = read('src/renderer/renderer.js');
+
+check(
+  '主进程提供 nyx:privacy:check，并且真实值由主进程给（核数 / 主显示器 / 系统语言）',
+  /ipcMain\.handle\('nyx:privacy:check'/.test(main) &&
+    /nodeOs\.cpus\(\)/.test(main) &&
+    /screen\.getPrimaryDisplay\(\)/.test(main) &&
+    /getPreferredSystemLanguages/.test(main),
+);
+check(
+  '自检 IPC 带硬上限（观测卡住不许把设置页 init() 拖死）',
+  /PRIVACY_CHECK_TIMEOUT_MS/.test(main) && /Promise\.race\(\[/.test(main),
+);
+check(
+  '自检不许把观察值当真实值：truth 由主进程单独取，页面只给 observed',
+  /privacyCheck\.judgeItem\(id, observedValue, truth\)/.test(main) &&
+    privacyCheckModule.judgeItem('A5', { cores: 8 }, null).level === 'unknown',
+);
+check(
+  '设置页有「隐私自检」卡片：运行、复制、四组表格容器、没有分数',
+  /id="btn-privacy-check"/.test(settingsHtml) &&
+    /id="btn-privacy-check-copy"/.test(settingsHtml) &&
+    /id="privacy-check-table"/.test(settingsHtml) &&
+    /不联网、不上传/.test(settingsHtml) &&
+    !/隐私评分|评分：\s*\d/.test(settingsHtml),
+);
+check(
+  '设置页渲染只走 textContent（观察值可能带页面内容，拼 HTML 就是自找注入）',
+  /function renderPrivacyCheck\(res\)/.test(settingsJs) &&
+    /tableEl\.textContent = ''/.test(settingsJs) &&
+    /td\.textContent =/.test(settingsJs) &&
+    !/privacy-check-table[\s\S]{0,400}innerHTML/.test(settingsJs),
+);
+check(
+  '复制走主进程剪贴板（渲染层的 navigator.clipboard 在文件页里不可靠）',
+  /privacyCheck: \(\) => ipcRenderer\.invoke\('nyx:privacy:check'\)/.test(preloadSource) &&
+    /window\.nyx\.digestCopy\(privacyCheckReport\)/.test(settingsJs),
+);
+check(
+  '首次进隐私模式的横幅在 header 里（body 会被 WebContentsView 盖住），并且只弹一次',
+  /id="privacy-banner"/.test(shellHtml) &&
+    shellHtml.indexOf('id="privacy-banner"') < shellHtml.indexOf('</header>') &&
+    /privacyBannerSeen/.test(shellJs) &&
+    /privacyBannerSeen: false/.test(read('src/core/ui-store.js')),
+);
+check(
+  '横幅出现时让外壳变高（标签视图往下推），收起时恢复——和「更多」菜单同一套机制',
+  /function setPrivacyBannerVisible\(visible\)/.test(shellJs) && /applyShellExtra\(measured\)/.test(shellJs),
+);
+check(
+  '报告里不许出现绝对化措辞与百分制评分（口径守卫，防止越写越像广告）',
+  privacyCheckModule.BANNED_PHRASES.every((phrase) => !privacyCheckModule.buildReport([], {}).includes(phrase)) &&
+    !/评分/.test(privacyCheckModule.buildReport([], {})),
+);
+
+check(
+  '应用页（起始页/设置页）也走新标签回调——否则隐私模式下第一屏就是真 UA（1.18.0 实测过）',
+  /createAppPage\(options\)/.test(read('src/core/tabs.js')) &&
+    /应用页也要走一遍"新标签回调"/.test(read('src/core/tabs.js')) &&
+    /gate = this\.onTabCreated\(tab\);/.test(read('src/core/tabs.js')),
+);
+check(
+  'Emulation 身份对齐命令在文档就绪后才发（导航前发只会等满超时，还会和补打抢调试会话）',
+  /第一个文档的补丁是/.test(main) &&
+    /applySurfaceToCurrentDocument/.test(main) &&
+    main.indexOf('指纹面下发') > main.indexOf('function applySurfaceToCurrentDocument'),
+);
+
 console.log('');
 console.log(`隐私指纹面回归：通过 ${passed} 项，失败 ${failed} 项`);
 if (failed > 0) {

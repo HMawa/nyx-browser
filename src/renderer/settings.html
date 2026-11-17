@@ -449,7 +449,31 @@
           <div class="sec-fold-tools"><button type="button" class="btn btn-mini" data-fold-all="open">全部铺开</button><button type="button" class="btn btn-mini" data-fold-all="close">全部收回</button></div></header>
 
           <div class="sec-scroll" data-fx-progress="1">
-            <section class="info-card fx-reveal" style="--fx-delay: 0s;">
+            <section class="info-card fx-reveal card-wide" id="privacy-check-card" style="--fx-delay: 0s;">
+              <div class="info-head" role="button" tabindex="0" title="隐私自检：点击铺开或收回">
+                <h3>隐私自检</h3>
+                <span class="badge" id="privacy-check-badge">还没跑过</span>
+              </div>
+              <div class="info-body">
+                <p class="hint">
+                  在这台机器上跑一遍，看看隐私模式到底伪装了什么、哪些是<strong>测不到</strong>——真实值由主进程给（核数、主显示器、显卡名、系统语言），
+                  页面自己报的数值只当观察值，所以这张表不会自问自答。判断只在本机做，不联网、不上传。
+                </p>
+                <div class="btn-row">
+                  <button type="button" class="btn btn-primary" id="btn-privacy-check">运行自检</button>
+                  <button type="button" class="btn" id="btn-privacy-check-copy" disabled>复制报告</button>
+                </div>
+                <p class="hint" id="privacy-check-summary" role="status" aria-live="polite">还没跑过。点「运行自检」，大约一秒出结果。</p>
+                <div class="privacy-check-table" id="privacy-check-table" hidden></div>
+                <p class="hint" id="privacy-check-notes"></p>
+                <p class="hint">
+                  这张表只证明它测到的面：TLS 指纹、HTTP/2 帧序、字体全量枚举都不在范围内；
+                  DNS 出口永远显示「测不到」，因为自检不去向第三方要答案。这里也没有分数。
+                </p>
+              </div>
+            </section>
+
+            <section class="info-card fx-reveal" style="--fx-delay: 0.02s;">
               <div class="info-head" role="button" tabindex="0" title="隐私模式的出站方式：点击铺开或收回">
                 <h3>隐私模式的出站方式</h3>
                 <span class="badge" id="privacy-link-badge">—</span>

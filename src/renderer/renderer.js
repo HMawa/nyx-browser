@@ -248,6 +248,96 @@ function renderToolbar() {
   document.body.classList.toggle('private-mode', isPrivate);
 
   renderLinkBadge();
+  syncPrivacyBanner(isPrivate);
+}
+
+/**
+ * 首次进隐私模式的横幅（1.18.0）。
+ *
+ * 为什么放在 header 里而不是 body：标签内容是 WebContentsView（原生视图），永远压在外壳 DOM 上面，
+ * body 里的横幅会被页面盖住。放 header 里、量完高度再让外壳变高（applyShellExtra），
+ * 主进程就会把标签视图往下推——和「更多」菜单让位是同一套机制。
+ *
+ * 只出现一次：`ui-preferences.json` 的 privacyBannerSeen 一置 true，之后再也不弹。
+ */
+let privacyBannerSeen = false;
+let privacyBannerWired = false;
+let privacyBannerVisible = false;
+
+function privacyBannerEl() {
+  return document.getElementById('privacy-banner');
+}
+
+function setPrivacyBannerVisible(visible) {
+  const el = privacyBannerEl();
+  if (!el) return;
+  const bannerHeight = visible ? Math.ceil(el.getBoundingClientRect().height || 0) : 0;
+  el.hidden = !visible;
+  privacyBannerVisible = visible;
+  // 先把横幅显示出来再量高度：hidden 元素量出来是 0
+  const measured = visible ? Math.ceil(el.getBoundingClientRect().height || bannerHeight) : 0;
+  applyShellExtra(measured);
+}
+
+function markPrivacyBannerSeen() {
+  privacyBannerSeen = true;
+  if (window.nyx && window.nyx.setUiPref) {
+    window.nyx.setUiPref('privacyBannerSeen', true).catch(() => {});
+  }
+}
+
+function wirePrivacyBanner() {
+  if (privacyBannerWired) return;
+  privacyBannerWired = true;
+  const closeBtn = document.getElementById('btn-privacy-banner-close');
+  const checkBtn = document.getElementById('btn-privacy-banner-check');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      markPrivacyBannerSeen();
+      setPrivacyBannerVisible(false);
+    });
+  }
+  if (checkBtn) {
+    checkBtn.addEventListener('click', () => {
+      markPrivacyBannerSeen();
+      setPrivacyBannerVisible(false);
+      if (window.nyx && window.nyx.openSettings) {
+        window.nyx.openSettings({ section: 'privacy' });
+      }
+    });
+  }
+}
+
+/**
+ * 跟着模式走：进隐私模式且没看过 → 显示；切回普通或已看过 → 收起（并让外壳恢复原高）。
+ * 切走也算"知道了"——用户已经在隐私模式里待过，不该下次再被同一条提示拦一次。
+ */
+function syncPrivacyBanner(isPrivate) {
+  const el = privacyBannerEl();
+  if (!el) return;
+  wirePrivacyBanner();
+  if (isPrivate) {
+    if (privacyBannerVisible) return;
+    if (privacyBannerSeen) return;
+    setPrivacyBannerVisible(true);
+    return;
+  }
+  if (privacyBannerVisible) {
+    // 用户切回了普通模式：算他知道了，记下来并收起
+    markPrivacyBannerSeen();
+    setPrivacyBannerVisible(false);
+  }
+}
+
+/** 启动时先读一次偏好：看过就不弹 */
+function loadPrivacyBannerPref() {
+  if (!window.nyx || !window.nyx.getUiPrefs) return;
+  window.nyx
+    .getUiPrefs()
+    .then((prefs) => {
+      privacyBannerSeen = Boolean(prefs && prefs.privacyBannerSeen === true);
+    })
+    .catch(() => {});
 }
 
 /**
@@ -1039,6 +1129,8 @@ function showNotice(notice) {
 
 window.nyx.onState(applyState);
 window.nyx.onNotice(showNotice);
+// 先读「横幅看过没」，再拉状态：否则首次进隐私模式会先闪一下横幅又被收回去
+loadPrivacyBannerPref();
 window.nyx.getState().then(applyState);
 
 /* ---------------- 下载中心（清单 A1） ---------------- */

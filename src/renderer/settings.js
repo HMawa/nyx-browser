@@ -869,6 +869,8 @@
       loadScreenWatch();
       // 离线阅读缓存（候选③）：条目数会随浏览变化，进分区就回读
       loadOfflineCache();
+      // 隐私自检（1.18.0）：只绑一次按钮，结果不主动跑（跑一次要观测页面，别偷偷跑）
+      wirePrivacyCheck();
     }
 
     // 扩展清单按需拉取：装载状态与文件系统耦合，进分区时读一次最新值
@@ -6047,6 +6049,175 @@ async function loadFootprint() {
   }
 
   wireSettingAuditTools();
+
+  /* ------------------------------------------------------------------ */
+  /* 隐私自检（1.18.0 P2）                                               */
+  /* ------------------------------------------------------------------ */
+
+  let privacyCheckWired = false;
+  let privacyCheckReport = '';
+
+  const PC_LEVEL_CLASS = { leak: 'is-bad', suspect: 'is-warn', unknown: 'is-neutral', masked: 'is-ok', pass: 'is-ok' };
+  const PC_LEVEL_LABEL = { leak: '泄漏', suspect: '可疑', unknown: '测不到', masked: '已伪装', pass: '正常' };
+
+  function pcCell(text, className) {
+    const td = document.createElement('td');
+    if (className) td.className = className;
+    td.textContent = text === undefined || text === null || text === '' ? '—' : String(text);
+    return td;
+  }
+
+  /**
+   * 把一次自检画成四张表。
+   * 只读文本、不用 innerHTML 拼字符串：观察值里可能带用户页面的内容，拼 HTML 就是自找注入。
+   */
+  function renderPrivacyCheck(res) {
+    const badge = byId('privacy-check-badge');
+    const summaryEl = byId('privacy-check-summary');
+    const tableEl = byId('privacy-check-table');
+    const notesEl = byId('privacy-check-notes');
+    const copyBtn = byId('btn-privacy-check-copy');
+    if (!badge || !summaryEl || !tableEl) return;
+
+    const summary = (res && res.summary) || {};
+    const worst = summary.worstLevel || 'unknown';
+    badge.textContent = PC_LEVEL_LABEL[worst] || '测不到';
+    badge.className = `badge ${worst === 'leak' ? 'bad' : worst === 'suspect' ? 'warn' : worst === 'unknown' ? '' : 'ok'}`.trim();
+    summaryEl.textContent = `${summary.headline || '自检完成'}（用时 ${res && res.elapsedMs !== undefined ? res.elapsedMs : '?'} 毫秒）`;
+    summaryEl.className = 'hint';
+
+    tableEl.textContent = '';
+    tableEl.hidden = false;
+    const groups = (res && res.groups) || [];
+    const rows = (res && res.rows) || [];
+    for (const group of groups) {
+      const items = rows.filter((row) => row.group === group.id);
+      const box = document.createElement('div');
+      box.className = 'privacy-check-group';
+      const title = document.createElement('h4');
+      title.textContent = group.label;
+      box.appendChild(title);
+
+      const table = document.createElement('table');
+      const head = document.createElement('tr');
+      for (const label of ['项', '结果', '观察值', '真实值', '说明']) {
+        const th = document.createElement('th');
+        th.textContent = label;
+        head.appendChild(th);
+      }
+      table.appendChild(head);
+
+      if (!items.length) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 5;
+        td.className = 'pc-reason';
+        td.textContent = '这一组这次没有可判的项。';
+        tr.appendChild(td);
+        table.appendChild(tr);
+      }
+
+      for (const row of items) {
+        const tr = document.createElement('tr');
+        const idCell = pcCell(`${row.id} ${row.title || ''}`, 'pc-id');
+        tr.appendChild(idCell);
+        const levelCell = pcCell(PC_LEVEL_LABEL[row.level] || '测不到', `pc-level ${PC_LEVEL_CLASS[row.level] || 'is-neutral'}`);
+        tr.appendChild(levelCell);
+        tr.appendChild(pcCell(privacyCheckValueText(row.observed)));
+        tr.appendChild(pcCell(privacyCheckValueText(row.truth)));
+        tr.appendChild(pcCell(row.reason, 'pc-reason'));
+        table.appendChild(tr);
+      }
+
+      box.appendChild(table);
+      tableEl.appendChild(box);
+    }
+
+    const notes = (res && res.notes) || [];
+    notesEl.textContent = notes.length ? `补充说明：${notes.join('；')}` : '';
+    notesEl.className = notes.length ? 'hint is-warn' : 'hint';
+
+    privacyCheckReport = (res && res.report) || '';
+    if (copyBtn) copyBtn.disabled = !privacyCheckReport;
+  }
+
+  /** 观察值/真实值可能是对象：压平成一句人话，别把 JSON 原样糊在表格里 */
+  function privacyCheckValueText(value) {
+    if (value === null || value === undefined) return '';
+    if (Array.isArray(value)) return value.length ? value.join('、') : '（空）';
+    if (typeof value === 'object') {
+      if (value.allowed) return value.allowed.length ? `放行：${value.allowed.join('、')}` : '没有默认放行的设备';
+      if (value.candidates) return value.candidates.length ? value.candidates.join('、') : '没有候选';
+      if (value.width !== undefined && value.height !== undefined) return `${value.width}×${value.height}${value.scaleFactor ? `（缩放 ${value.scaleFactor}）` : ''}`;
+      if (value.vendor !== undefined || value.renderer !== undefined) return `${value.vendor || ''} ${value.renderer || ''}`.trim();
+      if (value.blocked !== undefined) return value.blocked ? '已被拦下' : '没有被拦';
+      if (value.detected !== undefined) return value.detected ? '检测到' : '没有检测到';
+      if (value.encrypted !== undefined) return value.encrypted ? '整条加密' : value.enabled === false ? '没开' : '未加密';
+      return Object.keys(value).map((key) => `${key}=${value[key]}`).join('，');
+    }
+    if (typeof value === 'boolean') return value ? '是' : '否';
+    return String(value);
+  }
+
+  async function runPrivacyCheck() {
+    if (!window.nyx || !window.nyx.privacyCheck) {
+      setStatus('当前内核不支持隐私自检（缺少主进程接口）。', true);
+      return;
+    }
+    const summaryEl = byId('privacy-check-summary');
+    const btn = byId('btn-privacy-check');
+    if (summaryEl) {
+      summaryEl.textContent = '正在跑（约一秒）…';
+      summaryEl.className = 'hint';
+    }
+    if (btn) btn.disabled = true;
+    try {
+      // 主进程里有 3 秒硬上限；这里再兜一道，防止 IPC 本身没回来把界面挂住
+      const res = await Promise.race([
+        window.nyx.privacyCheck(),
+        new Promise((resolve) => setTimeout(() => resolve({ ok: false, error: '自检超时（4 秒没有回结果）' }), 4000)),
+      ]);
+      if (!res || res.ok === false) {
+        const badge = byId('privacy-check-badge');
+        if (badge) {
+          badge.textContent = '没跑成';
+          badge.className = 'badge bad';
+        }
+        if (summaryEl) {
+          summaryEl.textContent = `自检没跑成：${(res && res.error) || '未知原因'}`;
+          summaryEl.className = 'hint is-warn';
+        }
+        return;
+      }
+      renderPrivacyCheck(res);
+      setStatus(`隐私自检完成：${(res.summary && res.summary.headline) || '结果已更新'}`);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function wirePrivacyCheck() {
+    if (privacyCheckWired) return;
+    const runBtn = byId('btn-privacy-check');
+    const copyBtn = byId('btn-privacy-check-copy');
+    if (!runBtn) return;
+    privacyCheckWired = true;
+    runBtn.addEventListener('click', () => {
+      runPrivacyCheck().catch((err) => setStatus(`自检出错：${err.message}`, true));
+    });
+    if (copyBtn) {
+      copyBtn.addEventListener('click', async () => {
+        if (!privacyCheckReport) return;
+        // 走主进程写剪贴板（渲染层的 navigator.clipboard 在文件页里不可靠）
+        const res = await window.nyx.digestCopy(privacyCheckReport);
+        if (res && res.ok === false) {
+          setStatus(`复制失败：${res.error || '未知原因'}`, true);
+          return;
+        }
+        setStatus('自检报告已复制到剪贴板');
+      });
+    }
+  }
 
   // 主界面加载失败页（A4）的「打开诊断」会要求设置窗口直接落到「诊断」分区
   if (window.nyx.onSettingsSection) {

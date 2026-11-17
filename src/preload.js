@@ -11,6 +11,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 // 动效档位的时长与缓动只有一份（src/core/motion.js）；界面侧同步取用，避免两处各写一套数字
 const motionCore = require('./core/motion');
 const fontScaleCore = require('./core/font-scale');
+// 接入外壳词表（外部清单 VPN 外壳 §1）：与主进程读同一个文件，界面侧不再抄一份中文
+const netTermsCore = require('./core/net-terms');
 
 /**
  * 主题启动前置：渲染层要等 getState() 回调才知道主题，
@@ -67,6 +69,20 @@ contextBridge.exposeInMainWorld('nyx', {
   /** 写入单项界面偏好；仅接受白名单键与布尔值 */
   setUiPref: (key, value) => ipcRenderer.invoke('nyx:ui:prefs-set', { key, value }),
 
+  /* ---------------- 接入外壳（外部清单《VPN 接入外壳改造实现清单》§1） ---------------- */
+
+  /** 生效身份 + 三档选项 + 整套词（老用户自动回落 custom，新装默认 campus） */
+  netIdentity: () => ipcRenderer.invoke('nyx:net:identity'),
+
+  /** 亲手选一档接入方式；只写 netIdentity 偏好，不动订阅/端口/路径 */
+  setNetIdentity: (identity) => ipcRenderer.invoke('nyx:net:identity-set', { identity }),
+
+  /** 同步取某一档的整套词：界面首帧就能用对词，不必等 IPC 回来再刷一遍 */
+  netTermsFor: (identity) => netTermsCore.termsFor(identity),
+
+  /** 三档身份的显示名与一句说明（选择器用，避免界面里写死称呼） */
+  netIdentityOptions: () => netTermsCore.describeIdentities(),
+
   /** 应用与运行时信息（版本、内核版本、安装与用户数据目录、主页、标签上限） */
   getAppInfo: () => ipcRenderer.invoke('nyx:app:info'),
 
@@ -99,6 +115,13 @@ contextBridge.exposeInMainWorld('nyx', {
 
   /** 隐私现状：当前模式、加固口径、出口画像、WebRTC 策略、权限摘要、密码库统计 */
   getPrivacyStatus: () => ipcRenderer.invoke('nyx:privacy:status'),
+
+  /**
+   * 跑一次本地隐私自检（1.18.0）。
+   * 判定与报告都在主进程的纯逻辑模块里算，这里只把结果搬给界面；
+   * 主进程侧带 3 秒硬上限，页面观测卡住也不会把设置页拖死。
+   */
+  privacyCheck: () => ipcRenderer.invoke('nyx:privacy:check'),
 
   /**
    * 隐私模式的出站方式（proxy / direct）与其边界文案。

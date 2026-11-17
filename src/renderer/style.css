@@ -2801,6 +2801,39 @@ body.private-mode .shell {
   box-shadow: 0 22px 48px -26px rgba(0, 0, 0, 0.85);
 }
 
+/* ---------- 首次进隐私模式的横幅（1.18.0） ----------
+   它住在 header 里，出现时整个外壳会临时变高（renderer.js 量完高度调 shellExtra，
+   主进程把标签视图往下推），所以这里不需要绝对定位，也不需要 z-index。 */
+.mode-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 16px 8px;
+  border-top: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.mode-banner[hidden] {
+  display: none;
+}
+
+.mode-banner-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: calc(12px * var(--font-scale));
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.mode-banner-text strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.mode-banner .btn-mini {
+  flex: 0 0 auto;
+}
+
 .more-item {
   display: flex;
   align-items: flex-start;

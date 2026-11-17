@@ -58,6 +58,11 @@ const {
 } = require('electron');
 
 const sessions = require('./core/sessions');
+const nodeOs = require('node:os');
+// 隐私自检的判定引擎（纯逻辑）：主进程只负责把观测值和真实值喂给它
+const privacyCheck = require('./core/privacy-check');
+// 设备权限的默认档位：自检里的 D3 要看"普通模式默认放行了什么"
+const { baselineFor } = require('./core/permissions');
 const { PrivacyHardening } = require('./core/privacy-hardening');
 const {
   buildCdpSteps,
@@ -75,6 +80,8 @@ const {
   serializeWhitelist: serializePermissionWhitelist,
 } = require('./core/permission-store');
 const { Vault } = require('./core/vault');
+// 接入外壳文案真源（外部清单 VPN 外壳 §1）：三档身份与全部用户可见词都在这里，主进程只转发
+const netTerms = require('./core/net-terms');
 const { ProxyService } = require('./core/proxy-service');
 const { TabManager, normalizeInput } = require('./core/tabs');
 const { createActionRunner, setNavigateBudgetProvider } = require('./core/actions');
@@ -401,6 +408,12 @@ const EGRESS_CACHE_TTL_MS = Math.max(10_000, Number(process.env.NYX_EGRESS_CACHE
  * 宁可明说"没对齐"，也不能把时区猜错（错时区比不对齐更容易被识别）。
  */
 const EGRESS_MAX_WAIT_MS = Math.max(1_000, Number(process.env.NYX_EGRESS_WAIT || 6_000));
+/**
+ * 隐私自检的总闸。
+ * 观测脚本要等音频渲染与 WebRTC 候选，正常情况下 1 秒内就回来了；
+ * 但只要有一项卡住，设置页的 init() 就会被静默拖住——所以必须有硬上限。
+ */
+const PRIVACY_CHECK_TIMEOUT_MS = Math.max(1_000, Number(process.env.NYX_PRIVACY_CHECK_WAIT || 3_000));
 /**
  * 随包预置的内核根目录；其下 mihomo/ 内放 mihomo.exe 与 geo 数据。
  * 开发期取项目 vendor/，打包后由 extraResources 落到 resources/vendor，
@@ -1710,8 +1723,16 @@ function senderMode(event) {
  * 缓存过期或为空时才发起一次自查。自查本身带超时上限，超时按"出口未知"处理——
  * 出口未知时 profile 仍会做其余加固，只是不伪装时区（宁可不对齐也不对错）。
  */
-async function resolveEgressForProfile() {
-  const service = runtime.proxyService;
+function currentEgressAddress() {
+  try {
+    const service = runtime.proxyService;
+    const profile = service && typeof service.egressProfile === 'function' ? service.egressProfile() : null;
+    return profile && profile.ip ? String(profile.ip) : '';
+  } catch {
+    return '';
+  }
+}
+async function resolveEgressForProfile() {  const service = runtime.proxyService;
   if (!service) return { egress: null, egressUnknown: true, error: '代理服务未就绪' };
 
   // "取不到出口"这个结论也缓存 60 秒：最贵的不是成功那次，而是失败那次——
@@ -1807,6 +1828,8 @@ async function applyPrivacyHardening() {
  */
 async function attachPrivacySurface(tab) {
   if (!tab || !tab.view) return { ok: false, error: '标签还没准备好' };
+  // 这一行是给排障用的：指纹面到底有没有被叫起来、当时是什么模式、哪个标签
+  console.log(`[Nyx] 指纹面装配开始｜模式=${sessions.getMode()}｜标签=${tab && tab.id}`);
   if (!shouldAttachSurface(sessions.getMode())) return { ok: true, skipped: true };
 
   const profile = runtime.hardening ? runtime.hardening.profile : null;
@@ -1848,34 +1871,14 @@ async function attachPrivacySurface(tab) {
     });
   });
 
-  // 3) CDP：身份对齐（UA 元数据 / 时区 / 语言）。这些命令在导航前是有效的；
-  // 失败不掐断整条链路，但要留痕——补丁本身靠上一步，这一层只负责"别再报真型号"。
+  // 3) CDP：这里只把调试通道接上、并把 Worker 接管挂好。
+  //    Emulation.* 那些身份对齐命令**必须等文档就绪再发**——在"还没有文档"的 webContents 上
+  //    它们不回执（实测每一条都要等满 3 秒超时），既拖慢切换，又会和紧随其后的补打抢同一个
+  //    调试会话，导致首个文档的补丁时好时坏。发送动作放在 applySurfaceToCurrentDocument 里。
   try {
     if (!wc.debugger.isAttached()) wc.debugger.attach('1.3');
   } catch (err) {
     return fail(describeSurfaceFailure('attach', err));
-  }
-  // Page.enable 在"还没有文档"时不回执，发出去就行，不等。
-  try {
-    wc.debugger.sendCommand('Page.enable', {}).catch(() => {});
-  } catch (err) {
-    console.warn('[Nyx] 指纹面 Page.enable 发送失败：', err && err.message);
-  }
-  for (const step of buildCdpSteps(profile)) {
-    if (step.method === 'Page.enable' || step.method === 'Page.addScriptToEvaluateOnNewDocument') continue;
-    try {
-      const started = Date.now();
-      const sent = wc.debugger.sendCommand(step.method, step.params);
-      const timeout = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('下发超时（3 秒没有回执）')), 3000);
-      });
-      await Promise.race([sent, timeout]);
-      console.log(`[Nyx] 指纹面下发 ${step.method} 完成（${Date.now() - started}ms）`);
-    } catch (err) {
-      const message = describeSurfaceFailure('send', err);
-      console.warn(`[Nyx] 指纹面下发 ${step.method} 失败：${message}`);
-      diagnostics.warn('PRIVACY_SURFACE_STEP_FAILED', message, { tabId: tab.id, step: step.method });
-    }
   }
 
   // 4) Worker：Page.addScriptToEvaluateOnNewDocument 只管文档，管不到 Worker 上下文
@@ -1945,6 +1948,22 @@ async function applySurfaceToCurrentDocument(tab, profile) {
       diagnostics.error('PRIVACY_SURFACE_NOT_APPLIED', '加固脚本在当前文档里没有生效', { tabId: tab.id });
       notifyNotice({ level: 'error', code: 'PRIVACY_SURFACE_FAILED', title: '隐私模式加固没做完', message });
       return { ok: false, error: message };
+    }
+    // 补丁落地之后再发身份对齐命令：此时文档存在，命令才会真的回执。
+    // 失败只留痕、不掐断——补丁本身已经生效，这一层只影响"上报的身份细节"。
+    for (const step of buildCdpSteps(profile)) {
+      if (step.method === 'Page.enable' || step.method === 'Page.addScriptToEvaluateOnNewDocument') continue;
+      try {
+        const sent = wc.debugger.sendCommand(step.method, step.params);
+        const timeout = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('下发超时（1.5 秒没有回执）')), 1500);
+        });
+        await Promise.race([sent, timeout]);
+      } catch (err) {
+        const message = describeSurfaceFailure('send', err);
+        console.warn(`[Nyx] 指纹面下发 ${step.method} 失败：${message}`);
+        diagnostics.warn('PRIVACY_SURFACE_STEP_FAILED', message, { tabId: tab.id, step: step.method });
+      }
     }
     tab.privacyIncomplete = false;
     return { ok: true, applied };
@@ -5089,6 +5108,145 @@ function registerPrivacyIpc() {
 
   ipcMain.handle('nyx:privacy:status', () => buildPrivacyStatus());
 
+  /* ---------------- 隐私自检（1.18.0，本地判定，不联网） ---------------- */
+
+  /**
+   * 跑一次自检：把"现在伪装成什么样、哪些测不到"判成一张表。
+   *
+   * 真实值一律由主进程给（核数、主显示器、显卡名、系统语言、默认 UA）：
+   * 页面自己报的值只能当观察值，**永远不许拿来当真实值**——那等于自问自答，
+   * 报告会漂亮得像"全部已伪装"，实际什么也没证明。
+   */
+  ipcMain.handle('nyx:privacy:check', async () => {
+    const startedAt = Date.now();
+    const notes = [];
+    const rows = [];
+    const push = (id, observedValue, truth) => rows.push(privacyCheck.judgeItem(id, observedValue, truth));
+
+    const tab = runtime.tabManager ? runtime.tabManager.active : null;
+    const webContents = tab && tab.view ? tab.view.webContents : null;
+    let observed = null;
+
+    if (webContents && !webContents.isDestroyed()) {
+      try {
+        // 观测脚本本身返回 Promise（音频要渲染、WebRTC 要等候选），这里再兜一道总超时：
+        // 任何一步卡住都不许把设置页 init() 一起拖死。
+        observed = await Promise.race([
+          webContents.executeJavaScript(privacyCheck.buildObserverScript(), true),
+          new Promise((resolve) => setTimeout(() => resolve(null), PRIVACY_CHECK_TIMEOUT_MS)),
+        ]);
+      } catch (err) {
+        notes.push(`页面观测没跑完：${err.message}`);
+      }
+    } else {
+      notes.push('当前没有可用的标签页，身份与图像的观察值都取不到。');
+    }
+
+    const seen = observed && typeof observed === 'object' ? observed : {};
+    if (!observed) notes.push('这一轮只判了能判的项，页面里测得到的东西下次再跑。');
+
+    // 真实值：能拿到就给，拿不到就是 null（判成"测不到"，不许猜）
+    const cores = (() => {
+      try {
+        const list = nodeOs.cpus();
+        return Array.isArray(list) && list.length > 0 ? list.length : null;
+      } catch (err) {
+        return null;
+      }
+    })();
+
+    const display = (() => {
+      try {
+        const primary = screen.getPrimaryDisplay();
+        const size = primary && (primary.size || primary.bounds) ? primary.size || primary.bounds : null;
+        if (!size) return null;
+        return { width: size.width, height: size.height, scaleFactor: Number(primary.scaleFactor) || 1 };
+      } catch (err) {
+        return null;
+      }
+    })();
+
+    const realLanguages = (() => {
+      try {
+        const list = typeof app.getPreferredSystemLanguages === 'function' ? app.getPreferredSystemLanguages() : [];
+        return Array.isArray(list) && list.length > 0 ? list.join(',') : null;
+      } catch (err) {
+        return null;
+      }
+    })();
+
+    let gpuTruth = null;
+    try {
+      const hardware = await Promise.race([
+        getHardwareStatus(),
+        new Promise((resolve) => setTimeout(() => resolve(null), 1200)),
+      ]);
+      const device = hardware && hardware.gpu ? String(hardware.gpu.device || '') : '';
+      if (device) gpuTruth = device;
+      else notes.push('显卡名没读出来（GPU 探测超时），显卡那一项只能算测不到。');
+    } catch (err) {
+      notes.push('显卡名没读出来（GPU 探测失败），显卡那一项只能算测不到。');
+    }
+
+    push('A1', { ua: seen.ua || '' }, app.userAgentFallback || null);
+    push('A2', { uaPlatform: seen.uaPlatform, chPlatform: seen.chPlatform, chVersion: seen.chVersion, uaFullVersion: seen.uaFullVersion }, null);
+    push('A3', { languages: seen.languages || [] }, realLanguages);
+    push('A4', { timezone: seen.timezone, offsetMinutes: seen.offsetMinutes, languages: seen.languages || [] }, null);
+    push('A5', { cores: seen.cores }, cores);
+    push('A6', { width: seen.width, height: seen.height, dpr: seen.dpr }, display);
+    push('B1', { vendor: seen.vendor, renderer: seen.renderer }, gpuTruth);
+    push('B2', { hashA: seen.hashA, hashB: seen.hashB }, null);
+    // 音频没有"本机真实值"可对：没采集到就老老实实测不到。
+    push('B3', { sum: seen.audioSum === null || seen.audioSum === undefined ? '' : String(seen.audioSum) }, null);
+    push('C1', { candidates: seen.webrtcCandidates || [] }, null);
+    push('C2', { address: currentEgressAddress() }, sessions.getLink() === 'proxy' ? currentEgressAddress() : null);
+    push('C3', null, null);
+
+    try {
+      const watch = screenWatchPayload();
+      push('D1', { detected: Boolean(watch && watch.detected) }, null);
+    } catch (err) {
+      push('D1', null, null);
+    }
+    push('D2', { blocked: PRIVATE_MODE_AGENT_BLOCKED.has('readPage') }, null);
+    try {
+      const baseline = baselineFor('normal') || {};
+      const allowed = Object.keys(baseline).filter((key) => baseline[key] === 'allow');
+      push('D3', { allowed, known: true }, null);
+    } catch (err) {
+      push('D3', { allowed: [], known: false }, null);
+    }
+    const cache = privateCacheDecision();
+    push('D4', { enabled: runtime.uiStore ? runtime.uiStore.get().privateSnapshotEnabled !== false : true, encrypted: cache.mode === 'encrypted' }, null);
+
+    const meta = {
+      version: app.getVersion(),
+      electron: process.versions.electron || '',
+      chromium: process.versions.chrome || '',
+      at: new Date().toISOString(),
+      identity: buildPrivacyStatus().identityLabel || (sessions.getMode() === 'private' ? '隐私' : '普通'),
+      kernelRunning: Boolean(runtime.proxyKernel && runtime.proxyKernel.running),
+    };
+    const summary = privacyCheck.summarize(rows);
+    const report = privacyCheck.buildReport(rows, meta);
+    const reportJson = privacyCheck.buildReportJson(rows, meta);
+    const elapsedMs = Date.now() - startedAt;
+    console.log(`[Nyx] 隐私自检完成｜${summary.headline}｜用时 ${elapsedMs} 毫秒`);
+    diagnostics.info('PRIVACY_CHECK_DONE', summary.headline, { worst: summary.worstLevel, elapsedMs, mode: meta.identity });
+    return {
+      ok: true,
+      mode: sessions.getMode(),
+      rows,
+      groups: privacyCheck.GROUPS,
+      summary,
+      meta,
+      report,
+      reportJson,
+      notes,
+      elapsedMs,
+    };
+  });
+
   ipcMain.handle('nyx:permissions:list', (_event, limit) => buildPermissionView(limit));
 
   /** 清空"按站点已记住的授权"：只清会话缓存，不触碰持久白名单与站点数据 */
@@ -7086,6 +7244,44 @@ function readSigningStatus(options = {}) {
   });
 }
 
+/**
+ * 判断这台机器是不是「升级上来的老用户」：已经有订阅就算有历史配置。
+ *
+ * 为什么不用别的信号：订阅是接入外壳唯一真正关心的既有状态——有订阅的人一升级
+ * 就看见「接入配置 / 接入线路」，等于在不知道的情况下被换了界面，所以必须留旧词。
+ * 订阅读不出来（服务未就绪 / 文件坏了）时**按老用户处理**：宁可保守地保住旧界面，
+ * 也不要让升级的人突然面对一套陌生说法。
+ */
+function netHasExistingConfig() {
+  const service = runtime.proxyService;
+  if (!service || typeof service.status !== 'function') return true;
+  try {
+    const listed = service.status();
+    return Array.isArray(listed && listed.subscriptions) && listed.subscriptions.length > 0;
+  } catch {
+    return true;
+  }
+}
+
+/** 生效身份 + 三档选项 + 整套词（设置页与首装引导共用这一份载荷） */
+function netIdentityPayload() {
+  const saved = (runtime.uiStore && runtime.uiStore.get().netIdentity) || netTerms.IDENTITY_AUTO;
+  const hasExistingConfig = netHasExistingConfig();
+  const identity = netTerms.resolveIdentity(saved, { hasExistingConfig });
+
+  return {
+    ok: true,
+    saved,
+    identity,
+    auto: saved === netTerms.IDENTITY_AUTO,
+    hasExistingConfig,
+    label: netTerms.IDENTITY_LABELS[identity],
+    options: netTerms.describeIdentities(),
+    statement: netTerms.SHELL_STATEMENT,
+    terms: netTerms.termsFor(identity),
+  };
+}
+
 /** 设置中心 IPC：界面偏好读写、应用与运行时信息 */
 function registerSettingsIpc() {
   // 安装包签名状态（第五轮 ②）：读自身 exe 的签名与证书有效期，如实翻译
@@ -7113,6 +7309,38 @@ function registerSettingsIpc() {
     if (runtime.tabManager) pushState(runtime.tabManager.snapshot());
 
     return { ok: true, ui: result.ui || currentUiPrefs() };
+  });
+
+  /**
+   * 接入外壳身份（外部清单《VPN 接入外壳改造实现清单》§1 第 2、4 条）。
+   *
+   * 读：生效身份 + 三档选项 + 整套词 + 「这只是通用代理工具」的陈述。
+   * 写：只收三档显式身份，落到 `netIdentity` 界面偏好里——**不改订阅、不改端口、
+   *     不改任何已落盘的路径**（清单 §4 的迁移约束）。
+   *
+   * 为什么写入走既有 ui:prefs 存储而不是另开文件：回滚就是改回 custom 一个值，
+   * 不留第二份真源，也不给「两份配置对不上」留缝隙。
+   */
+  ipcMain.handle('nyx:net:identity', () => netIdentityPayload());
+
+  ipcMain.handle('nyx:net:identity-set', (_event, payload) => {
+    if (!runtime.uiStore) return { ok: false, error: '界面偏好存储未就绪' };
+
+    const identity = payload && payload.identity;
+    if (!netTerms.IDENTITIES.includes(identity)) {
+      return {
+        ok: false,
+        error: `接入方式只能是：${netTerms.IDENTITIES.map((key) => netTerms.IDENTITY_LABELS[key]).join(' / ')}`,
+      };
+    }
+
+    const saved = runtime.uiStore.set('netIdentity', identity);
+    if (!saved || saved.ok === false) {
+      return { ok: false, error: (saved && saved.error) || '这个接入方式存不下来' };
+    }
+
+    if (runtime.tabManager) pushState(runtime.tabManager.snapshot());
+    return Object.assign({ ok: true }, netIdentityPayload());
   });
 
   /**
