@@ -623,8 +623,12 @@ contextBridge.exposeInMainWorld('nyx', {
 
   /** 读导航预算：{ ok, navigateTimeoutMs, min, max, fallback, example } */
   tbNavigateTimeout: () => ipcRenderer.invoke('nyx:tb:navigate-timeout'),
-  /** 写导航预算：ms → { ok, navigateTimeoutMs, example }（越界返回中文错误） */
-  tbNavigateTimeoutSet: (ms) => ipcRenderer.invoke('nyx:tb:navigate-timeout-set', { navigateTimeoutMs: ms }),
+  /** 写导航预算：ms → { ok, navigateTimeoutMs, example }；带 sitesText 时同时写按站点的规则 */
+  tbNavigateTimeoutSet: (payload) =>
+    ipcRenderer.invoke(
+      'nyx:tb:navigate-timeout-set',
+      payload && typeof payload === 'object' ? payload : { navigateTimeoutMs: payload }
+    ),
 
   /** 订阅阈值变更推送（设置页保存后抓包面板即时生效），返回取消订阅函数 */
   onTbSlowMs: (listener) => {

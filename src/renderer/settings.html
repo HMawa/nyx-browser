@@ -166,6 +166,19 @@
                   <button type="button" class="btn" id="btn-nav-budget-save">保存</button>
                   <span class="hint" id="nav-budget-hint">正在读取…</span>
                 </div>
+                <div class="set-row" style="margin-top:10px">
+                  <div class="set-row-label">
+                    <div class="set-row-name">个别站点单独放宽</div>
+                    <div class="set-row-desc">
+                      每行一条，写成 <code class="mono">example.com=40</code>（子域自动继承；最长匹配优先）。
+                      没写的站点用上面的全局值。填错的行会整条拒收并告诉你第几行错在哪。
+                    </div>
+                  </div>
+                </div>
+                <textarea id="nav-budget-sites" class="text-input" rows="4" spellcheck="false"
+                  aria-label="按站点的导航等待上限（每行 example.com=40）"
+                  placeholder="example.com=40&#10;slow.example.org=60"></textarea>
+                <p class="hint" id="nav-budget-sites-hint">最多 50 条；秒数要在 3–60 之间。</p>
               </div>
             </section><section class="info-card fx-reveal">
               <div class="info-head" role="button" tabindex="0" title="图形性能：点击铺开或收回">

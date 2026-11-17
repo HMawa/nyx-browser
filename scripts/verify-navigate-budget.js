@@ -15,6 +15,13 @@ const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
 const budget = require(path.join(ROOT, 'src/core/navigate-budget.js'));
+const {
+  formatSiteRules,
+  hostMatches,
+  parseSiteRules,
+  resolveBudgetForUrl,
+  sanitizeSiteRules,
+} = budget;
 
 const actionsSource = fs.readFileSync(path.join(ROOT, 'src/core/actions.js'), 'utf8');
 const mainSource = fs.readFileSync(path.join(ROOT, 'src/main.js'), 'utf8');
@@ -97,10 +104,10 @@ check(
     && /setNavigateBudgetProvider/.test(actionsSource.slice(actionsSource.lastIndexOf('module.exports'))),
 );
 check(
-  'navigate 分支：请求里带了就用请求的（非法则回设置值），没带就用设置值',
+  'navigate 分支：请求里带了就用请求的（非法则回设置值），没带就用按站点挑的值',
   /const requested = params\.timeoutMs;/.test(actionsSource)
     && /resolveNavigateBudget\(requested\)/.test(actionsSource)
-    && /currentNavigateBudget\(\)/.test(actionsSource),
+    && /currentNavigateBudget\(params\.url\)/.test(actionsSource),
 );
 check(
   '超时文案改成 describeNavigateBudget（不再硬编码「Math.round(budget / 1000) 秒」）',
@@ -115,8 +122,10 @@ check(
     && /navigateTimeoutMs: nav == null \? NAVIGATE_BUDGET_DEFAULT : nav/.test(mainSource),
 );
 check(
-  '启动时把"读偏好"注入给动作执行器（改设置立刻生效，不用重启）',
-  /setNavigateBudgetProvider\(\(\) => readToolboxPrefs\(\)\.navigateTimeoutMs\)/.test(mainSource),
+  '启动时把"按地址挑预算"注入给动作执行器（改设置立刻生效，不用重启）',
+  /setNavigateBudgetProvider\(\(url\) => navigateBudgetForUrl\(url\)\)/.test(mainSource)
+    && /function navigateBudgetForUrl\(url\)/.test(mainSource)
+    && /resolveBudgetForUrl\(prefs\.navigateTimeoutSites, url, prefs\.navigateTimeoutMs\)/.test(mainSource),
 );
 check(
   '有一条读、一条写，写失败给中文原因并留痕',
@@ -128,21 +137,86 @@ check(
 
 /* ---------- ⑧ 暴露面与界面 ---------- */
 check(
-  'preload 暴露了读写两个方法（名字与主进程 IPC 对得上）',
+  'preload 暴露了读写两个方法（名字与主进程 IPC 对得上，写支持带站点规则）',
   /tbNavigateTimeout: \(\) => ipcRenderer\.invoke\('nyx:tb:navigate-timeout'\)/.test(preloadSource)
-    && /tbNavigateTimeoutSet: \(ms\) => ipcRenderer\.invoke\('nyx:tb:navigate-timeout-set'/.test(preloadSource),
+    && /tbNavigateTimeoutSet: \(payload\) =>/.test(preloadSource)
+    && /nyx:tb:navigate-timeout-set/.test(preloadSource),
 );
 check(
-  '设置页有这一项（输入框按"秒"填，3–60）',
+  '设置页有这一项（输入框按"秒"填，3–60，带按站点的文本框）',
   settingsHtml.includes('id="nav-budget-ms"')
     && settingsHtml.includes('id="btn-nav-budget-save"')
+    && settingsHtml.includes('id="nav-budget-sites"')
     && /min="3"[\s\S]{0,80}max="60"/.test(settingsHtml),
 );
 check(
   '进入外观分区就回读，保存失败不假装成功',
   /loadNavigateBudget\(\);/.test(settingsJs)
     && /保存失败：/.test(settingsJs)
-    && /NavigateTimeoutSet\(seconds \* 1000\)/.test(settingsJs),
+    && /tbNavigateTimeoutSet\(\{ navigateTimeoutMs: seconds \* 1000/.test(settingsJs),
+);
+
+/* ---------- ⑨ 按站点覆盖（用户要求：慢站单独放宽，不调大全局值） ---------- */
+const siteOk = parseSiteRules('example.com=30\n\n# 注释\nblog.example.com=45');
+check(
+  '多行规则能解析：空行与 # 注释跳过，域名小写归一',
+  siteOk.rules.length === 2
+    && siteOk.rules[0].host === 'example.com'
+    && siteOk.rules[0].ms === 30000
+    && siteOk.rules[1].ms === 45000
+    && siteOk.errors.length === 0,
+  JSON.stringify(siteOk.rules),
+);
+
+const siteBad = parseSiteRules('nope\nexample.com=999\nhttps://x.com=20\nfoo=abc');
+check(
+  '写错的行走整条拒收并点出行号（不悄悄按默认跑）',
+  siteBad.rules.length === 0 && siteBad.errors.length === 4 && siteBad.errors[0].startsWith('第 1 行'),
+  JSON.stringify(siteBad.errors),
+);
+
+check(
+  '同一域名写多次按最后一条算，并在 rewritten 里点名',
+  (() => {
+    const r = parseSiteRules('example.com=10\nexample.com=30');
+    return r.rules.length === 1 && r.rules[0].ms === 30000 && r.rewritten.join() === 'example.com';
+  })(),
+);
+
+check(
+  '子域继承，且最长匹配优先（blog 那条赢过整站那条）',
+  resolveBudgetForUrl([{ host: 'example.com', ms: 30000 }, { host: 'blog.example.com', ms: 45000 }], 'https://blog.example.com/a', 15000).ms === 45000
+    && resolveBudgetForUrl([{ host: 'example.com', ms: 30000 }], 'https://example.com/a', 15000).ms === 30000
+    && resolveBudgetForUrl([{ host: 'example.com', ms: 30000 }], 'https://notexample.com/', 8000).ms === 8000
+    && hostMatches('example.com', 'blog.example.com') === true
+    && hostMatches('example.com', 'anexample.com') === false,
+);
+
+check(
+  '坏规则在 sanitize 时单条丢掉，坏的不会把整张表废掉',
+  (() => {
+    const rules = sanitizeSiteRules([{ host: 'ok.com', ms: 20000 }, { host: '.BAD', ms: 5000 }, { host: 'x.com', ms: 999999 }, null]);
+    return rules.length === 1 && rules[0].host === 'ok.com';
+  })(),
+);
+
+check(
+  '文本与规则表能来回转（设置页回填不丢条目）',
+  formatSiteRules([{ host: 'a.com', ms: 30000 }, { host: 'b.com', ms: 45000 }]) === 'a.com=30\nb.com=45'
+    && parseSiteRules(formatSiteRules([{ host: 'a.com', ms: 30000 }])).rules[0].ms === 30000,
+);
+
+check(
+  '主进程从偏好里读站点规则，并把多行文本回给界面',
+  /navigateTimeoutSites: sanitizeSiteRules\(raw && raw\.navigateTimeoutSites\)/.test(mainSource)
+    && /sitesText: formatSiteRules\(prefs\.navigateTimeoutSites\)/.test(mainSource)
+    && /patch\.navigateTimeoutSites = parsed\.rules/.test(mainSource),
+);
+
+check(
+  '动作执行器把目标地址传进去（否则站点规则永远不会被用上）',
+  /currentNavigateBudget\(params\.url\)/.test(actionsSource)
+    && /if \(picked && typeof picked === 'object'\) return resolveNavigateBudget\(picked\.ms\)/.test(actionsSource),
 );
 
 console.log('');

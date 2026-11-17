@@ -980,7 +980,7 @@ async function bootstrap() {
 
   // 动作通道的导航预算从设置里读（v1.17.17）：注入成函数而不是值，
   // 用户改完设置立刻生效，不用重启浏览器。
-  setNavigateBudgetProvider(() => readToolboxPrefs().navigateTimeoutMs);
+  setNavigateBudgetProvider((url) => navigateBudgetForUrl(url));
 
   // 系统加密是否可用：用异步版探一次并缓存（Electron 45 起同步版已弃用）。
   // 放在 UI 存储之前——隐私快照那几个判断都读这个缓存。
@@ -7452,6 +7452,10 @@ const {
   NAVIGATE_BUDGET_MAX,
   NAVIGATE_BUDGET_MIN,
   describeNavigateBudget,
+  formatSiteRules,
+  parseSiteRules,
+  resolveBudgetForUrl,
+  sanitizeSiteRules,
 } = require('./core/navigate-budget');
 
 const NET_SLOW_DEFAULT = 1000;
@@ -7483,7 +7487,11 @@ function normalizeNavigateTimeout(value) {
 function readToolboxPrefs() {
   try {
     const file = toolboxPrefsPath();
-    const fallback = { slowMs: NET_SLOW_DEFAULT, navigateTimeoutMs: NAVIGATE_BUDGET_DEFAULT };
+    const fallback = {
+      slowMs: NET_SLOW_DEFAULT,
+      navigateTimeoutMs: NAVIGATE_BUDGET_DEFAULT,
+      navigateTimeoutSites: [],
+    };
     if (!fs.existsSync(file)) return fallback;
     const raw = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
     const slow = normalizeSlowMs(raw && raw.slowMs);
@@ -7491,10 +7499,22 @@ function readToolboxPrefs() {
     return {
       slowMs: slow == null ? NET_SLOW_DEFAULT : slow,
       navigateTimeoutMs: nav == null ? NAVIGATE_BUDGET_DEFAULT : nav,
+      // 按站点覆盖（用户要求）：坏条目单条丢掉，绝不让整张表失效或悄悄回退成全局值
+      navigateTimeoutSites: sanitizeSiteRules(raw && raw.navigateTimeoutSites),
     };
   } catch {
-    return { slowMs: NET_SLOW_DEFAULT, navigateTimeoutMs: NAVIGATE_BUDGET_DEFAULT };
+    return { slowMs: NET_SLOW_DEFAULT, navigateTimeoutMs: NAVIGATE_BUDGET_DEFAULT, navigateTimeoutSites: [] };
   }
+}
+
+/**
+ * 给某个地址挑导航预算：站点规则优先（最长匹配），否则用全局值。
+ * 动作执行器只关心「这次该等多久」，挑规则这件事留在主进程。
+ */
+function navigateBudgetForUrl(url) {
+  const prefs = readToolboxPrefs();
+  const picked = resolveBudgetForUrl(prefs.navigateTimeoutSites, url, prefs.navigateTimeoutMs);
+  return picked;
 }
 
 function writeToolboxPrefs(patch) {
@@ -8883,6 +8903,9 @@ function registerToolboxIpc() {
       max: NAVIGATE_BUDGET_MAX,
       fallback: NAVIGATE_BUDGET_DEFAULT,
       example: describeNavigateBudget(prefs.navigateTimeoutMs),
+      // 按站点覆盖（用户要求）：给界面回一份"可直接编辑的多行文本"，省得界面自己拼
+      sites: prefs.navigateTimeoutSites,
+      sitesText: formatSiteRules(prefs.navigateTimeoutSites),
     };
   });
 
@@ -8894,12 +8917,35 @@ function registerToolboxIpc() {
         error: `导航预算需要是 ${NAVIGATE_BUDGET_MIN / 1000}–${NAVIGATE_BUDGET_MAX / 1000} 秒之间的整数毫秒数`,
       };
     }
-    const prefs = writeToolboxPrefs({ navigateTimeoutMs: value });
+    /**
+     * 站点规则（用户要求：慢站单独放宽，不把全局值调大）。
+     * 只有真的传了 sitesText 才动这张表——不然只改全局值会把已配好的站点冲掉。
+     */
+    const patch = { navigateTimeoutMs: value };
+    let parsed = null;
+    if (payload && typeof payload.sitesText === 'string') {
+      parsed = parseSiteRules(payload.sitesText);
+      if (parsed.errors.length) {
+        return { ok: false, error: parsed.errors[0], errors: parsed.errors };
+      }
+      patch.navigateTimeoutSites = parsed.rules;
+    }
+    const prefs = writeToolboxPrefs(patch);
     if (!prefs) return { ok: false, error: '写入失败' };
-    diagnostics.info('NAVIGATE_BUDGET_UPDATED', `agent 导航预算改成 ${describeNavigateBudget(value)}`, {
-      navigateTimeoutMs: value,
-    });
-    return { ok: true, navigateTimeoutMs: prefs.navigateTimeoutMs, example: describeNavigateBudget(value) };
+    diagnostics.info(
+      'NAVIGATE_BUDGET_UPDATED',
+      `agent 导航预算改成 ${describeNavigateBudget(value)}` +
+        (parsed ? `，按站点 ${parsed.rules.length} 条` : ''),
+      { navigateTimeoutMs: value, sites: prefs.navigateTimeoutSites.length }
+    );
+    return {
+      ok: true,
+      navigateTimeoutMs: prefs.navigateTimeoutMs,
+      example: describeNavigateBudget(value),
+      sites: prefs.navigateTimeoutSites,
+      sitesText: formatSiteRules(prefs.navigateTimeoutSites),
+      rewritten: parsed ? parsed.rewritten : [],
+    };
   });
 
   ipcMain.handle('nyx:tb:set-open', (_event, payload) =>

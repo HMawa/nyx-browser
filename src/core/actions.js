@@ -43,10 +43,17 @@ function setNavigateBudgetProvider(provider) {
   navigateBudgetProvider = typeof provider === 'function' ? provider : null;
 }
 
-function currentNavigateBudget() {
+/**
+ * 当前该用多少预算。
+ * 传入目标地址时，主进程给的 provider 可以按站点挑（慢站单独放宽）；
+ * provider 的返回值既可能是数字，也可能是 {ms} —— 两种都认，测试里不注入就走默认值。
+ */
+function currentNavigateBudget(targetUrl) {
   if (!navigateBudgetProvider) return NAVIGATE_TIMEOUT_MS;
   try {
-    return resolveNavigateBudget(navigateBudgetProvider());
+    const picked = navigateBudgetProvider(targetUrl);
+    if (picked && typeof picked === 'object') return resolveNavigateBudget(picked.ms);
+    return resolveNavigateBudget(picked);
   } catch {
     return NAVIGATE_TIMEOUT_MS;
   }
@@ -236,7 +243,7 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog, ge
           // 单个请求可以带 timeoutMs 覆盖；不合法就退回设置里的预算，绝不悄悄夹值。
           const requested = params.timeoutMs;
           const budget = requested === undefined || requested === null || requested === ''
-            ? currentNavigateBudget()
+            ? currentNavigateBudget(params.url)
             : resolveNavigateBudget(requested);
           let timer = null;
           const timeout = new Promise((resolve) => {

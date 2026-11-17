@@ -4131,6 +4131,15 @@
     input.max = String(maxSec);
     input.value = String(Math.round((res.navigateTimeoutMs || 15000) / 1000));
     if (badge) badge.textContent = `${Math.round((res.navigateTimeoutMs || 15000) / 1000)} 秒`;
+    const sitesBox = byId('nav-budget-sites');
+    if (sitesBox) sitesBox.value = String(res.sitesText || '');
+    const sitesHint = byId('nav-budget-sites-hint');
+    if (sitesHint) {
+      const count = Array.isArray(res.sites) ? res.sites.length : 0;
+      sitesHint.textContent = count
+        ? `已经在用 ${count} 条站点规则（子域继承，最长匹配优先）；最多 50 条。`
+        : '还没有站点规则；最多 50 条，秒数要在 3–60 之间。';
+    }
     if (hint) {
       hint.textContent = notice
         || `现在是 ${res.example || ''}（默认 ${Math.round((res.fallback || 15000) / 1000)} 秒，可设 ${minSec}–${maxSec} 秒）`;
@@ -4155,7 +4164,12 @@
         }
         navBudgetSave.disabled = true;
         try {
-          const res = await window.nyx.tbNavigateTimeoutSet(seconds * 1000).catch(() => null);
+          // 站点规则与全局值一起提交：只改全局值时也把当前文本带上，
+          // 免得"改了个上限"把已配好的站点规则冲掉。
+          const sitesBox = byId('nav-budget-sites');
+          const res = await window.nyx
+            .tbNavigateTimeoutSet({ navigateTimeoutMs: seconds * 1000, sitesText: sitesBox ? sitesBox.value : undefined })
+            .catch(() => null);
           if (!res || res.ok === false) {
             if (hint) hint.textContent = `保存失败：${(res && res.error) || '未知原因'}`;
             setStatus('agent 导航上限保存失败', true);
@@ -4163,6 +4177,14 @@
           }
           navBudgetInput.value = String(Math.round(res.navigateTimeoutMs / 1000));
           if (badge) badge.textContent = `${Math.round(res.navigateTimeoutMs / 1000)} 秒`;
+          if (sitesBox && typeof res.sitesText === 'string') sitesBox.value = res.sitesText;
+          const sitesHint = byId('nav-budget-sites-hint');
+          const siteCount = Array.isArray(res.sites) ? res.sites.length : 0;
+          if (sitesHint) {
+            sitesHint.textContent = siteCount
+              ? `已经在用 ${siteCount} 条站点规则${res.rewritten && res.rewritten.length ? `（${res.rewritten.join('、')} 写了多次，按最后一条算）` : ''}；最多 50 条。`
+              : '还没有站点规则；最多 50 条，秒数要在 3–60 之间。';
+          }
           if (hint) hint.textContent = `已保存：agent 打开网页最多等 ${res.example}`;
           setStatus(`agent 导航上限已保存为 ${res.example}`);
         } finally {
