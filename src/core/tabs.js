@@ -590,9 +590,28 @@ class TabManager {
     wc.on('will-navigate', (event, targetUrl) => {
       if (!String(targetUrl).startsWith('file://')) event.preventDefault();
     });
-    wc.loadURL(url).catch((err) => {
-      console.warn('[Nyx] 应用页加载失败：', err && err.message);
-    });
+
+    // 应用页也要走一遍"新标签回调"：
+    //   · 隐私模式下起始页同样是 file:// 页面，它也会读 navigator.userAgent / 核数 / WebGL；
+    //     不装配的话，用户切进隐私模式看到的第一屏就是真 UA（自检会如实报"泄漏"）。
+    //   · 设置页里"隐私自检"读的正是当前标签，它自己更得是被加固过的那一版。
+    // 回调可能返回 Promise（指纹补丁要先进主世界），那就等它落地再 loadURL。
+    let gate = null;
+    try {
+      gate = this.onTabCreated(tab);
+    } catch (err) {
+      console.warn('[Nyx] 应用页创建回调异常：', err && err.message);
+    }
+    const startLoad = () => {
+      wc.loadURL(url).catch((err) => {
+        console.warn('[Nyx] 应用页加载失败：', err && err.message);
+      });
+    };
+    if (gate && typeof gate.then === 'function') {
+      gate.then(startLoad, startLoad);
+    } else {
+      startLoad();
+    }
 
     this.activate(tab.id);
     return { ok: true, id: tab.id, reused: false };

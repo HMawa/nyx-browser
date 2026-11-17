@@ -19,6 +19,7 @@
     "release": "node scripts/make-release.js",
     "verify": "node scripts/verify-all.js",
     "verify:integrity": "node scripts/verify-integrity.js dist\\win-unpacked",
+    "privacy:audit": "node scripts/privacy-audit.js",
     "sign:secret": "node scripts/signing-secret.js"
   },
   "dependencies": {
