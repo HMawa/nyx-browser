@@ -28,6 +28,7 @@ const {
   buildTypeByIdScript,
   elementNotFound,
   summarizeReadPage,
+  validateLimits,
 } = require('./page-reader');
 
 /** 导航上限（安全审计 P1-4）：超过这么久没完成就如实报超时，不让整条通道挂住 */
@@ -240,17 +241,34 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog, ge
 
         case 'readPage': {
           if (aborted()) return interrupted();
+          // 先校验上限：负数/0/非整数一律拒绝。夹一下最省事，但 `maxElements:-1`
+          // 配 slice(0,-1) 会悄悄少给一条、`maxText:0` 会悄悄给空正文——比报错更难查。
+          const limits = validateLimits({ maxElements: params.maxElements, maxText: params.maxText });
+          if (!limits.ok) return wrap({ ok: false, code: limits.code, error: limits.error });
           const raw = await wc.executeJavaScript(
-            buildReadPageScript({ maxText: params.maxText, maxElements: params.maxElements }),
+            buildReadPageScript({ maxText: limits.limits.maxText, maxElements: limits.limits.maxElements }),
             true,
           );
           if (aborted()) return interrupted();
           // 上限要两处一致：页面脚本按它截，汇总这里也按同一份截。
           // 只给页面不给汇总，就会出现「文档说能给 800，实际 300 就封顶」的静默封顶。
-          return wrap(summarizeReadPage(raw, { maxElements: params.maxElements, maxText: params.maxText }));
+          return wrap(summarizeReadPage(raw, limits.limits));
         }
 
         case 'screenshot': {
+          // 窗口最小化 / 被完全遮挡 / 正被模态确认框禁用时，capturePage 会直接拿不到画面
+          // （Current display surface not available for capture）。agent 常在后台跑，
+          // 这是最常见的一种失败——先把窗口恢复出来，再截。
+          const owner = typeof wc.getOwnerBrowserWindow === 'function' ? wc.getOwnerBrowserWindow() : null;
+          if (owner && !owner.isDestroyed()) {
+            try {
+              if (!owner.isVisible() || owner.isMinimized()) owner.restore();
+              if (!owner.isVisible()) owner.show();
+              owner.moveTop();
+            } catch {
+              /* 忽略：拿不到窗口就把失败原因交给下面统一报 */
+            }
+          }
           // 导航刚完成时第一次 capturePage 常常拿不到帧（UnknownVizError），
           // 等一帧再来一次通常就好——所以失败重试一次，而不是直接把错丢给用户。
           let image = null;
@@ -265,7 +283,12 @@ function createActionRunner({ getTabManager, getMode, getNetwork, getRiskLog, ge
             }
           }
           if (!image) {
-            return wrap({ ok: false, error: `截图失败：${(lastError && lastError.message) || '页面还没画出第一帧'}` });
+            const reason = (lastError && lastError.message) || '页面还没画出第一帧';
+            return wrap({
+              ok: false,
+              code: 'SCREENSHOT_NO_SURFACE',
+              error: `截图失败：${reason}。截图需要窗口可见——把 Nyx 窗口恢复出来（别最小化、别被别的窗口完全盖住），或者先关掉挡在前面的确认框。`,
+            });
           }
           const size = image.getSize();
           return wrap({

@@ -24,6 +24,45 @@ const READ_LIMITS = {
   maxNameLen: 80,
 };
 
+/** 调用方能传的上限范围：越界一律拒绝，不静默截断（负数会被 slice 当成"从末尾数"） */
+const LIMIT_BOUNDS = {
+  maxText: { min: 1, max: 20000 },
+  maxElements: { min: 1, max: 800 },
+};
+
+/**
+ * 校验调用方传进来的上限。
+ *
+ * 为什么不 `Math.max` 夹一下了事：`maxElements:-1` 配 `slice(0,-1)` 会**悄悄少给一条**，
+ * `maxText:0` 会**悄悄返回空正文**——agent 看到的是"成功但没内容"，比直接报错更难查。
+ *
+ * @returns {{ok:true, limits:object} | {ok:false, code:string, error:string}}
+ */
+function validateLimits(input) {
+  const limits = {};
+  if (input === undefined || input === null) return { ok: true, limits };
+  if (typeof input !== 'object') {
+    return { ok: false, code: 'BAD_VALUE', error: 'maxElements / maxText 要放在一个对象里传，比如 { "maxElements": 50 }。' };
+  }
+  for (const key of Object.keys(LIMIT_BOUNDS)) {
+    if (input[key] === undefined || input[key] === null) continue;
+    const bounds = LIMIT_BOUNDS[key];
+    const value = Number(input[key]);
+    if (!Number.isInteger(value)) {
+      return { ok: false, code: 'BAD_VALUE', error: `${key} 必须是整数（收到 ${JSON.stringify(input[key])}）。` };
+    }
+    if (value < bounds.min || value > bounds.max) {
+      return {
+        ok: false,
+        code: 'BAD_VALUE',
+        error: `${key} 要在 ${bounds.min} 到 ${bounds.max} 之间（收到 ${value}）；不传就用默认值。`,
+      };
+    }
+    limits[key] = value;
+  }
+  return { ok: true, limits };
+}
+
 /** 会出现在「可交互元素清单」里的选择器（宁多勿少，逐条还会再判可见性） */
 const INTERACTIVE_SELECTOR = [
   'a[href]',
@@ -361,7 +400,9 @@ function summarizeReadPage(raw, limits) {
 
 module.exports = {
   INTERACTIVE_SELECTOR,
+  LIMIT_BOUNDS,
   READ_LIMITS,
+  validateLimits,
   buildElementActionScript,
   buildReadPageScript,
   buildTypeByIdScript,

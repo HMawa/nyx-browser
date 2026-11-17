@@ -232,6 +232,52 @@ function main() {
     JSON.stringify({ 默认给: defaultCut.elements.length, 要500给: asked.elements.length, 默认字数: defaultCut.text.length, 要1万给: asked.text.length }),
   );
 
+  // F-01：越界不是"夹一下"，而是明确拒绝。
+  // 负数会走进 slice(0,-1) 悄悄少给一条；0 会悄悄给空正文——都返回 200 却少内容。
+  const badLimits = [
+    { maxElements: -1, key: 'maxElements', label: '负数' },
+    { maxElements: 0, key: 'maxElements', label: '0' },
+    { maxElements: 900, key: 'maxElements', label: '超上限' },
+    { maxText: -5, key: 'maxText', label: '负数' },
+    { maxText: 0, key: 'maxText', label: '0' },
+    { maxText: 50000, key: 'maxText', label: '超上限' },
+    { maxElements: 1.5, key: 'maxElements', label: '小数' },
+    { maxText: 'abc', key: 'maxText', label: '非数字' },
+  ];
+  for (const one of badLimits) {
+    const verdict = reader.validateLimits(one);
+    check(
+      `上限校验：${one.key}=${one.label} 直接拒绝并说清范围（F-01）`,
+      verdict.ok === false && verdict.code === 'BAD_VALUE' && verdict.error.includes(one.key),
+      JSON.stringify(verdict),
+    );
+  }
+  const goodLimits = reader.validateLimits({ maxElements: 50, maxText: 1000 });
+  check(
+    '上限校验：合法值原样通过，没传的键不补默认值（F-01）',
+    goodLimits.ok === true && goodLimits.limits.maxElements === 50 && goodLimits.limits.maxText === 1000,
+    JSON.stringify(goodLimits),
+  );
+  const emptyLimits = reader.validateLimits(undefined);
+  check(
+    '上限校验：完全不传就是空对象，交给默认值（F-01）',
+    emptyLimits.ok === true && Object.keys(emptyLimits.limits).length === 0,
+    JSON.stringify(emptyLimits),
+  );
+
+  // F-02：截图前要先把窗口恢复出来，失败要给出"窗口需可见"的原因与错误码
+  const actionsSource = fs.readFileSync(path.join(ROOT, 'src', 'core', 'actions.js'), 'utf8');
+  check(
+    '截图前先把窗口恢复出来（最小化/被遮挡时 capturePage 拿不到画面）（F-02）',
+    /getOwnerBrowserWindow/.test(actionsSource) && /owner\.restore\(\)/.test(actionsSource) && /owner\.moveTop\(\)/.test(actionsSource),
+    'actions.js 里应同时出现 getOwnerBrowserWindow / restore() / moveTop()',
+  );
+  check(
+    '截图失败时给出窗口可见性原因与错误码（F-02）',
+    /SCREENSHOT_NO_SURFACE/.test(actionsSource) && /截图需要窗口可见/.test(actionsSource),
+    'actions.js 里应有 SCREENSHOT_NO_SURFACE 与「截图需要窗口可见」',
+  );
+
   console.log('');
   if (failures.length === 0) {
     console.log(`[Nyx] 页面读取回归通过：${passed}/${passed} 项全绿`);
