@@ -75,6 +75,11 @@ check('5. 九个动作都在，且明确要求先 readPage 拿 elementId（别�
   assert.strictEqual(doc.ACTION_LINES.length, 9);
   assert.match(builtin, /先 `readPage`|先 readPage/);
   assert.match(builtin, /elementId/);
+  const exec = doc.ACTION_LINES.find(([type]) => type === 'executeJS');
+  assert.ok(exec && exec[2] === 'code', 'executeJS 的参数名必须是 code（服务端读的就是它）');
+  assert.match(builtin, /"type": "navigate", "params": \{ "url":/, '请求体要给出 {type, params} 的完整示例');
+  assert.match(builtin, /GET \/state/, 'state 走 GET 要写明');
+  assert.match(builtin, /`readPage` \/ `screenshot` \/ `extractText` 会被拒绝/, '隐私模式下被拒的动作要如实写');
 });
 
 check('6. 会被拦下来的四种情况都提前告知（站点授权 / 动作级确认 / 锁死设置 / 急停）', () => {

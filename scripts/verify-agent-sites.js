@@ -502,6 +502,8 @@ check('35. 站点判定接线：当前站点取 webContents.getURL()，navigate 
   assert.ok(/type === 'navigate' \? siteOfUrl\(params\.url\)/.test(authFn), 'navigate 要取目标地址的站点');
   assert.ok(/site: judgeSite/.test(authFn), '判定要用 judgeSite（目标优先）');
   assert.ok(/navigate-bad-url/.test(authFn), '目标地址看不懂时要失败关闭，不许猜');
+  assert.ok(/const hasScheme =/.test(mainSrc), 'siteOfUrl 要先判断有没有 scheme');
+  assert.ok(/https:\/\/\$\{text\}/.test(mainSrc), '裸域名要按 https 补全后再判站点');
 });
 
 check('36. 屏蔽名单对 navigate 真的生效：从白名单页跳到屏蔽站点会被拒，并说清两边站点（P1-3）', () => {

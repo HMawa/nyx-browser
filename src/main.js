@@ -1782,7 +1782,9 @@ async function attachPrivacySurface(tab) {
 
   // 1) UA：这一步最关键——它决定请求头与 navigator.userAgent 是否同源
   try {
-    wc.setUserAgent(profile.ua, profile.acceptLanguage);
+    // 与 privacy-hardening / toolbox 的调用口径一致：null/undefined 会让 Electron
+    // 在参数转换时抛 conversion failure，必须在这里也兜成空串。
+    wc.setUserAgent(profile.ua || '', profile.acceptLanguage || '');
   } catch (err) {
     return fail(describeSurfaceFailure('setUserAgent', err));
   }
@@ -9978,8 +9980,14 @@ function currentAgentSite() {
 function siteOfUrl(raw) {
   const text = String(raw || '').trim();
   if (!text) return '';
+  // 裸域名（example.com、example.com:8080、//example.com）按 https 处理。
+  // 否则 new URL() 直接抛错，navigate 会在授权阶段被判成"地址看不懂"，
+  // 或回落到当前页站点，出现"在空白页/设置页上怎么都跳不过去"。
+  const hasScheme =
+    /^[a-z][a-z0-9+.-]*:\/\//i.test(text) || /^(?:javascript|data|blob|file|about|mailto|tel):/i.test(text);
+  const candidate = hasScheme ? text : text.startsWith('//') ? `https:${text}` : `https://${text}`;
   try {
-    const url = new URL(text);
+    const url = new URL(candidate);
     return url.host || '';
   } catch {
     return '';

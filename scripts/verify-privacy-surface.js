@@ -327,7 +327,10 @@ check(
   '标签创建回调里调用 attachPrivacySurface，且在历史记录之前（loadURL 之前就装配）',
   /attachPrivacySurface\(tab\);[\s\S]{0,120}hookHistoryRecording\(tab\);/.test(main),
 );
-check('真的调了 wc.setUserAgent（不是只写注释）', /wc\.setUserAgent\(profile\.ua, profile\.acceptLanguage\);/.test(main));
+check(
+  '真的调了 wc.setUserAgent，且 null/undefined 已兜成空串（不是只写注释）',
+  /wc\.setUserAgent\(profile\.ua \|\| '', profile\.acceptLanguage \|\| ''\);/.test(main),
+);
 check(
   '真的 attach debugger 并逐条发送 CDP 命令',
   /wc\.debugger\.isAttached\(\)[\s\S]{0,80}wc\.debugger\.attach\('1\.3'\)/.test(main) &&

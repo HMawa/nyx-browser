@@ -18,11 +18,11 @@ const DOC_TITLE = 'Nyx · agent 接入说明';
 
 const ACTION_LINES = [
   ['navigate', '打开网址', 'url'],
-  ['readPage', '读页面里的可交互元素', '（可带 filter）'],
+  ['readPage', '读页面里的可交互元素', 'maxElements, maxText'],
   ['screenshot', '截当前页面', ''],
   ['click', '点中某个元素', 'elementId'],
   ['type', '往输入框里输文字', 'elementId, text'],
-  ['executeJS', '在页面里执行一段脚本', 'script'],
+  ['executeJS', '在页面里执行一段脚本', 'code'],
   ['extractText', '取页面正文', ''],
   ['state', '看标签状态', ''],
   ['settings', '改设置（可选 undo:true 撤销）', 'key, value'],
@@ -99,7 +99,7 @@ function buildAgentDoc(rawOptions) {
     lines.push(`| \`${type}\` | ${label} | ${params || '—'} |`);
   }
   lines.push('');
-  lines.push('动作统一形容为 `{ "type": "...", ...参数 }`。`click` / `type` 要先 `readPage` 拿到 `elementId`，不要猜选择器。');
+  lines.push('动作统一写成 `{ "type": "navigate", "params": { "url": "https://example.com/" } }`；`state` 是只读的，走 `GET /state`，不用 body。`click` / `type` 要先 `readPage` 拿到 `elementId`，不要猜选择器。');
   lines.push('');
 
   lines.push('## 4. 会被拦下来的情况（重要）');
@@ -116,7 +116,7 @@ function buildAgentDoc(rawOptions) {
   lines.push('1. `401` → token 不对或没带请求头；token 在本地文件里，别猜。');
   lines.push('2. `403` / 被拒 → 看返回里的原因：站点被屏蔽、动作级确认没点、或者 agent 已被急停。');
   lines.push('3. "找不到元素" → 先 `readPage` 重新拿一遍 `elementId`（页面刷新后旧的 id 会失效）。');
-  lines.push('4. 什么都没发生 → 检查是不是在隐私模式标签里（隐私模式下不写缓存，但动作照常；被拒绝会明确说）。');
+  lines.push('4. 什么都没发生 → 检查是不是在隐私模式标签里（隐私模式下 `readPage` / `screenshot` / `extractText` 会被拒绝；其余动作照常，被拒绝会明确说）。');
   lines.push('');
   lines.push('## 6. 边界（请如实转告使用者）');
   lines.push('');
