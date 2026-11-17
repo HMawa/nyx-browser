@@ -159,6 +159,20 @@ check(
   JSON.stringify({ wired: true }),
 );
 
+// 9. 回归脚本自己的收尾清理不许误杀并行实例（F-03）
+const allSrc = fs.readFileSync(path.join(ROOT, 'scripts', 'verify-all.js'), 'utf8');
+check(
+  '一键回归只清理自己起的进程，不会顺手杀掉并行跑着的实例（F-03）',
+  /BASELINE_PIDS/.test(allSrc) &&
+    /if \(BASELINE_PIDS\.has\(pid\)\) continue;/.test(allSrc) &&
+    /NYX_VERIFY_NO_CLEANUP/.test(allSrc),
+  JSON.stringify({
+    基线: /BASELINE_PIDS/.test(allSrc),
+    跳过既有: /if \(BASELINE_PIDS\.has\(pid\)\) continue;/.test(allSrc),
+    开关: /NYX_VERIFY_NO_CLEANUP/.test(allSrc),
+  }),
+);
+
 const failed = checks.filter((c) => !c.ok);
 if (failed.length) {
   console.log(`[验证] 共 ${checks.length} 项，通过 ${checks.length - failed.length} 项，失败 ${failed.length} 项`);

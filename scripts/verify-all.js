@@ -13,7 +13,7 @@
  *  7. scripts/verify-security-switches.js（外壳防护基线，19 项；纯 Node，不启动 Electron）
  *  8. scripts/verify-screen-watch.js（录屏 / 被远控检测，14 项；纯 Node，不启动 Electron）
  *  9. scripts/verify-agent-dispatch.js（agent 统一动作通道，20 项；纯 Node，不启动 Electron）
- * 10. scripts/verify-page-reader.js（页面读取与稳定元素 id，19 项；纯 Node，不启动 Electron）
+ * 10. scripts/verify-page-reader.js（页面读取与稳定元素 id、上限越界一律拒绝、截图前恢复窗口，34 项；纯 Node，不启动 Electron）
  * 11. scripts/verify-agent-audit.js（agent 审计面与急停，17 项；纯 Node，不启动 Electron）
  * 12. scripts/verify-agent-sites.js（站点三层授权与名单导入导出，34 项；纯 Node，不启动 Electron）
  * 13. scripts/verify-agent-mode.js（agent 接入模式与两步确认，16 项；纯 Node，不启动 Electron）
@@ -41,8 +41,8 @@
  * 35. scripts/verify-update-signature.js（更新签名：清单 Ed25519 签名往返、改任一受保护字段即失效、安装包六种验签结果、私钥不入库，17 项；纯 Node，不启动 Electron）
  * 36. scripts/verify-privacy-surface.js（隐私指纹面：加固脚本放进假页面世界真跑一遍核对 UA/语言/时区/Canvas/WebGL、显卡与字体统一上报值、CDP 五步顺序、userAgentMetadata、两个平台分开、完整版本号、语言去 q、Worker 版脚本与 Target.setAutoAttach 接管、文档就绪补打与接线可见，55 项；纯 Node，不启动 Electron）
  * 37. scripts/verify-ipc-guard.js（IPC 发送方校验：只认同项目 renderer 下的 html、子框架与网络地址全拒、三个注册口都被包上、页面上下文通道单独列，10 项；纯 Node，不启动 Electron）
- * 38. scripts/verify-http-api-auth.js（本地接口鉴权：只认请求头 token、查询串不再接受、无 token 的 health 不泄露版本，7 项；纯 Node，不启动 Electron）
- * 39. scripts/verify-audit-p2.js（安全审计 P2 批次：隐私模式 agent 内容边界、state 只读豁免、截图重试、密码框 name 抹除、limits 传参、设置只读不确认、MCP 参数转发，14 项；纯 Node，不启动 Electron）
+ * 38. scripts/verify-http-api-auth.js（本地接口鉴权：只认请求头 token、查询串不再接受、无 token 的 health 不泄露版本、请求体超限回 413，9 项；纯 Node，不启动 Electron）
+ * 39. scripts/verify-audit-p2.js（安全审计 P2 批次：隐私模式 agent 内容边界、state 只读豁免、截图重试、密码框 name 抹除、limits 传参、设置只读不确认、MCP 参数转发、回归脚本不误杀并行实例，15 项；纯 Node，不启动 Electron）
  * 40. scripts/verify-permissions.js（站点设备授权白名单：设备项拆分、来源只收 http(s)、三档授权、隐私模式封死、撤销/清空与接线，22 项；纯 Node，不启动 Electron）
  * 41. scripts/verify-switch-cache.js（模式切换缓存：代理可达 30 秒、出口取不到 60 秒内复用、时钟回拨不认、计时文案点名最慢一步，以及主进程真的接上了，21 项；纯 Node，不启动 Electron）
  * 42. scripts/verify-tab-park.js（标签停靠：切模式不再销毁标签、视图摘下但不关页面、恢复按原顺序挂回并还回原活动标签、退出私密时先摘调试通道再强制销毁私密标签、停靠不覆盖已有停靠、超出 12 个降级成只记地址并当面告知，21 项；纯 Node，不启动 Electron）
@@ -75,6 +75,18 @@ const OWN_EXECUTABLES = [
   path.join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe'),
   path.join(ROOT, 'dist', 'win-unpacked', 'Nyx.exe'),
 ].map((p) => path.resolve(p));
+
+/**
+ * 开跑之前就已经存在的进程 PID。
+ * 收尾清理只杀「不在这个集合里」的进程，避免把并行跑着的另一个 Electron 实例
+ * （比如人工开的 dist 版、或在跑审计的实例）一起打死。
+ * `listProcesses()` 是函数声明，会提升，这里在模块加载时取一次快照是安全的。
+ */
+const BASELINE_PIDS = new Set(
+  listProcesses()
+    .map((proc) => Number(proc.ProcessId))
+    .filter((pid) => Number.isInteger(pid) && pid > 0),
+);
 
 /** 回归步骤：顺序、各自超时（留足余量，正常耗时约 40s / 40s / 5s / 20s） */
 const STEPS = [
@@ -135,7 +147,7 @@ const STEPS = [
   {
     label: '页面读取回归',
     script: 'verify-page-reader.js',
-    items: '22 项',
+    items: '34 项',
     timeoutMs: 60000,
   },
   {
@@ -308,13 +320,13 @@ const STEPS = [
   {
     label: '本地接口鉴权回归',
     script: 'verify-http-api-auth.js',
-    items: '7 项',
+    items: '9 项',
     timeoutMs: 60000,
   },
   {
     label: '安全审计 P2 批次回归',
     script: 'verify-audit-p2.js',
-    items: '14 项',
+    items: '15 项',
     timeoutMs: 60000,
   },
   {
@@ -392,8 +404,17 @@ function listProcesses() {
 /**
  * 结束本仓库遗留的 Electron 进程。
  * 只匹配完整路径（大小写不敏感），绝不按进程名杀，避免误伤安装版与其他 Electron 应用。
+ *
+ * 2026-11-17 加一条：**只清理"本次回归开始之后新出现的"进程**。
+ * 原来只要有 `dist\win-unpacked\Nyx.exe` 就杀，会把并行跑的审计实例一起打死
+ * （实测误杀过一次，还让"同 profile 重启静默退出"的疑团背了锅）。
+ * 设 `NYX_VERIFY_NO_CLEANUP=1` 可完全不清理。
  */
 function cleanupLeftovers(tag) {
+  if (String(process.env.NYX_VERIFY_NO_CLEANUP || '') === '1') {
+    console.log(`[回归] ${tag}：NYX_VERIFY_NO_CLEANUP=1，跳过清理`);
+    return 0;
+  }
   const allow = new Set(OWN_EXECUTABLES.map((p) => p.toLowerCase()));
   const killed = [];
 
@@ -403,6 +424,8 @@ function cleanupLeftovers(tag) {
     if (!allow.has(path.resolve(exePath).toLowerCase())) continue;
     const pid = Number(proc.ProcessId);
     if (!Number.isInteger(pid) || pid <= 0) continue;
+    // 开跑之前就存在的实例不是我们起的，别动它（并行审计实例就是这么被误杀的）
+    if (BASELINE_PIDS.has(pid)) continue;
     // /T 连带子孙进程（renderer / gpu / utility），/F 强制结束
     spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
       stdio: 'ignore',
@@ -413,7 +436,7 @@ function cleanupLeftovers(tag) {
   }
 
   if (killed.length) {
-    console.log(`[回归] ${tag}：已清理本仓库残留进程 ${killed.join('、')}`);
+    console.log(`[回归] ${tag}：已清理本次回归留下的进程 ${killed.join('、')}`);
   }
   return killed.length;
 }
