@@ -160,18 +160,45 @@ check(
 );
 
 // 9. 回归脚本自己的收尾清理不许误杀并行实例（F-03）
+// 断言要盯住"记自己的根 PID"，不是"基线快照"——基线只挡住开跑前就有的进程，
+// 回归跑起来之后你另开的实例照样会被杀（审计复测过）。
 const allSrc = fs.readFileSync(path.join(ROOT, 'scripts', 'verify-all.js'), 'utf8');
 check(
   '一键回归只清理自己起的进程，不会顺手杀掉并行跑着的实例（F-03）',
-  /BASELINE_PIDS/.test(allSrc) &&
-    /if \(BASELINE_PIDS\.has\(pid\)\) continue;/.test(allSrc) &&
-    /NYX_VERIFY_NO_CLEANUP/.test(allSrc),
+  /const SPAWNED_ROOTS = new Set\(\)/.test(allSrc) &&
+    /SPAWNED_ROOTS\.add\(result\.pid\)/.test(allSrc) &&
+    /if \(!cleanAll && !owned\.has\(pid\)\) continue;/.test(allSrc) &&
+    /NYX_VERIFY_NO_CLEANUP/.test(allSrc) &&
+    // 不许退回"只要路径对得上就杀"的老办法
+    !/if \(BASELINE_PIDS\.has\(pid\)\) continue;/.test(allSrc),
   JSON.stringify({
-    基线: /BASELINE_PIDS/.test(allSrc),
-    跳过既有: /if \(BASELINE_PIDS\.has\(pid\)\) continue;/.test(allSrc),
+    记录自己起的: /SPAWNED_ROOTS\.add\(result\.pid\)/.test(allSrc),
+    只杀自己那棵: /if \(!cleanAll && !owned\.has\(pid\)\) continue;/.test(allSrc),
     开关: /NYX_VERIFY_NO_CLEANUP/.test(allSrc),
+    退回基线法: /if \(BASELINE_PIDS\.has\(pid\)\) continue;/.test(allSrc),
   }),
 );
+
+// 10. 进程树归属算法本身：喂假进程表，只认自己那棵（F-03 的单元证明）
+{
+  const { collectOwnedPids } = require(path.join(ROOT, 'scripts', 'verify-all.js'));
+  const procs = [
+    { ProcessId: 100, ParentProcessId: 1 }, // 我们 spawn 的子脚本
+    { ProcessId: 101, ParentProcessId: 100 }, // 它拉起的 Nyx 主进程
+    { ProcessId: 102, ParentProcessId: 101 }, // renderer
+    { ProcessId: 103, ParentProcessId: 101 }, // gpu
+    { ProcessId: 900, ParentProcessId: 1 }, // 并行跑的审计实例（同一个父，但不是我们的）
+    { ProcessId: 901, ParentProcessId: 900 },
+  ];
+  const owned = collectOwnedPids(procs, [100]);
+  check(
+    '归属算法只认自己那棵树：自己的子孙全收，同父的并行实例一个都不碰（F-03）',
+    owned.has(100) && owned.has(101) && owned.has(102) && owned.has(103) && !owned.has(900) && !owned.has(901),
+    JSON.stringify([...owned].sort()),
+  );
+  const empty = collectOwnedPids(procs, []);
+  check('归属算法：没有根就是空集，不会退化成"全杀"（F-03）', empty.size === 0, JSON.stringify([...empty]));
+}
 
 const failed = checks.filter((c) => !c.ok);
 if (failed.length) {

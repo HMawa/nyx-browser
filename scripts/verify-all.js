@@ -42,7 +42,7 @@
  * 36. scripts/verify-privacy-surface.js（隐私指纹面：加固脚本放进假页面世界真跑一遍核对 UA/语言/时区/Canvas/WebGL、显卡与字体统一上报值、CDP 五步顺序、userAgentMetadata、两个平台分开、完整版本号、语言去 q、Worker 版脚本与 Target.setAutoAttach 接管、文档就绪补打与接线可见，55 项；纯 Node，不启动 Electron）
  * 37. scripts/verify-ipc-guard.js（IPC 发送方校验：只认同项目 renderer 下的 html、子框架与网络地址全拒、三个注册口都被包上、页面上下文通道单独列，10 项；纯 Node，不启动 Electron）
  * 38. scripts/verify-http-api-auth.js（本地接口鉴权：只认请求头 token、查询串不再接受、无 token 的 health 不泄露版本、请求体超限回 413，9 项；纯 Node，不启动 Electron）
- * 39. scripts/verify-audit-p2.js（安全审计 P2 批次：隐私模式 agent 内容边界、state 只读豁免、截图重试、密码框 name 抹除、limits 传参、设置只读不确认、MCP 参数转发、回归脚本不误杀并行实例，15 项；纯 Node，不启动 Electron）
+ * 39. scripts/verify-audit-p2.js（安全审计 P2 批次：隐私模式 agent 内容边界、state 只读豁免、截图重试、密码框 name 抹除、limits 传参、设置只读不确认、MCP 参数转发、回归只清理自己那棵进程树，17 项；纯 Node，不启动 Electron）
  * 40. scripts/verify-permissions.js（站点设备授权白名单：设备项拆分、来源只收 http(s)、三档授权、隐私模式封死、撤销/清空与接线，22 项；纯 Node，不启动 Electron）
  * 41. scripts/verify-switch-cache.js（模式切换缓存：代理可达 30 秒、出口取不到 60 秒内复用、时钟回拨不认、计时文案点名最慢一步，以及主进程真的接上了，21 项；纯 Node，不启动 Electron）
  * 42. scripts/verify-tab-park.js（标签停靠：切模式不再销毁标签、视图摘下但不关页面、恢复按原顺序挂回并还回原活动标签、退出私密时先摘调试通道再强制销毁私密标签、停靠不覆盖已有停靠、超出 12 个降级成只记地址并当面告知，21 项；纯 Node，不启动 Electron）
@@ -77,11 +77,16 @@ const OWN_EXECUTABLES = [
 ].map((p) => path.resolve(p));
 
 /**
- * 开跑之前就已经存在的进程 PID。
- * 收尾清理只杀「不在这个集合里」的进程，避免把并行跑着的另一个 Electron 实例
- * （比如人工开的 dist 版、或在跑审计的实例）一起打死。
- * `listProcesses()` 是函数声明，会提升，这里在模块加载时取一次快照是安全的。
+ * 本次回归自己 spawn 出来的子进程 PID（每跑一个脚本往里加一个）。
+ *
+ * 为什么不信"基线快照"：那只挡住"开跑前就存在"的进程，回归跑起来之后你另开的
+ * dist 实例照样会被杀。审计实机复测过——19:07 开跑、19:07:52 起一个隔离实例，
+ * 19:10 第一个脚本收尾时它被清理掉了。所以改成记自己的根 PID，再顺着
+ * ParentProcessId 找子孙：只可能命中"我们起的"，别的实例连关系都没有。
  */
+const SPAWNED_ROOTS = new Set();
+
+/** 开跑前就存在的进程：留作日志对照，不参与"要不要杀"的判断 */
 const BASELINE_PIDS = new Set(
   listProcesses()
     .map((proc) => Number(proc.ProcessId))
@@ -326,7 +331,7 @@ const STEPS = [
   {
     label: '安全审计 P2 批次回归',
     script: 'verify-audit-p2.js',
-    items: '15 项',
+    items: '17 项',
     timeoutMs: 60000,
   },
   {
@@ -402,13 +407,44 @@ function listProcesses() {
 }
 
 /**
- * 结束本仓库遗留的 Electron 进程。
- * 只匹配完整路径（大小写不敏感），绝不按进程名杀，避免误伤安装版与其他 Electron 应用。
+ * 从"我们自己 spawn 的根 PID"出发，顺着 ParentProcessId 收出整棵进程树的 PID 集合。
+ * 单独抽出来是为了能被断言直接喂假数据测（不用真起进程）。
+ * @param {Array<{ProcessId:number, ParentProcessId:number}>} procs
+ * @param {Iterable<number>} roots
+ * @returns {Set<number>}
+ */
+function collectOwnedPids(procs, roots) {
+  const owned = new Set();
+  for (const pid of roots) {
+    const n = Number(pid);
+    if (Number.isInteger(n) && n > 0) owned.add(n);
+  }
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const proc of procs || []) {
+      const ppid = Number(proc && proc.ParentProcessId);
+      const pid = Number(proc && proc.ProcessId);
+      if (!Number.isInteger(pid) || pid <= 0) continue;
+      if (owned.has(pid)) continue;
+      if (owned.has(ppid)) {
+        owned.add(pid);
+        grew = true;
+      }
+    }
+  }
+  return owned;
+}
+
+/**
+ * 结束本次回归自己 spawn 出来的 Electron 进程。
+ * 只匹配完整路径（大小写不敏感），绝不按进程名杀；**而且只碰自己那一棵树**：
+ * 从 SPAWNED_ROOTS（本次 spawn 的子脚本 PID）出发，顺着 ParentProcessId 收子孙，
+ * 命中的才杀。并行跑的审计实例、人工开的 dist 实例与我们没有父子关系，不会被碰。
  *
- * 2026-11-17 加一条：**只清理"本次回归开始之后新出现的"进程**。
- * 原来只要有 `dist\win-unpacked\Nyx.exe` 就杀，会把并行跑的审计实例一起打死
- * （实测误杀过一次，还让"同 profile 重启静默退出"的疑团背了锅）。
- * 设 `NYX_VERIFY_NO_CLEANUP=1` 可完全不清理。
+ * 代价（如实写在注释里）：上一次回归崩掉后**留在机器上**的残留进程不会被这里清掉，
+ * 因为没有人能证明它是"我们起的"。真要清就人工按完整路径关，或者跑一次
+ * `NYX_VERIFY_CLEAN_ALL=1`（明确表示"这台机器上的本仓库实例都可以关"）。
  */
 function cleanupLeftovers(tag) {
   if (String(process.env.NYX_VERIFY_NO_CLEANUP || '') === '1') {
@@ -416,16 +452,18 @@ function cleanupLeftovers(tag) {
     return 0;
   }
   const allow = new Set(OWN_EXECUTABLES.map((p) => p.toLowerCase()));
-  const killed = [];
+  const procs = listProcesses();
+  const cleanAll = String(process.env.NYX_VERIFY_CLEAN_ALL || '') === '1';
+  const owned = collectOwnedPids(procs, SPAWNED_ROOTS);
 
-  for (const proc of listProcesses()) {
+  const killed = [];
+  for (const proc of procs) {
     const exePath = String(proc.ExecutablePath || '');
     if (!exePath) continue;
     if (!allow.has(path.resolve(exePath).toLowerCase())) continue;
     const pid = Number(proc.ProcessId);
     if (!Number.isInteger(pid) || pid <= 0) continue;
-    // 开跑之前就存在的实例不是我们起的，别动它（并行审计实例就是这么被误杀的）
-    if (BASELINE_PIDS.has(pid)) continue;
+    if (!cleanAll && !owned.has(pid)) continue;
     // /T 连带子孙进程（renderer / gpu / utility），/F 强制结束
     spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
       stdio: 'ignore',
@@ -436,7 +474,7 @@ function cleanupLeftovers(tag) {
   }
 
   if (killed.length) {
-    console.log(`[回归] ${tag}：已清理本次回归留下的进程 ${killed.join('、')}`);
+    console.log(`[回归] ${tag}：已清理本次回归自己起的进程 ${killed.join('、')}`);
   }
   return killed.length;
 }
@@ -484,6 +522,10 @@ function runStepOnce(step, index, total) {
     env: process.env,
   });
   const ms = nowMs() - started;
+
+  // 先记下"这是我们起的"再清理：spawnSync 给回的是子脚本自己的 PID，
+  // 它拉起的 Electron 是它的子进程，清理时顺着 ParentProcessId 就能认出来。
+  if (Number.isInteger(result.pid) && result.pid > 0) SPAWNED_ROOTS.add(result.pid);
 
   // 无论成败都再清一次，避免子脚本异常退出留下 Electron 进程
   cleanupLeftovers(`[${index}/${total}] 收尾清理`);
@@ -561,4 +603,8 @@ function main() {
   process.exitCode = 0;
 }
 
-main();
+// 只有直接跑这个文件才执行回归；被 require（断言里测 collectOwnedPids）时不动手
+if (require.main === module) main();
+
+/* 便于纯逻辑断言直接调用 */
+module.exports = { collectOwnedPids };
