@@ -131,14 +131,24 @@ const UI_PREF_DEFAULTS = {
   /**
    * 接入方式（VPN 接入外壳清单 B1）。
    *
-   * 'auto' 是关键的一档：它不写死 campus，而是交给 net-terms.resolveIdentity 在读取时判断——
-   * 有历史接入配置的老用户仍看到 custom（今天的界面，一个字都不变），
-   * 干净机器才走 campus（校园网络接入）。这样升级用户不会被悄悄改词，
-   * 而新装的机器又能按引导里的选择起步。用户显式选过之后这里存具体身份，不再自动推断。
+   * 'auto' 是关键的一档：它不写死 campus，而是取 `netIdentityResolved` 里落定的那一档——
+   * 老用户仍是 custom（今天的界面，一个字都不变），干净机器才走 campus（校园网络接入）。
+   * 迁移判断只在首次解析时做一次，之后不随订阅数变化（审计 F4）。
+   * 用户显式选过之后这里存具体身份，不再自动推断。
    *
    * 只影响界面文案与默认叫法：不碰内核、订阅、端口、分流与任何既有偏好键。
    */
   netIdentity: 'auto',
+
+  /**
+   * `netIdentity` 的解析结果，只写一次（审计 F4）。
+   *
+   * 为什么单开一个键：迁移判断只能发生一次，判据也不能是「当前有几条订阅」那种会变的东西。
+   * 首次读到 auto 时主进程按「引导走过没有 / 有没有老数据文件」算出结论写在这里，
+   * 之后一直用它——用户后来加订阅、删订阅，界面叫法都不会翻。
+   * 空串 = 还没算过（正常只会出现在首次启动那一小段时间里）。
+   */
+  netIdentityResolved: '',
 };
 
 /** 枚举型偏好的合法取值（键 → 允许值）。
@@ -153,8 +163,10 @@ const UI_PREF_ENUMS = {
   motionLevel: ['calm', 'lively'],
   /** 界面字号档位（清单 D3 遗留项）；倍率见 src/core/font-scale.js */
   fontScale: ['small', 'normal', 'large', 'huge'],
-  /** 接入方式（VPN 接入外壳清单 B1）：auto = 按有无历史配置自动推断 */
+  /** 接入方式（VPN 接入外壳清单 B1）：auto = 用 netIdentityResolved 里落定的那一档 */
   netIdentity: ['auto', 'campus', 'enterprise', 'custom'],
+  /** auto 的解析结果；空串表示尚未解析 */
+  netIdentityResolved: ['', 'campus', 'enterprise', 'custom'],
 };
 
 class UiStore {

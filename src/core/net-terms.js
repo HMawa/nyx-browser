@@ -201,17 +201,20 @@ function t(key, identity) {
  * 决定当前该用哪一档身份。
  *
  * 规则（清单 §2 默认值）：用户显式选过就用选的；没选过（auto）时，
- * 机器上有历史接入配置 → custom（升级用户维持原样），干净机器 → campus（新装走引导）。
- * 不传 ctx 时按"没配置"处理（= campus）：主进程传的是它算好的值，异常时它自己按老用户保守处理，
- * 这个纯函数不替调用方猜。
+ * 老用户 → custom（升级后界面维持原样），新装 → campus（走引导选）。
+ *
+ * **判据由调用方给，这里不猜**。审计 F4 定的口径：不能用「当前有几条订阅」判断老用户——
+ * 那个数会变（用户后来加一条订阅，界面口径就翻），而迁移判断只能发生一次。
+ * 主进程的做法是首次解析时落一个持久化的 `netIdentityResolved`，之后一直用它。
+ * 不传 ctx 时按"新装"处理（= campus），异常情况由调用方自己保守决定。
  *
  * @param {string} saved 偏好里存的值（可能是 auto、空或脏数据）
- * @param {{hasExistingConfig?: boolean}} [ctx]
+ * @param {{isUpgrade?: boolean}} [ctx]
  */
 function resolveIdentity(saved, ctx) {
   if (IDENTITIES.includes(saved)) return saved;
-  const hasExistingConfig = Boolean(ctx && ctx.hasExistingConfig);
-  return hasExistingConfig ? UPGRADE_IDENTITY : DEFAULT_IDENTITY;
+  const isUpgrade = Boolean(ctx && ctx.isUpgrade);
+  return isUpgrade ? UPGRADE_IDENTITY : DEFAULT_IDENTITY;
 }
 
 /**

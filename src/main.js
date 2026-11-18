@@ -7303,31 +7303,57 @@ function registerSettingsIpc() {
    * 只做三件事：读当前该用哪一档、判断"这台机器像不像老用户"、写用户显式选择的身份。
    * 不碰内核、订阅、端口与分流——换身份不重启内核、不重连（清单验收第 3 条）。
    */
-  function netHasExistingConfig() {
-    // 判断依据只有一条：已有接入配置（订阅）。服务没就绪或抛错时按"老用户"处理——
-    // 宁可让升级用户维持旧界面，也不要给一个用了很久的人突然换成校园口径。
+  /**
+   * 这台机器像不像"老用户"（已经用过 Nyx）。
+   *
+   * 审计 F4 的口径：**不能拿「当前有几条订阅」判断**——那个数会变，用户后来加一条订阅，
+   * 界面口径就跟着翻，而且升级用户若没订阅会被判成新装（反过来也一样）。
+   * 迁移判断只该发生一次，判据也必须是不随时间漂移的东西：
+   *   1. 首次安装标记里 `pending === true` → 全新安装，走引导选；
+   *   2. `pending === false` → 引导已经走过（或明确跳过），是老用户；
+   *   3. 没有标记（早于引导功能的版本装上来）→ 看磁盘上有没有老版本留下的数据文件。
+   */
+  function netIsUpgradeUser() {
     try {
-      const status =
-        runtime.proxyService && typeof runtime.proxyService.status === 'function'
-          ? runtime.proxyService.status()
-          : null;
-      const subs = status && Array.isArray(status.subscriptions) ? status.subscriptions : [];
-      return subs.length > 0;
+      const marker = readOnboardMarker();
+      if (marker && marker.pending === true) return false;
+      if (marker && marker.pending === false) return true;
     } catch {
-      return true;
+      // 读不懂标记时不据此判，继续看数据文件
     }
+    for (const name of ['bookmarks.json', 'bookmarks-store.json', 'history.json', 'ui-preferences.json']) {
+      try {
+        if (fs.existsSync(userDataFile(name))) return true;
+      } catch {
+        // 单个文件探测失败不影响结论
+      }
+    }
+    return false;
+  }
+
+  /**
+   * `auto` 一档的解析结果只落一次盘（`netIdentityResolved`）。
+   *
+   * 这样「跟随默认」能被选、而且选完之后界面口径固定：不会今天 campus、明天加条订阅就变 custom。
+   * 存进去的值如果是脏数据，按当前判断重算一次覆盖它。
+   */
+  function netResolveAutoIdentity() {
+    const stored = runtime.uiStore ? runtime.uiStore.get().netIdentityResolved : '';
+    if (netTerms.IDENTITIES.includes(stored)) return stored;
+    const identity = netTerms.resolveIdentity(netTerms.IDENTITY_AUTO, { isUpgrade: netIsUpgradeUser() });
+    if (runtime.uiStore) runtime.uiStore.set('netIdentityResolved', identity);
+    return identity;
   }
 
   function netIdentityPayload() {
     const saved = (runtime.uiStore && runtime.uiStore.get().netIdentity) || netTerms.IDENTITY_AUTO;
-    const hasExistingConfig = netHasExistingConfig();
-    const identity = netTerms.resolveIdentity(saved, { hasExistingConfig });
+    const identity =
+      saved === netTerms.IDENTITY_AUTO ? netResolveAutoIdentity() : netTerms.resolveIdentity(saved);
     return {
       ok: true,
       saved,
       identity,
       auto: saved === netTerms.IDENTITY_AUTO,
-      hasExistingConfig,
       label: netTerms.IDENTITY_LABELS[identity],
       note: netTerms.IDENTITY_NOTES[identity],
       options: netTerms.describeIdentities(),
@@ -7343,9 +7369,15 @@ function registerSettingsIpc() {
     if (!runtime.uiStore) return { ok: false, error: '界面偏好存储未就绪' };
 
     const identity = payload && payload.identity;
-    if (!netTerms.IDENTITIES.includes(identity)) {
-      const names = netTerms.IDENTITIES.map((id) => netTerms.IDENTITY_LABELS[id]).join(' / ');
-      return { ok: false, error: `接入方式只能是：${names}` };
+    // 「跟随默认」是可选的：以前主进程只认三档，界面上却摆着 auto 这一项，
+    // 用户一点就报「只能是…」，等于给了一个必然失败的选项（审计 F3）。
+    const allowed = [netTerms.IDENTITY_AUTO].concat(netTerms.IDENTITIES);
+    if (!allowed.includes(identity)) {
+      const names = netTerms
+        .describeIdentities()
+        .map((opt) => opt.label)
+        .join(' / ');
+      return { ok: false, error: `接入方式只能是：跟随默认 / ${names}` };
     }
 
     const result = runtime.uiStore.set('netIdentity', identity);
