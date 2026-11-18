@@ -244,7 +244,9 @@ function renderStatus() {
   els.btnRestart.disabled = busy;
 
   // 顶栏关键参数：当前订阅 / 混合端口 / 出口 IP，一眼可见
+  // 当前订阅名是用户自己起的，换词扫描不许碰（审计 F5）
   els.activeSub.textContent = (status && status.activeName) || '未配置';
+  els.activeSub.dataset.netKeep = '1';
 
   els.mixedPort.textContent = kernel.mixedPort ? String(kernel.mixedPort) : '—';
 
@@ -613,6 +615,9 @@ function renderSubs() {
     title.className = 'sub-title';
     title.textContent = sub.name;
     title.title = sub.name;
+    // 备注名是用户自己起的：换词扫描一律不许碰（审计 F5）——用户把订阅叫「学校节点」
+    // 不该被显示层改成「学校线路」，复制出去也得和存的一致。
+    title.dataset.netKeep = '1';
     if (sub.active) {
       const tag = document.createElement('span');
       tag.className = 'sub-tag';
@@ -625,6 +630,7 @@ function renderSubs() {
     url.className = 'sub-url';
     url.textContent = sub.urlMasked;
     url.title = sub.urlMasked;
+    url.dataset.netKeep = '1';
     item.appendChild(url);
 
     const meta = document.createElement('div');
@@ -633,6 +639,8 @@ function renderSubs() {
       ? `上次拉取失败：${sub.lastError}`
       : `节点 ${sub.nodeCount || 0} 个 · 上次更新 ${formatTime(sub.lastFetchAt)}`;
     meta.title = meta.textContent;
+    // 失败原文是内核/网络返回的原话，改字等于篡改证据（与日志区同一条规矩）
+    if (sub.lastError) meta.dataset.netKeep = '1';
     item.appendChild(meta);
 
     const actions = document.createElement('div');

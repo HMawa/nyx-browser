@@ -909,11 +909,34 @@
   const NET_SHELL_ATTRS = ['title', 'aria-label', 'placeholder'];
 
   /**
+   * 记下"换词前的原文"，切回自定义服务端时逐条还原（审计 F2）。
+   *
+   * 以前切回 custom 只是把 Observer 摘掉、再 return——已经改过的字留在原地，
+   * 于是出现"静态标签回来了、空态和状态条还是外壳词"的半新半旧界面。
+   * 这里用两个 Map（不用 WeakMap：切回时要能遍历）记录原值，custom 时先卸观察器再还原。
+   * 每次还原后清空，所以容量上限就是这一个分区的文本节点数，不会随运行时间涨。
+   */
+  const netShellTextOriginals = new Map();
+  const netShellAttrOriginals = new Map();
+
+  function restoreNetShellText() {
+    for (const [node, original] of netShellTextOriginals) {
+      if (node.isConnected && node.nodeValue !== original) node.nodeValue = original;
+    }
+    netShellTextOriginals.clear();
+    for (const [el, attrs] of netShellAttrOriginals) {
+      if (!el.isConnected) continue;
+      for (const [name, original] of Object.entries(attrs)) el.setAttribute(name, original);
+    }
+    netShellAttrOriginals.clear();
+  }
+
+  /**
    * 把分区里已经渲染出来的旧术语换成外壳叫法（清单 §3 映射表）。
    *
    * 为什么要在显示层扫一遍：状态条、空态提示、按钮 title 是拼出来的句子，
    * 逐条登记词条会漏；扫一遍能兜住现有与以后新增的句子。日志区（.log-box / pre / code）跳过：
-   * 那是内核原始输出，改字等于篡改证据。
+   * 那是内核原始输出，改字等于篡改证据。用户数据（订阅备注名 / 地址 / 失败原文）同样跳过（审计 F5）。
    */
   function sweepNetShellText(identity) {
     const panel = panelOf('network');
@@ -925,7 +948,8 @@
         acceptNode(node) {
           const parent = node.parentElement;
           if (!parent || NET_SHELL_TEXT_SKIP.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
-          // 日志区是内核原始输出；[data-net-keep] 是清单 §7.3 要求保留的「通用网络代理工具」事实陈述
+          // 日志区是内核原始输出；[data-net-keep] 是清单 §7.3 要求保留的事实陈述，
+          // 以及订阅备注名、订阅地址、失败原文这些用户数据与错误原文（审计 F1 / F5）
           if (parent.closest('.log-box, pre, code, [data-net-keep]')) return NodeFilter.FILTER_REJECT;
           return NodeFilter.FILTER_ACCEPT;
         },
@@ -934,7 +958,9 @@
       while (walker.nextNode()) nodes.push(walker.currentNode);
       for (const node of nodes) {
         const next = shellize(node.nodeValue, identity);
-        if (next !== node.nodeValue) node.nodeValue = next;
+        if (next === node.nodeValue) continue;
+        if (!netShellTextOriginals.has(node)) netShellTextOriginals.set(node, node.nodeValue);
+        node.nodeValue = next;
       }
       for (const el of panel.querySelectorAll(NET_SHELL_ATTRS.map((name) => `[${name}]`).join(','))) {
         if (el.closest('[data-net-keep]')) continue;
@@ -942,7 +968,11 @@
           const value = el.getAttribute(name);
           if (!value) continue;
           const next = shellize(value, identity);
-          if (next !== value) el.setAttribute(name, next);
+          if (next === value) continue;
+          if (!netShellAttrOriginals.has(el)) netShellAttrOriginals.set(el, {});
+          const record = netShellAttrOriginals.get(el);
+          if (!(name in record)) record[name] = value;
+          el.setAttribute(name, next);
         }
       }
     } finally {
@@ -950,7 +980,7 @@
     }
   }
 
-  /** 只在校园 / 单位两档挂 Observer：状态推送、节点表重绘之后自动补一遍换词；切回 custom 立刻摘掉 */
+  /** 只在校园 / 单位两档挂 Observer：状态推送、节点表重绘之后自动补一遍换词；切回 custom 立刻摘掉并还原 */
   function watchNetShellText(identity) {
     if (netShellObserver) {
       netShellObserver.disconnect();
@@ -961,8 +991,13 @@
       netShellSweepTimer = 0;
     }
     const panel = panelOf('network');
+    if (!['campus', 'enterprise'].includes(identity)) {
+      // 先还原再走人：静态标签由 data-net-term 铺回旧词，动态句子靠这里还原
+      restoreNetShellText();
+      return;
+    }
     sweepNetShellText(identity);
-    if (!panel || !['campus', 'enterprise'].includes(identity)) return;
+    if (!panel) return;
     netShellObserver = new MutationObserver(() => {
       if (netShellSweeping || netShellSweepTimer) return;
       netShellSweepTimer = window.setTimeout(() => {
@@ -1026,8 +1061,11 @@
     if (label) label.textContent = `接入方式：${payload.label}`;
     const note = byId('net-identity-note');
     if (note) note.textContent = payload.note || '';
+    // 范围说明会被换词（它里面提到「内核」），事实陈述必须原样——分两个元素写，别拼成一句（审计 F1）
+    const scope = byId('net-identity-scope');
+    if (scope) scope.textContent = payload.scopeNote || '';
     const statement = byId('net-identity-statement');
-    if (statement) statement.textContent = [payload.scopeNote, payload.statement].filter(Boolean).join(' ');
+    if (statement) statement.textContent = payload.statement || '';
     const bar = byId('net-identity-bar');
     if (bar) bar.dataset.identity = payload.identity;
   }
