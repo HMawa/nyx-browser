@@ -2848,8 +2848,15 @@ async function main() {
       }
       if (fileAt >= 256 * 1024) break;
     }
-    const dlList = await shell.eval(`window.nyx.listDownloads()`);
-    const dlItem = dlList && Array.isArray(dlList.items) ? dlList.items[0] : null;
+    // 文件落盘与 DownloadItem 的状态推送不是同一时刻：字节到了但 state 还停在
+    // progressing 是正常的收尾窗口。这里等到状态落定，不是把断言放宽。
+    let dlItem = null;
+    for (let i = 0; i < 12; i += 1) {
+      const dlList = await shell.eval(`window.nyx.listDownloads()`);
+      dlItem = dlList && Array.isArray(dlList.items) ? dlList.items[0] : null;
+      if (dlItem && (dlItem.state === 'completed' || dlItem.state === 'interrupted' || dlItem.state === 'cancelled')) break;
+      await sleep(300);
+    }
     check(
       '普通模式下载真的落盘（不再 0 字节、不再静默取消）（A1）',
       fileAt === 256 * 1024 &&
@@ -4451,6 +4458,88 @@ async function main() {
         );
       } catch (err) {
         check('进程详情端到端检查未中断', false, err && err.message);
+      }
+    }
+
+    // —— 接入外壳：合规声明不许被换词扫掉；切回自定义服务端要逐字还原（审计 F1 / F2 / F5）——
+    if (settings) {
+      try {
+        const netShell = await settings.eval(`(async () => {
+          const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+          const nav = document.querySelector('.nav-item[data-sec="network"]');
+          if (nav) nav.click();
+          const read = () => ({
+            statement: (document.getElementById('net-identity-statement') || {}).textContent || '',
+            scope: (document.getElementById('net-identity-scope') || {}).textContent || '',
+            empty: (document.getElementById('sub-list') || {}).textContent || '',
+            select: (document.getElementById('net-identity-select') || {}).value || '',
+          });
+          // 这一页的状态只由 select 的 change 驱动（直接调 IPC 不会重铺界面），
+          // 所以要像用户那样改控件；顺带让断言与实例初始档位解耦。
+          const pick = async (value) => {
+            const el = document.getElementById('net-identity-select');
+            if (!el) return false;
+            el.value = value;
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            await sleep(800);
+            return el.value === value;
+          };
+          await pick('campus');
+          for (let i = 0; i < 16; i += 1) {
+            if (/订阅|接入配置/.test(read().empty)) break;
+            await sleep(250);
+          }
+          const campus = read();
+          // Observer 是 80ms 防抖，声明被改写照理发生在这个窗口里；多等两轮再读
+          await sleep(600);
+          const campusSettled = read();
+          // 切到自定义服务端：静态标签由 data-net-term 铺回旧词，动态句子靠 restoreNetShellText 还原
+          const switchedCustom = await pick('custom');
+          const custom = Object.assign({ switched: switchedCustom }, read());
+          // 「跟随默认」必须能保存（审计 F3：以前选了就报错，等于摆一个必然失败的选项）
+          const autoPicked = await pick('auto');
+          const auto = Object.assign({ switched: autoPicked }, read());
+          // 复原成校园档，避免把隔离实例留在 auto 上影响别的断言
+          await pick('campus');
+          const back = read();
+          return { campus, campusSettled, custom, back, auto };
+        })()`);        const campus = (netShell && netShell.campus) || {};
+        const settled = (netShell && netShell.campusSettled) || {};
+        const custom = netShell && netShell.custom;
+        check(
+          '接入外壳：校园档下合规声明原样保留，只有范围说明被换词（不静默篡改事实，非 F1）',
+          /通用网络代理工具/.test(campus.statement || '')
+            && !/接入通道/.test(campus.statement || '')
+            && /通用网络代理工具/.test(settled.statement || '')
+            && !/接入通道/.test(settled.statement || '')
+            && /接入组件/.test(settled.scope || '')
+            && /接入配置/.test(settled.empty || ''),
+          JSON.stringify({ statement: settled.statement, scope: settled.scope, empty: settled.empty }),
+        );
+        check(
+          '接入外壳：切回自定义服务端后动态句子逐字回到旧词（空态不再是「接入配置」）',
+          !!custom
+            && custom.switched === true
+            && custom.select === 'custom'
+            && /暂无订阅/.test(custom.empty || '')
+            && !/暂无接入配置/.test(custom.empty || '')
+            && /通用网络代理工具/.test(custom.statement || '')
+            && !/接入组件/.test(custom.scope || ''),
+          JSON.stringify(custom),
+        );
+        check(
+          '接入外壳：再切回校园档，空态重新变成外壳词（还原不是单向损坏）',
+          /暂无接入配置/.test((netShell && netShell.back && netShell.back.empty) || ''),
+          JSON.stringify(netShell && netShell.back),
+        );
+        const auto = netShell && netShell.auto;
+        check(
+          '接入外壳：「跟随默认」能保存且不报错（选择器里摆着的选项不许必然失败，非 F3）',
+          !!auto && auto.switched === true && auto.select === 'auto',
+          JSON.stringify(auto),
+        );
+      } catch (err) {
+        check('接入外壳端到端检查未中断', false, err && err.message);
       }
     }
 

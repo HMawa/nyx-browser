@@ -74,26 +74,26 @@ check('1. 词表是纯字符串模块（界面侧可直接 require），三档�
 });
 
 check('2. 用户显式选过就照办：campus 即便有历史配置也不被改成 custom', () => {
-  assert.strictEqual(netTerms.resolveIdentity('campus', { hasExistingConfig: true }), 'campus');
-  assert.strictEqual(netTerms.resolveIdentity('enterprise', { hasExistingConfig: true }), 'enterprise');
-  assert.strictEqual(netTerms.resolveIdentity('custom', { hasExistingConfig: false }), 'custom');
+  assert.strictEqual(netTerms.resolveIdentity('campus', { isUpgrade: true }), 'campus');
+  assert.strictEqual(netTerms.resolveIdentity('enterprise', { isUpgrade: true }), 'enterprise');
+  assert.strictEqual(netTerms.resolveIdentity('custom', { isUpgrade: false }), 'custom');
 });
 
-check('3. 没选过 + 有历史接入配置 → custom（升级用户维持今天的界面）', () => {
-  assert.strictEqual(netTerms.resolveIdentity('auto', { hasExistingConfig: true }), 'custom');
-  // 纯函数不替调用方猜：不传 ctx 就当"没配置"，保守判断留给主进程（那边异常时按老用户算）
+check('3. 没选过 + 老用户 → custom（升级后维持今天的界面）', () => {
+  assert.strictEqual(netTerms.resolveIdentity('auto', { isUpgrade: true }), 'custom');
+  // 纯函数不替调用方猜：不传 ctx 就当"新装"，保守判断留给主进程
   assert.strictEqual(netTerms.resolveIdentity('auto'), 'campus');
 });
 
-check('4. 没选过 + 干净机器 → campus（新装默认走校园口径）', () => {
-  assert.strictEqual(netTerms.resolveIdentity('auto', { hasExistingConfig: false }), 'campus');
-  assert.strictEqual(netTerms.resolveIdentity('', { hasExistingConfig: false }), 'campus');
+check('4. 没选过 + 新装 → campus（新装默认走校园口径）', () => {
+  assert.strictEqual(netTerms.resolveIdentity('auto', { isUpgrade: false }), 'campus');
+  assert.strictEqual(netTerms.resolveIdentity('', { isUpgrade: false }), 'campus');
 });
 
 check('5. 脏值一律按「没选过」处理，不报错也不乱猜成 enterprise', () => {
   for (const dirty of ['weird', 'CAMPUS', ' campus ', null, undefined, 42, {}]) {
-    assert.strictEqual(netTerms.resolveIdentity(dirty, { hasExistingConfig: false }), 'campus', `脏值 ${String(dirty)}`);
-    assert.strictEqual(netTerms.resolveIdentity(dirty, { hasExistingConfig: true }), 'custom', `脏值 ${String(dirty)}`);
+    assert.strictEqual(netTerms.resolveIdentity(dirty, { isUpgrade: false }), 'campus', `脏值 ${String(dirty)}`);
+    assert.strictEqual(netTerms.resolveIdentity(dirty, { isUpgrade: true }), 'custom', `脏值 ${String(dirty)}`);
   }
 });
 
@@ -225,19 +225,28 @@ check('19. 主进程两个 IPC 各注册一次，写身份只碰 uiStore（不�
     assert.ok(!block.includes(forbidden), `写身份的处理块里出现了 ${forbidden}——换身份不许碰网络行为`);
   }
   assert.ok(block.includes("runtime.uiStore.set('netIdentity'"), '写身份应落到 uiStore');
-  assert.ok(block.includes('IDENTITIES.includes'), '写身份前应校验三档身份');
+  // 「跟随默认」必须能保存回去（审计 F3：界面上摆着 auto 却保存必失败，等于给用户一个坑）
+  assert.ok(/IDENTITY_AUTO/.test(block), '写身份应允许「跟随默认」（auto）这一档');
 });
 
-check('20. 身份载荷自带界面要的全部字段，且"有没有历史配置"只看订阅数', () => {
+check('20. 身份载荷自带界面要的全部字段，且"像不像老用户"不看订阅数（审计 F4）', () => {
   const start = mainJs.indexOf('function netIdentityPayload');
   const block = mainJs.slice(start, mainJs.indexOf("ipcMain.handle('nyx:net:identity'", start));
-  for (const field of ['identity', 'label', 'options', 'statement', 'scopeNote', 'terms', 'hasExistingConfig']) {
+  for (const field of ['identity', 'label', 'options', 'statement', 'scopeNote', 'terms', 'auto']) {
     assert.ok(block.includes(`${field}`), `载荷缺字段 ${field}`);
   }
-  const hasConfigStart = mainJs.indexOf('function netHasExistingConfig');
-  const hasConfigBlock = mainJs.slice(hasConfigStart, start);
-  assert.ok(hasConfigBlock.includes('subscriptions'), '判断历史配置应看订阅列表');
-  assert.ok(hasConfigBlock.includes('return true'), '异常时应保守按老用户处理');
+  assert.ok(!block.includes('hasExistingConfig'), '载荷不该再对外暴露"按订阅数推断"的旧口径');
+  // 迁移判据必须是"引导走过没有 / 有没有老数据文件"，且解析结果只落一次盘
+  const upgradeStart = mainJs.indexOf('function netIsUpgradeUser');
+  assert.ok(upgradeStart > 0, '缺少 netIsUpgradeUser');
+  const upgradeBlock = mainJs.slice(upgradeStart, mainJs.indexOf('function netResolveAutoIdentity', upgradeStart));
+  assert.ok(upgradeBlock.includes('readOnboardMarker'), '老用户判断应看首次安装标记');
+  assert.ok(!upgradeBlock.includes('subscriptions'), '老用户判断不许拿订阅数当依据（订阅数会变，口径就翻）');
+  const resolveBlock = mainJs.slice(
+    mainJs.indexOf('function netResolveAutoIdentity'),
+    mainJs.indexOf('function netIdentityPayload'),
+  );
+  assert.ok(resolveBlock.includes("'netIdentityResolved'"), '自动解析结果应落盘到 netIdentityResolved');
 });
 
 check('21. 三处接线齐全：preload 四接口、设置页选择器 + data-net-term、进分区回读', () => {
@@ -344,15 +353,20 @@ check('25. 渲染层现有文案全量换词后零残留（含空态、状态条
   assert.deepStrictEqual(leftover.slice(0, 5), [], `还有 ${leftover.length} 条换词后残留旧术语`);
 });
 
-check('26. 动态文案接上线：preload 同步接口 + 设置页扫描 + Observer 跳日志区 + custom 摘掉', () => {
+check('26. 动态文案接上线：preload 同步接口 + 设置页扫描 + Observer 跳日志区 + custom 摘掉并还原', () => {
   assert.ok(/netShellizeText: \(text, identity\) => netTermsCore\.shellize\(text, identity\)/.test(preloadJs), 'preload 缺 netShellizeText');
   assert.ok(/function sweepNetShellText/.test(settingsJs), '设置页缺动态文案扫描');
   assert.ok(/function watchNetShellText/.test(settingsJs), '设置页缺 Observer 安装');
   assert.ok(/watchNetShellText\(payload\.identity\)/.test(settingsJs), '铺身份时没接动态文案扫描');
   const block = settingsJs.slice(settingsJs.indexOf('function sweepNetShellText'), settingsJs.indexOf('function applyNetIdentity'));
   assert.ok(/\.log-box, pre, code/.test(block), '日志区必须跳过：那是内核原始输出');
+  assert.ok(/\[data-net-keep\]/.test(block), '用户数据与事实陈述要跳过（data-net-keep）');
   assert.ok(/netShellObserver\.disconnect\(\)/.test(block), '切回 custom 或重装时必须先摘掉旧 Observer');
-  assert.ok(/!\[.campus., .enterprise.\]\.includes\(identity\)\) return/.test(block), '只有校园/单位两档才挂 Observer');
+  assert.ok(/\['campus', 'enterprise'\]\.includes\(identity\)/.test(block), '只有校园/单位两档才挂 Observer');
+  // 审计 F2：切回 custom 必须把改过的字还原，而不是只摘 Observer 就走
+  assert.ok(/function restoreNetShellText/.test(settingsJs), '缺还原函数：切回自定义服务端时动态文案会留在外壳词上');
+  assert.ok(/restoreNetShellText\(\)/.test(block), '切回 custom 的分支没有调用还原');
+  assert.ok(/netShellTextOriginals\.set\(/.test(block) && /netShellAttrOriginals\.set\(/.test(block), '扫描时要记下原文，否则无从还原');
 });
 
 check('27. 外壳（地址栏/状态条/提示）也换词：主进程改完推事件、外壳收到重扫、日志区仍跳过', () => {
@@ -369,17 +383,30 @@ check('27. 外壳（地址栏/状态条/提示）也换词：主进程改完推�
   assert.ok(!/resolveIdentity/.test(rendererJs), '外壳不该自己推断接入方式');
 });
 
-check('28. 关于页保留事实陈述：通用网络代理工具 + mihomo GPL-3.0，换词扫描豁免 data-net-keep', () => {
+check('28. 关于页与身份条都保留事实陈述：通用网络代理工具 + mihomo GPL-3.0，且都挂换词豁免', () => {
+  // 关于页：按「声明原文」定位它所在的那一段，再检查这一段确实标了豁免。
+  // 不按「第一个 data-net-keep」找——那样一旦别处先出现标记（比如身份条），断言就会错位。
   const aboutAt = settingsHtml.indexOf('data-sec="about"');
   assert.ok(aboutAt > 0, '设置页找不到关于分区');
   const about = settingsHtml.slice(aboutAt);
-  const keepAt = about.indexOf('data-net-keep');
-  assert.ok(keepAt > 0, '关于页的事实陈述必须标 data-net-keep，否则会被换词扫掉');
-  const keep = about.slice(keepAt, keepAt + 700);
-  assert.ok(/通用网络代理工具/.test(keep), '关于页要保留「本产品是通用网络代理工具」的事实陈述（清单 §7.3）');
-  assert.ok(/mihomo/.test(keep) && /GPL-3\.0/.test(keep), '关于页要有 mihomo 的 GPL-3.0 声明');
+  const stmtAt = about.indexOf('通用网络代理工具');
+  assert.ok(stmtAt > 0, '关于页丢了「通用网络代理工具」这句事实陈述（清单 §7.3）');
+  const stmtBlock = about.slice(Math.max(0, stmtAt - 500), stmtAt + 300);
+  assert.ok(/data-net-keep/.test(stmtBlock), '关于页的事实陈述必须标 data-net-keep，否则会被换词扫掉');
+  assert.ok(/mihomo/.test(about) && /GPL-3\.0/.test(about), '关于页要有 mihomo 的 GPL-3.0 声明');
   assert.ok(/data-net-keep/.test(settingsJs), '设置页扫描要跳过 data-net-keep');
   assert.ok(/\[data-net-keep\]/.test(rendererJs), '外壳扫描要跳过 data-net-keep');
+
+  // 身份条里是同一句声明的第二份（审计 F1：以前它没标豁免，80ms 后被 Observer 扫成外壳词）
+  const barAt = settingsHtml.indexOf('id="net-identity-bar"');
+  assert.ok(barAt > 0, '设置页找不到身份条');
+  // 身份条很短，按固定长度切；不能用「下一个 data-sec="network"」——那个串在导航里先出现过一次
+  const bar = settingsHtml.slice(barAt - 120, barAt + 1200);
+  assert.ok(/id="net-identity-statement"[^>]*data-net-keep/.test(bar), '身份条的事实陈述必须单独一个元素并标 data-net-keep');
+  assert.ok(/id="net-identity-scope"/.test(bar), '范围说明要独立成元素，才能只换它、不换事实陈述');
+  // 声明内容本身就是"通用网络代理工具"，换词表一定会改它 —— 用这条断言把风险钉住在词表层
+  assert.notStrictEqual(netTerms.shellize(netTerms.SHELL_STATEMENT, 'campus'), netTerms.SHELL_STATEMENT,
+    '换词表已经碰不动声明了，说明这条豁免断言失去了意义，请重新确认');
   // 清单验收 12：全隐私开关的可访问标签与可见文案同源；原生文案里本来写着「代理」，换词必须连 aria-label / title 一起换
   const privacyBtn = indexHtml.slice(indexHtml.indexOf('id="mode-toggle"') - 200, indexHtml.indexOf('id="mode-toggle"') + 700);
   assert.ok(/aria-label="全隐私模式开关/.test(privacyBtn), '隐私开关的 aria-label 不见了');
