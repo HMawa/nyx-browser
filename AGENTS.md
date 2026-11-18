@@ -33,7 +33,7 @@
 - 运行时：Electron 45.3.2 / Chromium 156.0.8078.100 / Node 24.22.2；Windows。
 - 运行时依赖只有两个：`@modelcontextprotocol/sdk`、`zod`（MCP server 用）。
 - 回归基线：`npm run verify` = **1151 项 / 49 个脚本**（= `scripts/verify-all.js` 里 49 条 `items` 标签之和，实测也是 1151；2026-11-18 接线收口轮实测 **49 通过 / 0 失败 / 0 跳过 / 801 秒**；同一套脚本在轻载时测得 545 秒——**耗时随机器负载波动，别拿它当版本特征，项数与通过数才是**；上一版 1120 项 / 48 脚本 / 696 秒是 1.18.2 的基线）。**逐脚本项数以 `scripts/verify-all.js` 的 `items` 为准**——以前这里抄过一份长枚举，结果和实际差了 18 项（发版门禁 48→52、代码签名 35→38 没同步），现在只认那个文件；历史版本的项数写在各自的 `docs/Nyx-<版本>-发版记录.md` 与 `docs/CHANGELOG.md` 里。
-- 发布状态：1.17.11–1.17.20 从未发布；1.18.0 被审计打回（判定写错 + 报告带真实指纹），1.18.1 是修正版，1.18.2 补它暴露的三处真实不一致；`v1.18.2` tag → `dfc311d` 里旧文档仍含 B1 残留，main 已补漏并打了 `v1.18.2-post`。**1.19.0 已 tag/push**（`v1.19.0` → `7b9ff62`，main 同点），本机已装到 `%LOCALAPPDATA%\Programs\Nyx`。
+- 发布状态：1.17.11–1.17.20 从未发布；1.18.0 被审计打回（判定写错 + 报告带真实指纹），1.18.1 是修正版，1.18.2 补它暴露的三处真实不一致；`v1.18.2` tag → `dfc311d` 里旧文档仍含 B1 残留，main 已补漏并打了 `v1.18.2-post`。**1.19.0 已 tag/push**（`v1.19.0` → `7b9ff62` 这个发版提交；main 之后只有文档提交，不移动 tag），本机已装到 `%LOCALAPPDATA%\Programs\Nyx`。
 - 安装器 e2e（不进 `npm run verify`）：`scripts/test-installer-e2e.js` 真机跑 全新 → 降级 → 升级 → 修复 → 保留数据卸载 → 完全卸载，**56 项断言**；`--cross` 跨两版模式（旧版装→seed 旧格式数据→覆盖装新版→两次启动）**57 项断言（56 通过 / 1 明确跳过）**；归档基线放 `dist\legacy`（当前 1.16.0 / 1.17.1 / 1.17.2，由 `npm run sync:legacy` 轮换维护），`--cross` 不带 `--from` 会自动选最老那份；`make-release.js --with-installer-test` 已把它接进发版门禁（默认不跑，但摘要必打印原因与命令）。
 - 更新源：`%APPDATA%\Nyx\updates`（`latest.json` + 安装包 + `.blocks.json` + `extensions.json`）；留档 `%APPDATA%\Nyx\updates-archive\<版本>`。
 - 安装器：NSIS，`perMachine:false`（装到用户目录），自定义脚本 `build/installer.nsh`、打包后钩子 `build/after-pack.js`。
@@ -198,7 +198,7 @@
 - 五个新坑：① 设置页 `init()` 里 `await` 一个永不返回的 IPC（`nyx:hardware:status` 的 PowerShell 探测）会让后续初始化**静默不发生**——必须逐项超时兜住；② `.sec-scroll` 是纵向 flex，卡片铺开会被压扁（量出来高度 0）；③ `edit` 删整段 HTML 时少删一个 `</div>` 会让下一个分区成为子节点（探针打出 `displayParent` 才发现）；④ 新主题的浅灰文字必须先算对比度（cream/sea 的 `--text-faint` 各红了 1 次）；⑤ `verify-all` 里的环境性假失败只能靠"放大等待 + 一次重试"处理，**绝不能改断言**。
 - 待办（等用户决定）：是否发 1.17.9；`nyx:hardware:status` 在本机永不返回（已被兜住，但值得单独治）；`AGENT_STOP_SHORTCUT_FAILED`（`CommandOrControl+Alt+X` 被占用，只在诊断里）是否做成界面可见提示；字号档位（清单 D3 里明确"属独立改造"）尚未做。
 
-### 9.17 1.19.0 接入外壳（校园 / 单位网络接入，2026-11-18，**代码完成，未发版**）
+### 9.17 1.19.0 接入外壳（校园 / 单位网络接入，2026-11-18，**已发布 `7b9ff62` / tag `v1.19.0`**）
 
 - 来源：外部清单《Nyx浏览器-VPN接入外壳改造实现清单》（不在本仓库内），用户 m00517 要求按单执行。只改呈现 / 入口 / 引导 / 文案四层，`proxy-service` / `proxy-kernel` / `kernel-bridge` / `proxy-config` / `proxy-filter` 一行未动。
 - 提交：`d637d18`（`src/core/net-terms.js` 28 词条 + `netIdentity` 偏好 + 两个 IPC + preload 四接口 + 身份条 + 三段式骨架 + `verify-net-terms.js` 21 项）、`f5349dd`（`shellize()` + 有序替换表 + 设置页 TreeWalker/Observer 动态换词）、`ada6e1d`（首装引导第 2 步「接入方式」，`verify-onboard` 14 / e2e 8）、`c046777`（外壳换词 + 关于页「通用网络代理工具 + mihomo GPL-3.0」`data-net-keep` 豁免）、`5bf399a`（`docs/Nyx-1.19.0-接入外壳.md`：能力对照表 + 清单 20 项逐条判定 + 四个问题答复）。
