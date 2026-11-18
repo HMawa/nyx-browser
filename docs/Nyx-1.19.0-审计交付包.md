@@ -49,8 +49,8 @@
 
 | 项 | 值 |
 | --- | --- |
-| HEAD | `e91a502db5c2ec924797aa44f8be17d0309a29ca`（`e91a502`） |
-| 远端 `refs/heads/main` | 同 `e91a502` |
+| HEAD | 本文件是 **1.19.0 交付当时的快照**；当前 HEAD 用 `git log -1 --format=%H` 现取（发布后审计的处置见 §11） |
+| 远端 `refs/heads/main` | 交付当时 = `b79617c`（本文档的提交），此后只有文档提交 |
 | tag `v1.19.0` | → `7b9ff62841f59037f6dae12f84d73c9694750a3a`（发版提交） |
 | tag `v1.18.2-post` | → `d87d5c1441a0e62dfbc9df8a4c2346880755fb59` |
 | tag `v1.18.2` | → `dfc311d…`，**没有移动过**（理由见 `docs/Nyx-1.18.2-脱敏补正.md`） |
@@ -136,7 +136,7 @@ d637d18 feat(net): 接入身份与术语表单一真源，外壳加身份条与�
 
 ## 7. 建议的审计路线（八步）
 
-1. `git checkout e91a502`，确认 `git status` 干净；
+1. `git checkout v1.19.0`（**不要用 HEAD**：HEAD 之后还有文档提交与 1.19.1 的修复），确认 `git status` 干净；
 2. `node -e "console.log(require('./package.json').version)"` → 1.19.0；
 3. `Get-FileHash dist\Nyx-Setup-1.19.0.exe -Algorithm SHA256` → 与 §1 的 sha256 比对；
 4. `node scripts/verify-update-signature.js` → 清单签名链通；
@@ -182,3 +182,27 @@ d637d18 feat(net): 接入身份与术语表单一真源，外壳加身份条与�
 | 未动 | `proxy-service` / `proxy-kernel` / `kernel-bridge` / `proxy-config` / `proxy-filter` 一行未改 |
 | 回归 | 48 脚本 / 1120 项 → **49 脚本 / 1151 项** |
 | 产物 | 127,323,616 → **127,336,256** 字节 |
+
+---
+
+## 11. 发布后审计与 1.19.1 的处置
+
+**结论：1.19.0 不放行（P1×2），修正版是 1.19.1。** 审计报告在 `temp/audit/reports/2026-11-19-1.19.0-接入外壳审计.md`（不入库），这里只记处置结果。
+
+| 编号 | 级别 | 问题 | 处置 | 证据 |
+| --- | --- | --- | --- | --- |
+| F1 | P1 | campus 档下合规声明被换词改写（「通用网络**代理**工具」→「通用网络**接入通道**工具」） | 身份条拆成两段：`#net-identity-scope`（范围说明，允许换词）+ `#net-identity-statement`（事实陈述，加 `data-net-keep="1"` 跳过换词） | `481ed56`；界面回归 4 条端到端断言 |
+| F2 | P1 | 切回 custom 后静态标签回旧词，但订阅空态与状态条仍留外壳词 | `settings.js` 记 `netShellTextOriginals` / `netShellAttrOriginals`，新增 `restoreNetShellText()`，非 campus/enterprise 先逐字还原再停扫 | `481ed56` |
+| F3 | P2 | 「跟随默认」可点但保存必失败（IPC 白名单里没有 `auto`） | `nyx:net:identity-set` 允许 `[IDENTITY_AUTO].concat(IDENTITIES)`，错误文案同步 | `c412944` |
+| F4 | P2 | `auto` 用「订阅条数」判老用户，加/删订阅会翻口径 | 删 `netHasExistingConfig()`；新增 `netIsUpgradeUser()`（读 `onboarding.json` 的 `pending`，无标记才看本地数据）与 `netResolveAutoIdentity()`（一次性落盘 `netIdentityResolved`，此后固定） | `c412944` |
+| F5 | P3 | 全局 `split/join` 换词会碰用户数据与错误原文 | 订阅备注名、订阅地址、`lastError`、状态条打 `data-net-keep` | `481ed56` |
+| F6 | P3 | 测试盲区：没断言 custom 还原、没覆盖空态 | 界面回归 139 → **143**（新增 4 条：声明原样、空态还原、可保存、回切生效） | `6522590` |
+| F7 | P3 | 本文件 §3 的 HEAD 写的是 `e91a502`，与实际 `b79617c` 不一致 | 已改成「快照 + 现取 HEAD」，并把 §7 第一步改 `git checkout v1.19.0` | 本次提交 |
+
+**tag 没有移动。** `v1.19.0` 仍指向 `7b9ff62`，理由是：审计侧要求「给出 1.19.1 修复证据链」，而挪 tag 会让人对不上审计报告里的对象；修正版本身有 `v1.19.1`。1.19.1 的验收与边界见 `docs/Nyx-1.19.1-发版记录.md`。
+
+三条与审计方对齐的口径：
+
+1. **1.19.0 的包和更新源条目留着不动**（`Nyx-Setup-1.19.0.exe` 仍在留档里），这样审计可以复跑 §7 的八步验证；用户升级由更新源指向 1.19.1 完成。
+2. **全量回归的数**：1.19.0 = 1151 项 / 49 脚本；1.19.1 = **1155 项 / 49 脚本**（多出 4 条就是 F6 补的断言）。两次实测的失败项都是「锁屏时系统剪贴板不可用」，断言一个字没改。
+3. **本轮审计侧自己跑过什么、没跑什么**：审计独立跑了 `verify-net-terms` 与部分端到端，未独立跑全量与安装器 e2e；1.19.1 的 e2e 与安装保留验证 11/11 是主开发本机跑通的，原始输出在发版记录里。

@@ -27,13 +27,13 @@
 
 ---
 
-## 2. 固定事实（2026-11-18 基线）
+## 2. 固定事实（2026-11-19 基线）
 
-- 版本：`package.json` = **1.19.0**；**已发布**的产物 `dist/Nyx-Setup-1.19.0.exe`（Electron 45.3.2，127,336,256 字节，sha256 `7ec6204bbb5304fc55f057503c91425199fd1b820a3ed0822d2e9af136966777`，签名 `CN=Nyx Self-Signed, O=Nyx contributors, OU=local build`，指纹 `256F208A5D31782DAF9DA041CF1D7A2A382931D0`）；更新源 `latest.json` 已指向它（带 Ed25519 签名，`keyId dc2cec223e6ea7c7`）。留档保留 1.19.0 / 1.18.2 / 1.18.1；`dist-sign` 里还留着旧版本，**验签按版本号挑包**（`scripts/lib/pick-artifact.js`），不会再验到旧包。上一版 1.18.2（127,323,616 / `0ceed9ba…`）的 tag `v1.18.2` → `dfc311d` 里仍含 B1 残留，main 已补漏（`docs/Nyx-1.18.2-脱敏补正.md`；补正后的树打了 `v1.18.2-post`）。
+- 版本：`package.json` = **1.19.1**；**已发布**的产物 `dist/Nyx-Setup-1.19.1.exe`（Electron 45.3.2，127,338,776 字节，sha256 `ac301054342724a4e9338d6bd88002c452e9972daad8f70ee8bb6dea2a12383e`，签名 `CN=Nyx Self-Signed, O=Nyx contributors, OU=local build`，指纹 `256F208A5D31782DAF9DA041CF1D7A2A382931D0`）；更新源 `latest.json` 已指向它（带 Ed25519 签名，`keyId dc2cec223e6ea7c7`）。留档保留 1.19.1 / 1.19.0 / 1.18.2；`dist-sign` 里还留着旧版本，**验签按版本号挑包**（`scripts/lib/pick-artifact.js`），不会再验到旧包。上一版 1.19.0（127,336,256 / `7ec6204b…`）、再上一版 1.18.2（127,323,616 / `0ceed9ba…`）的 tag `v1.18.2` → `dfc311d` 里仍含 B1 残留，main 已补漏（`docs/Nyx-1.18.2-脱敏补正.md`；补正后的树打了 `v1.18.2-post`）。
 - 运行时：Electron 45.3.2 / Chromium 156.0.8078.100 / Node 24.22.2；Windows。
 - 运行时依赖只有两个：`@modelcontextprotocol/sdk`、`zod`（MCP server 用）。
-- 回归基线：`npm run verify` = **1151 项 / 49 个脚本**（= `scripts/verify-all.js` 里 49 条 `items` 标签之和，实测也是 1151；2026-11-18 接线收口轮实测 **49 通过 / 0 失败 / 0 跳过 / 801 秒**；同一套脚本在轻载时测得 545 秒——**耗时随机器负载波动，别拿它当版本特征，项数与通过数才是**；上一版 1120 项 / 48 脚本 / 696 秒是 1.18.2 的基线）。**逐脚本项数以 `scripts/verify-all.js` 的 `items` 为准**——以前这里抄过一份长枚举，结果和实际差了 18 项（发版门禁 48→52、代码签名 35→38 没同步），现在只认那个文件；历史版本的项数写在各自的 `docs/Nyx-<版本>-发版记录.md` 与 `docs/CHANGELOG.md` 里。
-- 发布状态：1.17.11–1.17.20 从未发布；1.18.0 被审计打回（判定写错 + 报告带真实指纹），1.18.1 是修正版，1.18.2 补它暴露的三处真实不一致；`v1.18.2` tag → `dfc311d` 里旧文档仍含 B1 残留，main 已补漏并打了 `v1.18.2-post`。**1.19.0 已 tag/push**（`v1.19.0` → `7b9ff62` 这个发版提交；main 之后只有文档提交，不移动 tag），本机已装到 `%LOCALAPPDATA%\Programs\Nyx`。
+- 回归基线：`npm run verify` = **1155 项 / 49 个脚本**（= `scripts/verify-all.js` 里 49 条 `items` 标签之和；2026-11-19 1.19.1 轮实测 **48 通过 / 1 失败 / 0 跳过 / 1155 项 / 745 秒**，唯一失败是锁屏导致系统剪贴板不可用、非代码缺陷；解锁后单跑界面脚本为 **143/143**）。**逐脚本项数以 `scripts/verify-all.js` 的 `items` 为准**——以前这里抄过一份长枚举，结果和实际差了 18 项（发版门禁 48→52、代码签名 35→38 没同步），现在只认那个文件；历史版本的项数写在各自的 `docs/Nyx-<版本>-发版记录.md` 与 `docs/CHANGELOG.md` 里。**耗时随机器负载波动（545 / 745 / 801 秒是同一套脚本），别拿它当版本特征，项数与通过数才是。**
+- 发布状态：1.17.11–1.17.20 从未发布；1.18.0 被审计打回（判定写错 + 报告带真实指纹），1.18.1 是修正版，1.18.2 补它暴露的三处真实不一致；`v1.18.2` tag → `dfc311d` 里旧文档仍含 B1 残留，main 已补漏并打了 `v1.18.2-post`。1.19.0 被审计打回（P1×2），**1.19.1 是修正版（`v1.19.1`）**；`v1.19.0` → `7b9ff62`。本机已装到 `%LOCALAPPDATA%\Programs\Nyx`（FileVersion 1.19.1）。
 - 安装器 e2e（不进 `npm run verify`）：`scripts/test-installer-e2e.js` 真机跑 全新 → 降级 → 升级 → 修复 → 保留数据卸载 → 完全卸载，**56 项断言**；`--cross` 跨两版模式（旧版装→seed 旧格式数据→覆盖装新版→两次启动）**57 项断言（56 通过 / 1 明确跳过）**；归档基线放 `dist\legacy`（当前 1.16.0 / 1.17.1 / 1.17.2，由 `npm run sync:legacy` 轮换维护），`--cross` 不带 `--from` 会自动选最老那份；`make-release.js --with-installer-test` 已把它接进发版门禁（默认不跑，但摘要必打印原因与命令）。
 - 更新源：`%APPDATA%\Nyx\updates`（`latest.json` + 安装包 + `.blocks.json` + `extensions.json`）；留档 `%APPDATA%\Nyx\updates-archive\<版本>`。
 - 安装器：NSIS，`perMachine:false`（装到用户目录），自定义脚本 `build/installer.nsh`、打包后钩子 `build/after-pack.js`。
@@ -206,6 +206,14 @@
 - 本轮真回退（已修）：外壳换词把「更多」菜单的「代理中心」改成「接入通道」，`verify-ui-polish.js` 的 B1 断言写死 `/代理中心/` 报红；修法是 `#more-proxy` 加 `data-net-section="network"`、断言改判「这一项指向 network 分区」（说法随身份变，按字面判早晚还会红，不是放宽）。
 - 诚实边界：主进程日志与原生通知未换词；内核日志一字不改；custom 档顶部多一条回滚用身份选择器；订阅导入 / 测速 / 分流 / 出口**没有逐档真机复测**（逻辑未动，属推断）；13 寸首屏截图未拍。
 - **分工（2026-11-18 用户定）**：规划线只做分析、规划、拆解与验收口径，**产出 md，不改代码**；实现由主开发按其交付的 md 进行。
+
+### 9.18 1.19.1 审计修正（2026-11-19，**已发布 `v1.19.1`**）
+
+- 来源：`temp/audit/reports/2026-11-19-1.19.0-接入外壳审计.md`（结论「不放行，P1×2」）。不新增功能，只修缺陷：F1 合规声明被换词改写（`#net-identity-statement` 加 `data-net-keep="1"`，身份条拆成「范围说明 + 事实陈述」两段）、F2 切回 custom 不逐字还原（`settings.js` 的 `netShellTextOriginals`/`netShellAttrOriginals` + `restoreNetShellText()`）、F3 「跟随默认」必然保存失败（IPC 允许 `auto`）、F4 老用户判据看订阅条数（改 `netIsUpgradeUser()` 看 `onboarding.json` 的 `pending` + `netResolveAutoIdentity()` 落盘 `netIdentityResolved`）、F5 换词碰用户数据（订阅备注名/地址/失败原文打 `data-net-keep`）、F6 测试盲区（界面回归 139 → **143**）。
+- 提交 `481ed56`（F1/F2/F5）、`c412944`（F3/F4）、`6522590`（断言）、文档提交与 tag 见 `git log`。
+- **本轮最值钱的教训**：端到端断言**不要直接调 IPC**——设置页的状态只由 `select` 的 `change` 驱动，绕过控件调 `window.nyx.setNetIdentity()` 只会改主进程，页面不重铺，读到的仍是旧态（第一版因此误判「换词没生效」）。要像用户那样改控件。
+- 另一条：下载断言曾假失败——字节已落盘但 `DownloadItem.state` 还在 `progressing` 的收尾窗口；改成等状态落定，不是把 `completed` 放宽。
+- 全量实测 48/49 通过，唯一红是锁屏导致系统剪贴板不可用（`Set-Clipboard` 同刻也失败），断言未改。
 
 ### 9.16 1.17.10 批次（2026-11-15 夜，设置页重排 + 「更多」菜单遮挡，**代码完成，未发版**）
 
