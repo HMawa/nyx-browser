@@ -440,7 +440,9 @@ check(
 );
 check(
   '自检不许把观察值当真实值：truth 由主进程单独取，页面只给 observed',
-  /privacyCheck\.judgeItem\(id, observedValue, truth\)/.test(main) &&
+  // 判定调用要带上 ctx（模式决定"不一致"的含义），但 observed / truth 仍是两个独立实参——
+  // 这条断言守的是"别拿 observed 顶替 truth"，不是参数个数。
+  /privacyCheck\.judgeItem\(id, observedValue, truth(?:, ctx)?\)/.test(main) &&
     privacyCheckModule.judgeItem('A5', { cores: 8 }, null).level === 'unknown',
 );
 check(
@@ -491,6 +493,35 @@ check(
   /第一个文档的补丁是/.test(main) &&
     /applySurfaceToCurrentDocument/.test(main) &&
     main.indexOf('指纹面下发') > main.indexOf('function applySurfaceToCurrentDocument'),
+);
+
+/* ---- 1.18.2 自检暴露出来的三处真实不一致 ---- */
+const tabsSource = read('src/core/tabs.js');
+const hardeningSource = read('src/core/privacy-hardening.js');
+
+check(
+  '应用页也受 WebRTC 策略约束（隐私模式第一屏就是起始页，不设策略会吐内网地址）',
+  /createAppPage\(options\)/.test(tabsSource) &&
+    /wc\.setWebRTCIPHandlingPolicy\(this\.getWebrtcPolicy\(this\.getMode\(\)\)\)/.test(tabsSource),
+);
+
+check(
+  '像素比取系统缩放（真实浏览器 dpr 恒等于系统缩放，改成 1 反而是破绽）',
+  /function currentScreenScaleFactor\(\)/.test(main) &&
+    /devicePixelRatio:\s*currentScreenScaleFactor\(\)/.test(main) &&
+    /screen\.getPrimaryDisplay\(\)/.test(main),
+);
+
+check(
+  '出口时区未知时，时区跟语言取同一地区（否则「语言 en-US + 时区上海」这种组合不存在）',
+  /function timezoneForLanguage\(language\)/.test(hardeningSource) &&
+    /timezoneForLanguage\(resolvedLanguage\)/.test(hardeningSource) &&
+    /const LANGUAGE_TIMEZONE = \{/.test(hardeningSource),
+);
+
+check(
+  '时区偏移的符号按 getTimezoneOffset 口径（纽约 +300、东京 -540，写反了会与时区名矛盾）',
+  /return Math\.round\(\(local - asUTC\) \/ 60000\);/.test(hardeningSource),
 );
 
 console.log('');

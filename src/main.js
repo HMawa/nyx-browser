@@ -1824,13 +1824,33 @@ async function applyPrivacyHardening() {
  * 任何一层失败都必须让用户看见（红线 2）：不静默降级成"半加固"，
  * 并在标签上记 `privacyIncomplete` 供后续排障。
  */
+/**
+ * 当前主显示器的缩放比。
+ * 隐私模式要把 devicePixelRatio 改成画像里的值，但"改成多少"不能拍脑袋：
+ * 真实浏览器的 devicePixelRatio 恒等于系统缩放，改成别的值就是一处破绽。
+ */
+function currentScreenScaleFactor() {
+  try {
+    const display = screen.getPrimaryDisplay();
+    const factor = display && Number(display.scaleFactor);
+    return Number.isFinite(factor) && factor > 0 ? factor : 1;
+  } catch (error) {
+    return 1;
+  }
+}
+
 async function attachPrivacySurface(tab) {
   if (!tab || !tab.view) return { ok: false, error: '标签还没准备好' };
   // 这一行是给排障用的：指纹面到底有没有被叫起来、当时是什么模式、哪个标签
   console.log(`[Nyx] 指纹面装配开始｜模式=${sessions.getMode()}｜标签=${tab && tab.id}`);
   if (!shouldAttachSurface(sessions.getMode())) return { ok: true, skipped: true };
 
-  const profile = runtime.hardening ? runtime.hardening.profile : null;
+  const baseProfile = runtime.hardening ? runtime.hardening.profile : null;
+  // 像素比要跟系统缩放一致：真实浏览器里 devicePixelRatio 恒等于系统缩放，
+  // 只在 JS 里把它改成 1、而系统缩放是 1.5，反而是"只改了一半"的破绽。
+  const profile = baseProfile
+    ? { ...baseProfile, devicePixelRatio: currentScreenScaleFactor() }
+    : null;
   const wc = tab.view.webContents;
   const fail = (message) => {
     tab.privacyIncomplete = true;
@@ -5119,7 +5139,10 @@ function registerPrivacyIpc() {
     const startedAt = Date.now();
     const notes = [];
     const rows = [];
-    const push = (id, observedValue, truth) => rows.push(privacyCheck.judgeItem(id, observedValue, truth));
+    // `ctx.mode` 传下去：同样的差异在两种模式下含义相反（普通模式下不一致 = 泄漏，
+    // 隐私模式下不一致 = 已伪装），判定函数需要知道自己在哪个模式里。
+    const ctx = { mode: sessions.getMode() === 'private' ? 'private' : 'normal' };
+    const push = (id, observedValue, truth) => rows.push(privacyCheck.judgeItem(id, observedValue, truth, ctx));
 
     const tab = runtime.tabManager ? runtime.tabManager.active : null;
     const webContents = tab && tab.view ? tab.view.webContents : null;

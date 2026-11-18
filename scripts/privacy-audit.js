@@ -25,9 +25,12 @@ const { spawn } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..');
 const OUT_DIR = path.join(ROOT, 'docs', 'privacy-audit');
+/** 原始（未脱敏）存证只落在这里：temp 不入库，`--raw` 才写。 */
+const RAW_DIR = path.join(ROOT, 'temp', 'privacy-audit');
 const WAIT_MS = 90_000;
 
 const { pickFreePort } = require(path.join(__dirname, 'lib', 'free-port.js'));
+const privacyCheck = require(path.join(ROOT, 'src', 'core', 'privacy-check.js'));
 
 function hasFlag(name) {
   return process.argv.includes(name);
@@ -238,12 +241,17 @@ function buildMarkdown(result, version) {
   lines.push('');
   lines.push('## 逐项结果');
   lines.push('');
+  lines.push('> 这份存证随仓库公开，所以「真实值」一列默认隐藏；泄漏/可疑项的观察值本身就等于真实值，也一并隐藏。');
+  lines.push('> 需要排障请在本地跑 `node scripts/privacy-audit.js --raw`，原始 JSON 只写到 `temp/privacy-audit/`（不入库），**不要分享**。');
+  lines.push('');
   lines.push('| 项 | 结果 | 观察值 | 真实值 | 说明 |');
   lines.push('| --- | --- | --- | --- | --- |');
+  const secrets = secretsOf(result.rows);
   for (const row of result.rows || []) {
-    const observed = stringifyValue(row.observed);
-    const truth = stringifyValue(row.truth);
-    lines.push(`| ${row.id} ${row.title || ''} | ${row.level} | ${observed} | ${truth} | ${String(row.reason || '').replace(/\|/g, '\\|')} |`);
+    const risky = row.level === 'leak' || row.level === 'suspect';
+    const observed = risky ? '—（与真实值相同，已隐藏）' : stringifyValue(row.observed);
+    const reason = scrubText(String(row.reason || ''), secrets).replace(/\|/g, '\\|');
+    lines.push(`| ${row.id} ${row.title || ''} | ${row.level} | ${observed} | —（已隐藏） | ${reason} |`);
   }
   lines.push('');
   lines.push(`## 与上一版（${previous ? previous.version : '无'}）的差异`);
@@ -278,6 +286,43 @@ function stringifyValue(value) {
   return String(value);
 }
 
+/**
+ * 收集「真实值」里的字符串，用于把说明文字里带到的真值打掉。
+ *
+ * 为什么不只隐藏表格那一列：判定理由里会写「页面读到的核数 24 与本机真实核数一致」这样的句子，
+ * 只藏列不藏句子，等于把真值换个地方公开。
+ */
+function secretsOf(rows) {
+  const found = new Set();
+  const add = (value) => {
+    const text = value === null || value === undefined ? '' : String(value).trim();
+    if (!text) return;
+    if (/^\d+$/.test(text) ? text.length >= 2 : text.length >= 3) found.add(text);
+  };
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!row) continue;
+    const truth = row.truth;
+    if (truth === null || truth === undefined) continue;
+    if (Array.isArray(truth)) truth.forEach(add);
+    else if (typeof truth === 'object') Object.keys(truth).forEach((key) => add(truth[key]));
+    else add(truth);
+  }
+  return Array.from(found);
+}
+
+function scrubText(text, secrets) {
+  let out = String(text);
+  for (const secret of secrets) {
+    if (!secret) continue;
+    if (/^\d+$/.test(secret)) {
+      out = out.replace(new RegExp(`(^|[^\\d.])${secret}(?![\\d.])`, 'g'), (whole, before) => `${before}—`);
+    } else if (out.indexOf(secret) >= 0) {
+      out = out.split(secret).join('—');
+    }
+  }
+  return out;
+}
+
 async function main() {
   const version = versionOf();
 
@@ -289,8 +334,16 @@ async function main() {
       return;
     }
     const text = fs.readFileSync(file, 'utf8');
-    const ok = text.includes('## 与上一版') && text.includes('诚实边界');
-    console.log(ok ? `✔ 本版存证在位：docs/privacy-audit/${version}.md（${text.length} 字节）` : '✘ 存证内容不完整（缺少差异段或诚实边界）');
+    const ok =
+      text.includes('## 与上一版') &&
+      text.includes('诚实边界') &&
+      text.includes('已隐藏') &&
+      !/Electron\/\d/.test(text);
+    console.log(
+      ok
+        ? `✔ 本版存证在位且已脱敏：docs/privacy-audit/${version}.md（${text.length} 字节）`
+        : '✘ 存证内容不完整或没脱敏（需要差异段、诚实边界，且不许出现真实 UA 串）',
+    );
     if (!ok) process.exitCode = 1;
     return;
   }
@@ -306,7 +359,26 @@ async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   const file = path.join(OUT_DIR, `${version}.md`);
   fs.writeFileSync(file, markdown, 'utf8');
-  console.log(`[隐私自检存证] 已写入 docs/privacy-audit/${version}.md（${markdown.length} 字节）`);
+  console.log(`[隐私自检存证] 已写入 docs/privacy-audit/${version}.md（${markdown.length} 字节，已脱敏）`);
+
+  if (hasFlag('--raw')) {
+    // 原始版只进 temp（不入库）：排障要原始值，但原始值不许跟着仓库走。
+    try {
+      fs.mkdirSync(RAW_DIR, { recursive: true });
+      const rawFile = path.join(RAW_DIR, `${version}.json`);
+      const raw = {
+        at: new Date().toISOString(),
+        mode: result.devAppMode || 'private',
+        elapsedMs: result.elapsedMs,
+        notes: result.notes || [],
+        reportJson: privacyCheck.buildReportJson(result.rows || [], result.meta, { redact: false }),
+      };
+      fs.writeFileSync(rawFile, JSON.stringify(raw, null, 2), 'utf8');
+      console.log(`[隐私自检存证] 原始版（含真实值，勿分享）：temp/privacy-audit/${version}.json`);
+    } catch (error) {
+      console.warn(`[隐私自检存证] 原始版没写成：${error.message}（不影响脱敏存证）`);
+    }
+  }
   console.log(`[隐私自检存证] 结论：${result.summary ? result.summary.headline : ''}｜用时 ${result.elapsedMs} 毫秒`);
 }
 

@@ -187,8 +187,110 @@ ok('报告 JSON 字段固定，便于随版本存档比对', () => {
   const json = check.buildReportJson(rows, { version: '1.18.0', electron: '45.3.2', chromium: '156.0.8078.100', at: 'T', identity: '普通', kernelRunning: false });
   assert.strictEqual(json.kind, 'nyx-privacy-audit');
   const keys = Object.keys(json).sort().join(',');
-  assert.strictEqual(keys, 'at,chromium,counts,electron,groups,headline,identity,kernelRunning,kind,version,worstLevel');
+  assert.strictEqual(keys, 'at,chromium,counts,electron,groups,headline,identity,kernelRunning,kind,redacted,version,worstLevel');
   assert.strictEqual(json.groups.length, check.GROUPS.length, '四组都要在');
+  assert.strictEqual(json.redacted, true, '默认必须脱敏');
+});
+
+/* ---------- 19–32：审计打回的五条（A2/A3/A4/A6 判定 + 报告脱敏） ---------- */
+
+ok('A2：高熵版本号取不到时必须「测不到」，不许把空值当一致', () => {
+  const row = check.judgeItem('A2', { uaPlatform: 'Win32', chPlatform: 'Windows', chVersion: '', uaFullVersion: '' }, null);
+  assertLevel('unknown', row.level, 'A2 空版本');
+  assert.ok(row.reason.includes('高熵'), '理由要说清是没取到高熵值');
+});
+
+ok('A2：主版本号对不上 → 可疑；对得上 → 正常', () => {
+  const bad = check.judgeItem('A2', { uaPlatform: 'Win32', chPlatform: 'Windows', chVersion: '156.0.8078.100', uaFullVersion: '150.0.7871.100' }, null);
+  assertLevel('suspect', bad.level, 'A2 版本不一致');
+  const good = check.judgeItem('A2', { uaPlatform: 'Win32', chPlatform: 'Windows', chVersion: '156.0.8078.100', uaFullVersion: '156.0.0.0' }, null);
+  assertLevel('pass', good.level, 'A2 版本一致');
+});
+
+ok('观测脚本真的调了 getHighEntropyValues（静态守卫）', () => {
+  const script = check.buildObserverScript();
+  assert.ok(script.includes('getHighEntropyValues'), '低熵 API 拿不到完整版本号，必须走高熵查询');
+  assert.ok(script.includes('uaFullVersion') && script.includes('fullVersionList'), '要高熵的这两项');
+  assert.ok(!script.includes('`'), '脚本里不许出现反引号（会截断外层模板）');
+});
+
+ok('A3：普通模式下语言不一致就是泄漏，隐私模式下才是已伪装', () => {
+  const normal = check.judgeItem('A3', { languages: ['zh-CN', 'zh-Hans-CN'] }, 'zh-Hans-CN', { mode: 'normal' });
+  assertLevel('leak', normal.level, 'A3 普通模式（归一后相同）');
+  const priv = check.judgeItem('A3', { languages: ['en-US', 'en'] }, 'zh-Hans-CN', { mode: 'private' });
+  assertLevel('masked', priv.level, 'A3 隐私模式');
+  const normalDiff = check.judgeItem('A3', { languages: ['en-US', 'en'] }, 'zh-Hans-CN', { mode: 'normal' });
+  assertLevel('leak', normalDiff.level, 'A3 普通模式下读到别的语言同样是泄漏');
+});
+
+ok('canonicalLanguage 能把 zh-Hans-CN 折成 zh-CN，且对拍不误伤', () => {
+  assert.strictEqual(check.canonicalLanguage('zh-Hans-CN'), 'zh-cn');
+  assert.strictEqual(check.canonicalLanguage('zh_CN'), 'zh-cn');
+  assert.strictEqual(check.canonicalLanguage('en-US;q=0.9'), 'en-us');
+  assert.strictEqual(check.canonicalLanguage('en'), 'en');
+  assert.strictEqual(check.canonicalLanguage(''), '');
+  assert.strictEqual(check.canonicalLanguage('zh-Hant-TW'), 'zh-tw');
+});
+
+ok('A4：语言与时区的地区要对得上，对不上就是可疑', () => {
+  const cases = [
+    [{ timezone: 'Asia/Shanghai', offsetMinutes: -480, languages: ['en-US', 'en'] }, 'suspect', 'en-US + 上海'],
+    [{ timezone: 'America/New_York', offsetMinutes: 300, languages: ['en-US', 'en'] }, 'pass', 'en-US + 纽约'],
+    [{ timezone: 'Asia/Shanghai', offsetMinutes: -480, languages: ['zh-CN', 'zh'] }, 'pass', 'zh-CN + 上海'],
+    [{ timezone: 'America/New_York', offsetMinutes: 300, languages: ['zh-CN', 'zh'] }, 'suspect', 'zh-CN + 纽约'],
+  ];
+  for (const [observed, expected, label] of cases) {
+    const row = check.judgeItem('A4', observed, null);
+    assertLevel(expected, row.level, label);
+  }
+});
+
+ok('A4：时区未知 / 不在对照表里时不得判正常', () => {
+  const noTz = check.judgeItem('A4', { timezone: '', languages: ['zh-CN'] }, null);
+  assertLevel('unknown', noTz.level, 'A4 无时区');
+  const oddTz = check.judgeItem('A4', { timezone: 'Pacific/Chatham', offsetMinutes: -765, languages: ['xx-YY'] }, null);
+  assertLevel('unknown', oddTz.level, 'A4 对照表外');
+});
+
+ok('A6：像素比与系统缩放不一致 → 可疑（早先这里写反了）', () => {
+  const real = { width: 2560, height: 1440, scaleFactor: 1.5 };
+  const bad = check.judgeItem('A6', { width: 1707, height: 1067, dpr: 1 }, real);
+  assertLevel('suspect', bad.level, 'A6 dpr 不一致');
+  assert.ok(bad.reason.includes('像素比'), '理由要点名像素比');
+  const good = check.judgeItem('A6', { width: 1707, height: 1067, dpr: 1.5 }, real);
+  assertLevel('pass', good.level, 'A6 dpr 一致');
+});
+
+ok('A6：缺像素比或系统缩放时必须测不到', () => {
+  const noDpr = check.judgeItem('A6', { width: 1707, height: 1067 }, { width: 2560, height: 1440, scaleFactor: 1.5 });
+  assertLevel('unknown', noDpr.level, 'A6 缺 dpr');
+  const noScale = check.judgeItem('A6', { width: 1707, height: 1067, dpr: 1.5 }, { width: 2560, height: 1440 });
+  assertLevel('unknown', noScale.level, 'A6 缺系统缩放');
+});
+
+ok('报告默认脱敏：不给真实核数 / 屏幕 / UA 串', () => {
+  const realUa = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Nyx/1.18.0 Electron/45.3.2';
+  const rows = [
+    check.judgeItem('A1', { ua: realUa }, realUa),
+    check.judgeItem('A5', { cores: 24 }, 24),
+    check.judgeItem('A6', { width: 1707, height: 1067, dpr: 1.5 }, { width: 2560, height: 1440, scaleFactor: 1.5 }),
+  ];
+  const text = check.buildReport(rows, { version: '1.18.0' });
+  assert.ok(!text.includes('Electron/45.3.2'), '不许出现真实 UA 串');
+  assert.ok(!/\b24\b/.test(text), '不许出现真实核数');
+  assert.ok(!text.includes('1707') && !text.includes('2560'), '不许出现本机屏幕（伪装值也算机主特征）');
+  assert.ok(text.includes('已隐藏'), '要明确写出"已隐藏"');
+  assert.ok(text.includes('不要直接分享'), '要提醒原始版别分享');
+});
+
+ok('报告显式关掉脱敏时才给真实值（--raw 的口径）', () => {
+  const realUa = 'Mozilla/5.0 Nyx/1.18.0 Electron/45.3.2';
+  const rows = [check.judgeItem('A1', { ua: realUa }, realUa), check.judgeItem('A5', { cores: 24 }, 24)];
+  const text = check.buildReport(rows, { version: '1.18.0' }, { redact: false });
+  assert.ok(text.includes('Electron/45.3.2'), '原始版要能看真实 UA');
+  assert.ok(/\b24\b/.test(text), '原始版要能看真实核数');
+  const json = check.buildReportJson(rows, { version: '1.18.0' }, { redact: false });
+  assert.strictEqual(json.redacted, false, 'JSON 也要标出没脱敏');
 });
 
 /* ---------- 汇总 ---------- */

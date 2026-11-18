@@ -133,6 +133,75 @@ function reallText(value) {
   return str(value).length > 0;
 }
 
+/**
+ * 语言标签归一：小写、`_`→`-`、去掉 `;q=…` 尾巴、把带书写系统的折叠成两段。
+ *
+ * 为什么要它：`navigator.languages` 里可能是 `zh-Hans-CN`，而系统给的真实值是 `zh-CN`；
+ * 直接拼字符串比较会恒不相等，于是「其实没伪装」被报成「已伪装」（真实的泄漏被藏起来了）。
+ * 折叠规则：只保留「语言（-书写系统）-地区」里的语言与地区，`zh-Hans-CN` → `zh-cn`。
+ */
+function canonicalLanguage(tag) {
+  let text = str(tag).trim().toLowerCase();
+  if (!text) return '';
+  const semi = text.indexOf(';');
+  if (semi >= 0) text = text.slice(0, semi).trim();
+  text = text.replace(/_/g, '-');
+  const parts = text.split('-').filter(Boolean);
+  if (!parts.length) return '';
+  if (parts.length === 1) return parts[0];
+  // 四字母的中间段是书写系统（Hans/Hant/Latn…），判定与比较时不需要它
+  const rest = parts.slice(1).filter((part) => part.length !== 4);
+  return rest.length ? `${parts[0]}-${rest[rest.length - 1]}` : parts[0];
+}
+
+/** 语言 → 说得通的地区（只做最小的几个语种，够抓「中文本地化 + 美国时区」这类矛盾）。 */
+const LANG_REGIONS = {
+  zh: ['cn', 'hk', 'tw', 'mo', 'sg'],
+  en: ['us', 'gb', 'au', 'ca', 'nz', 'ie', 'sg', 'in'],
+  ja: ['jp'],
+  ko: ['kr', 'kp'],
+  de: ['de', 'at', 'ch'],
+  fr: ['fr', 'be', 'ca', 'ch'],
+  es: ['es', 'mx', 'ar', 'cl', 'co'],
+  ru: ['ru', 'by', 'kz'],
+  pt: ['pt', 'br'],
+};
+
+/** 时区 → 地区（取时区名里的城市，够用且不需要全量表）。 */
+const TZ_REGIONS = {
+  'asia/shanghai': 'cn',
+  'asia/chongqing': 'cn',
+  'asia/urumqi': 'cn',
+  'asia/hong_kong': 'hk',
+  'asia/macau': 'mo',
+  'asia/taipei': 'tw',
+  'asia/tokyo': 'jp',
+  'asia/seoul': 'kr',
+  'asia/singapore': 'sg',
+  'europe/london': 'gb',
+  'america/new_york': 'us',
+  'america/chicago': 'us',
+  'america/denver': 'us',
+  'america/los_angeles': 'us',
+  'america/toronto': 'ca',
+  'australia/sydney': 'au',
+  'europe/berlin': 'de',
+  'europe/paris': 'fr',
+  'europe/moscow': 'ru',
+};
+
+function regionOfLanguage(tag) {
+  const canon = canonicalLanguage(tag);
+  if (!canon) return { language: '', region: '' };
+  const parts = canon.split('-');
+  return { language: parts[0], region: parts.length > 1 ? parts[parts.length - 1] : '' };
+}
+
+function regionOfTimeZone(tz) {
+  const key = str(tz).trim().toLowerCase();
+  return TZ_REGIONS[key] || '';
+}
+
 function judgeA2(observed, truth) {
   const info = observed && typeof observed === 'object' ? observed : {};
   const uaPlatform = str(info.uaPlatform);
@@ -146,13 +215,20 @@ function judgeA2(observed, truth) {
   if (!sameText(mapped, chPlatform)) {
     return result('A2', 'suspect', info, truth, `UA 说自己是 ${mapped}，客户端提示却说 ${chPlatform}，两边对不上${SUSPECT_TAIL}`);
   }
-  if (chVersion && uaFull && !sameText(chVersion, uaFull.split('.')[0] + '.')) {
-    // 只是提示，不升级成可疑：主版本一致就够
+  // 版本这一层必须要拿到高熵值才有意义：普通 Chromium 上 uaFullVersion / fullVersionList 是空的，
+  // 空值绝不能算「一致」——那会把「根本没测到」写成「通过」。
+  if (!chVersion || !uaFull) {
+    return result('A2', 'unknown', info, truth, '客户端提示的完整版本号没取到（浏览器只在高熵查询里才给），UCH 版本这一层无法核对。');
   }
-  return result('A2', 'pass', info, truth, 'UA 与客户端提示互相自洽。');
+  const chMajor = str(chVersion).split('.')[0];
+  const uaMajor = str(uaFull).split('.')[0];
+  if (chMajor !== uaMajor) {
+    return result('A2', 'suspect', info, truth, `客户端提示报 ${chVersion}，UA 自己报 ${uaFull}，主版本号对不上${SUSPECT_TAIL}`);
+  }
+  return result('A2', 'pass', info, truth, `UA 与客户端提示自洽（主版本 ${chMajor} 一致）。`);
 }
 
-function judgeA3(observed, truth) {
+function judgeA3(observed, truth, ctx) {
   const list = asList(observed && observed.languages !== undefined ? observed.languages : observed);
   if (!list.length) return result('A3', 'unknown', list, truth, unknownReason('A3'));
   if (list.some((item) => /;q=/i.test(item))) {
@@ -160,10 +236,19 @@ function judgeA3(observed, truth) {
   }
   const real = asList(truth);
   if (!real.length) return result('A3', 'unknown', list, truth, unknownReason('A3'));
-  if (list.join(',') === real.join(',')) {
-    return result('A3', 'leak', list, truth, '语言列表与本机真实设置完全一致。');
+  // 逐项归一后再比：`zh-Hans-CN` 与 `zh-CN` 是同一种语言，拼字符串比会恒不相等，
+  // 那样「本机语言原样暴露」就会被错报成「已伪装」——真实泄漏被藏起来，比误报更糟。
+  const normList = list.map(canonicalLanguage).filter(Boolean);
+  const normReal = real.map(canonicalLanguage).filter(Boolean);
+  const same = normList.join(',') === normReal.join(',');
+  const mode = str(ctx && ctx.mode).toLowerCase();
+  if (same) {
+    return result('A3', 'leak', list, truth, `语言列表与本机真实设置一致（${normReal.join(', ')}），没有伪装。`);
   }
-  return result('A3', 'masked', list, truth, '语言列表已被替换成画像里的值。');
+  if (mode === 'private') {
+    return result('A3', 'masked', list, truth, `语言列表已换成画像里的值（本机是 ${normReal.join(', ')}）。`);
+  }
+  return result('A3', 'leak', list, truth, `普通模式不伪装语言：页面读到的 ${normList.join(', ')} 与真实设置 ${normReal.join(', ')} 不同，说明它读到了绕开系统设置的顺序。`);
 }
 
 function judgeA4(observed, truth) {
@@ -172,15 +257,61 @@ function judgeA4(observed, truth) {
   const offset = info.offsetMinutes;
   const langs = asList(info.languages);
   if (!tz) return result('A4', 'unknown', info, truth, unknownReason('A4'));
-  const zhLang = langs.some((item) => /^zh/i.test(item));
-  const usTz = /^America\//.test(tz);
-  if (zhLang && usTz) {
-    return result('A4', 'suspect', info, truth, `界面语言还是中文，时区却说在 ${tz}，地区与时区对不上${SUSPECT_TAIL}`);
+  if (!langs.length) {
+    return result('A4', 'unknown', info, truth, '语言列表没读到，时区与地区是否冲突无法核对。');
   }
-  if (Number.isFinite(offset) && usTz && Math.abs(Number(offset) - 300) > 60) {
-    return result('A4', 'suspect', info, truth, `时区写 ${tz}，但时区偏移是 ${offset} 分钟，两者矛盾`);
+  // 早先只拦「中文 + America/」，画像给的是 en-US + Asia/Shanghai 时反而判 pass——
+  // 这里改成双向查表：语言说自己在哪个地区、时区说自己在哪个地区，两边不打架才算正常。
+  const tzRegion = regionOfTimeZone(tz);
+  const langInfo = regionOfLanguage(langs[0]);
+  if (tzRegion && langInfo.region) {
+    if (!sameText(tzRegion, langInfo.region)) {
+      return result('A4', 'suspect', info, truth, `语言是 ${langs[0]}（地区 ${langInfo.region.toUpperCase()}），时区却说在 ${tz}（地区 ${tzRegion.toUpperCase()}），两边对不上${SUSPECT_TAIL}`);
+    }
+  } else if (tzRegion && langInfo.language) {
+    const allowed = LANG_REGIONS[langInfo.language] || [];
+    if (allowed.length && !allowed.includes(tzRegion)) {
+      return result('A4', 'suspect', info, truth, `${langInfo.language} 通常不会配 ${tz}，这种组合不像真实用户${SUSPECT_TAIL}`);
+    }
   }
-  return result('A4', 'pass', info, truth, '时区与语言、偏移之间没有明显矛盾。');
+  if (Number.isFinite(Number(offset))) {
+    const minutes = Number(offset);
+    // 只是粗略核对：真实偏移必须和时区名对得上（UTC+8 是 -480 分钟）。
+    const expected = offsetOfZone(tz);
+    if (expected !== null && Math.abs(minutes - expected) > 60) {
+      return result('A4', 'suspect', info, truth, `时区写 ${tz}，但偏移是 ${minutes} 分钟，两者矛盾（这个时区应该接近 ${expected} 分钟）`);
+    }
+  }
+  if (!tzRegion && !langInfo.region) {
+    return result('A4', 'unknown', info, truth, `时区 ${tz} 与语言 ${langs[0]} 都不在已知对照表里，无法判断是否矛盾。`);
+  }
+  if (!tzRegion) {
+    // 只有语言带地区、时区却不认识：这时说「没矛盾」等于给了一个没有依据的通过。
+    return result('A4', 'unknown', info, truth, `时区 ${tz} 不在已知对照表里，无法核对它和语言 ${langs[0]} 是否一致。`);
+  }
+  return result('A4', 'pass', info, truth, '时区、语言与偏移之间没有明显矛盾。');
+}
+
+/** 常见时区名的标准偏移（分钟，UTC+8 记 -480，与 Date#getTimezoneOffset 同号）。 */
+function offsetOfZone(tz) {
+  const key = str(tz).trim().toLowerCase();
+  const table = {
+    'asia/shanghai': -480,
+    'asia/hong_kong': -480,
+    'asia/taipei': -480,
+    'asia/singapore': -480,
+    'asia/tokyo': -540,
+    'asia/seoul': -540,
+    'europe/london': 0,
+    'america/new_york': 300,
+    'america/chicago': 360,
+    'america/denver': 420,
+    'america/los_angeles': 480,
+    'europe/berlin': -60,
+    'europe/paris': -60,
+    'australia/sydney': -600,
+  };
+  return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : null;
 }
 
 function judgeA5(observed, truth) {
@@ -206,13 +337,19 @@ function judgeA6(observed, truth) {
   if (!real || !Number.isFinite(Number(real.width))) {
     return result('A6', 'unknown', info, null, unknownReason('A6'));
   }
+  const realDpr = Number(real.scaleFactor);
+  if (!Number.isFinite(dpr) || !Number.isFinite(realDpr)) {
+    return result('A6', 'unknown', info, real, '像素比（页面报告的或系统缩放的）没拿到，无法判断是否被伪装。');
+  }
   if (width === Number(real.width) && height === Number(real.height)) {
     return result('A6', 'suspect', info, real, '屏幕尺寸与主显示器完全一致，真实 Chrome 通常遇到的是缩放后的可用区域，一模一样反而少见。');
   }
-  if (Number.isFinite(dpr) && Number.isFinite(Number(real.scaleFactor)) && Math.abs(dpr - Number(real.scaleFactor)) > 0.01) {
-    return result('A6', 'pass', info, real, '像素比与系统缩放一致，尺寸也做了调整。');
+  // 早先这里写反了：像素比和系统缩放**不一致**反而判 pass。真实浏览器的 devicePixelRatio
+  // 就是系统缩放（1.5 倍缩放报 1.5），对不上说明只改了尺寸没改缩放，是更显眼的组合。
+  if (Math.abs(dpr - realDpr) > 0.01) {
+    return result('A6', 'suspect', info, real, `像素比 ${dpr} 与系统缩放 ${realDpr} 不一致，只改尺寸不改缩放反而更显眼${SUSPECT_TAIL}`);
   }
-  return result('A6', 'pass', info, real, '屏幕尺寸已被调整过。');
+  return result('A6', 'pass', info, real, '屏幕尺寸已被调整过，像素比与系统缩放一致。');
 }
 
 function judgeB1(observed, truth) {
@@ -354,9 +491,10 @@ function judgeC3(observed, truth) {
  * @param {string} id 项编号（A1…D4）
  * @param {*} observed 被观察值（页面上/主进程里实测到的）
  * @param {*} truth 真实值；`null` 表示"这台机器上拿不到"，此时必须判 unknown
+ * @param {{mode?:string}} [ctx] 上下文：`mode` 是 `normal` 还是 `private`（同样的差异，两种模式下含义相反）
  * @returns {{id:string, group:string, level:string, title:string, observed:*, truth:*, reason:string}}
  */
-function judgeItem(id, observed, truth) {
+function judgeItem(id, observed, truth, ctx) {
   const key = str(id).toUpperCase();
   const judge = JUDGES[key];
   if (!judge) {
@@ -367,7 +505,7 @@ function judgeItem(id, observed, truth) {
   if (TRUTH_REQUIRED.has(key) && (truth === null || truth === undefined)) {
     return result(key, 'unknown', observed === undefined ? null : observed, null, unknownReason(key));
   }
-  const judged = judge(observed, truth);
+  const judged = judge(observed, truth, ctx || {});
   return judged;
 }
 
@@ -443,10 +581,68 @@ function normalizeMeta(meta) {
   };
 }
 
-/** 人读的 Markdown 报告（只进剪贴板，不落盘）。 */
-function buildReport(rows, meta) {
+/** 从「真实值」里收集需要隐藏的字符串（报告默认脱敏，见 buildReport 的 redact）。 */
+function secretStrings(rows) {
+  const found = new Set();
+  const add = (value) => {
+    const text = str(value).trim();
+    if (!text) return;
+    // 纯数字（核数 24、宽度 1707）短到 2 位也得藏——判定理由里会原样写出来；
+    // 字符串类要求 3 位以上，否则「en」「US」这种会误伤正文。
+    if (/^\d+$/.test(text) ? text.length >= 2 : text.length >= 3) found.add(text);
+  };
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!row) continue;
+    const truth = row.truth;
+    if (truth === null || truth === undefined) continue;
+    if (Array.isArray(truth)) truth.forEach((item) => add(item));
+    else if (typeof truth === 'object') Object.keys(truth).forEach((key) => add(truth[key]));
+    else add(truth);
+  }
+  return Array.from(found);
+}
+
+function scrub(text, secrets) {
+  let out = str(text);
+  for (const secret of secrets) {
+    if (!secret) continue;
+    if (/^\d+$/.test(secret)) {
+      // 数字要带边界，否则 24 会把时间戳里的 2024 也打坏
+      out = out.replace(new RegExp(`(^|[^\\d.])${secret}(?![\\d.])`, 'g'), (whole, before) => `${before}—`);
+    } else if (out.indexOf(secret) >= 0) {
+      out = out.split(secret).join('—');
+    }
+  }
+  return out;
+}
+
+/**
+ * 脱敏时这一行的观察值要不要一起藏。
+ *
+ * 两类都要藏：① 泄漏/可疑项的观察值本来就等于真实值；② A1/A3/A5/A6/B1 这几个"身份面"的观察值
+ * 即使是被伪装后的假值，也在描述这台机器的特征组合（UA、语言、核数、屏幕、显卡），
+ * 存证是要随仓库公开的，没必要把它们带出去。
+ */
+const HIDE_OBSERVED_ALWAYS = new Set(['A1', 'A3', 'A5', 'A6', 'B1']);
+
+function shouldHideObserved(row, redact) {
+  if (!redact) return false;
+  if (row.level === 'leak' || row.level === 'suspect') return true;
+  return HIDE_OBSERVED_ALWAYS.has(str(row.id).toUpperCase());
+}
+
+/**
+ * 人读的 Markdown 报告（只进剪贴板，不落盘）。
+ *
+ * 默认**脱敏**：这份报告会被复制、被贴进工单、被存进仓库，所以「真实值」一列默认写「已隐藏」，
+ * 泄漏项/可疑项里本来就等于真实值的观察值也一并隐藏，理由文字里带到的真实数字也会被打掉。
+ * 排障时用 `{ redact: false }`（`scripts/privacy-audit.js --raw`）在本地生成原始版，**不要分享**。
+ */
+function buildReport(rows, meta, options) {
   const info = normalizeMeta(meta);
   const summary = summarize(rows);
+  const redact = !options || options.redact !== false;
+  const secrets = redact ? secretStrings(rows) : [];
   const lines = [];
   lines.push('# Nyx 隐私自检报告');
   lines.push('');
@@ -454,9 +650,14 @@ function buildReport(rows, meta) {
   lines.push(`- Electron：${info.electron}｜Chromium：${info.chromium}`);
   lines.push(`- 时间：${info.at}`);
   lines.push(`- 身份档：${info.identity}｜代理内核：${info.kernelRunning ? '在运行' : '未运行'}`);
+  if (redact) {
+    lines.push('- 脱敏：**已隐藏本机真实值**。这份报告可以安全分享；需要排障请在本地用 `npm run privacy:audit --raw` 生成，不要直接分享原始版。');
+  }
   lines.push('');
   lines.push(`**结论**：${summary.headline}`);
   lines.push('');
+  const hiddenTruth = redact ? '—（已隐藏）' : '';
+  const hiddenObserved = '—（与真实值相同，已隐藏）';
   for (const group of groupRows(rows)) {
     if (!group.rows.length) continue;
     lines.push(`## ${group.title}`);
@@ -465,7 +666,10 @@ function buildReport(rows, meta) {
     lines.push('| --- | --- | --- | --- | --- |');
     for (const row of group.rows) {
       const level = describeLevel(row.level);
-      lines.push(`| ${row.title || row.id} | ${level.label} | ${formatValue(row.observed)} | ${formatValue(row.truth)} | ${row.reason} |`);
+      const observedText = shouldHideObserved(row, redact) ? hiddenObserved : formatValue(row.observed);
+      const truthText = redact ? hiddenTruth : formatValue(row.truth);
+      const reasonText = redact ? scrub(row.reason, secrets) : row.reason;
+      lines.push(`| ${row.title || row.id} | ${level.label} | ${observedText} | ${truthText} | ${reasonText} |`);
     }
     lines.push('');
   }
@@ -473,10 +677,16 @@ function buildReport(rows, meta) {
   return lines.join('\n');
 }
 
-/** 结构化报告（字段固定，方便随版本存档比对）。 */
-function buildReportJson(rows, meta) {
+/**
+ * 结构化报告（字段固定，方便随版本存档比对）。
+ *
+ * 同样默认脱敏：真值换成占位符、泄漏/可疑项的观察值也换掉；差异比对只看 `level`，不受影响。
+ */
+function buildReportJson(rows, meta, options) {
   const info = normalizeMeta(meta);
   const summary = summarize(rows);
+  const redact = !options || options.redact !== false;
+  const secrets = redact ? secretStrings(rows) : [];
   return {
     kind: 'nyx-privacy-audit',
     version: info.version,
@@ -485,20 +695,31 @@ function buildReportJson(rows, meta) {
     at: info.at,
     identity: info.identity,
     kernelRunning: info.kernelRunning,
+    redacted: redact,
     counts: summary.counts,
     headline: summary.headline,
     worstLevel: summary.worstLevel,
     groups: groupRows(rows).map((group) => ({
       key: group.key,
       title: group.title,
-      rows: group.rows.map((row) => ({
-        id: row.id,
-        level: row.level,
-        title: row.title || row.id,
-        observed: row.observed === undefined ? null : row.observed,
-        truth: row.truth === undefined ? null : row.truth,
-        reason: row.reason,
-      })),
+      rows: group.rows.map((row) => {
+        return {
+          id: row.id,
+          level: row.level,
+          title: row.title || row.id,
+          observed: redact
+            ? shouldHideObserved(row, true)
+              ? '—（已隐藏）'
+              : row.observed === undefined
+                ? null
+                : row.observed
+            : row.observed === undefined
+              ? null
+              : row.observed,
+          truth: redact ? '—（已隐藏）' : row.truth === undefined ? null : row.truth,
+          reason: redact ? scrub(row.reason, secrets) : row.reason,
+        };
+      }),
     })),
   };
 }
@@ -550,12 +771,8 @@ function buildObserverScript() {
     '    out.chPlatform = d ? str(d.platform) : "";',
     '    out.uaFullVersion = d ? str(d.uaFullVersion) : "";',
     '    out.chVersion = "";',
-    '    if (d && d.fullVersionList) {',
-    '      for (var i = 0; i < d.fullVersionList.length; i += 1) {',
-    '        var brand = d.fullVersionList[i] || {};',
-    '        if (/Chromium/i.test(str(brand.brand))) out.chVersion = str(brand.version);',
-    '      }',
-    '    }',
+    // 注意：低熵 API 上 fullVersionList / uaFullVersion 在真实 Chromium 里是**空的**，
+    // 必须走下面 getHighEntropyValues 才拿得到；这里只留初值，别拿它当结论。
     '  } catch (e) {}',
     '  try { out.uaPlatform = str(navigator.platform); } catch (e) { out.uaPlatform = ""; }',
     '  try { out.language = str(navigator.language); } catch (e) { out.language = ""; }',
@@ -600,8 +817,34 @@ function buildObserverScript() {
     '    var done = false;',
     '    function finish() { if (!done) { done = true; resolve(out); } }',
     '    var budget = setTimeout(finish, 900);',
-    '    var pending = 2;',
+    '    var pending = 3;',
     '    function settled() { pending -= 1; if (pending <= 0) { clearTimeout(budget); finish(); } }',
+    // 客户端提示的高熵字段：低熵只有 brand 与 major，完整版本号必须显式要一次。
+    // 拿不到就让 chVersion / uaFullVersion 保持空，判定那边会按「测不到」处理，绝不填空当一致。
+    '    var chStarted = false;',
+    '    try {',
+    '      var ud = navigator.userAgentData;',
+    '      if (ud && typeof ud.getHighEntropyValues === "function") {',
+    '        chStarted = true;',
+    '        ud.getHighEntropyValues(["uaFullVersion", "fullVersionList", "platformVersion", "architecture", "bitness", "model"]).then(function (high) {',
+    '          try {',
+    '            if (high) {',
+    '              out.uaFullVersion = str(high.uaFullVersion) || out.uaFullVersion;',
+    '              out.platformVersion = str(high.platformVersion);',
+    '              out.architecture = str(high.architecture);',
+    '              out.bitness = str(high.bitness);',
+    '              var list = high.fullVersionList || [];',
+    '              for (var i = 0; i < list.length; i += 1) {',
+    '                var brand = list[i] || {};',
+    '                if (/Chromium/i.test(str(brand.brand))) out.chVersion = str(brand.version);',
+    '              }',
+    '            }',
+    '          } catch (e) {}',
+    '          settled();',
+    '        }).catch(function () { settled(); });',
+    '      }',
+    '    } catch (e) { chStarted = false; }',
+    '    if (!chStarted) settled();',
     // 音频：离线渲染一段，取样本和（只在本机比对，不上传）
     '    try {',
     '      var Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;',
@@ -661,11 +904,15 @@ module.exports = {
   buildObserverScript,
   buildReport,
   buildReportJson,
+  canonicalLanguage,
   countLevels,
   describeLevel,
   diffReports,
   groupRows,
   judgeItem,
+  normalizeMeta,
+  regionOfLanguage,
+  regionOfTimeZone,
   summarize,
   worstLevel,
 };

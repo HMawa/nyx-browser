@@ -590,6 +590,10 @@ class TabManager {
     wc.on('will-navigate', (event, targetUrl) => {
       if (!String(targetUrl).startsWith('file://')) event.preventDefault();
     });
+    // 应用页也是 WebContents：隐私模式第一屏（起始页）就是它，而自检又恰好跑在这一页上。
+    // 不设策略时它用默认值，`RTCPeerConnection` 照样吐出内网地址（实测 172.24.x.x 这类），
+    // 等于把"本机所在网络"直接摆在隐私模式的第一屏上。
+    wc.setWebRTCIPHandlingPolicy(this.getWebrtcPolicy(this.getMode()));
 
     // 应用页也要走一遍"新标签回调"：
     //   · 隐私模式下起始页同样是 file:// 页面，它也会读 navigator.userAgent / 核数 / WebGL；

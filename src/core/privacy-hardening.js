@@ -132,7 +132,11 @@ function timezoneOffsetMinutes(timeZone, date = new Date()) {
       Number(map.second),
     );
     const local = Math.floor(date.getTime() / 1000) * 1000;
-    return Math.round((asUTC - local) / 60000);
+    // 注意符号：`Date.prototype.getTimezoneOffset()` 的口径是「本地比 UTC 慢多少分钟为正」，
+    // 纽约（UTC-5）应当给 +300，东京（UTC+9）应当给 -540。
+    // 之前这里写成 asUTC - local，符号正好反了：纽约会报 -300，页面里的偏移与
+    // 「America/New_York」这个时区名自相矛盾（自检 A4 就是靠这条对不上的）。
+    return Math.round((local - asUTC) / 60000);
   } catch {
     return null;
   }
@@ -149,9 +153,63 @@ function isValidTimezone(timeZone) {
   }
 }
 
+/**
+ * 语言 → 代表性时区（只在"出口时区未知"时用来兜底对齐）。
+ *
+ * 为什么需要它：隐私画像会把语言换成画像里的值（比如 en-US），但如果出口没给出时区，
+ * 真实时区就留在本机（Asia/Shanghai）——于是页面看到「语言 en-US + 时区上海」这种
+ * 现实里不存在的组合。真实 Chrome 里语言与时区大体来自同一地区，这种自相矛盾
+ * 本身就是一处可识别特征（自检 A4 就是这么判的）。
+ * 出口给了时区时一律以出口为准，这张表只在出口未知时兜底。
+ */
+const LANGUAGE_TIMEZONE = {
+  'en-us': 'America/New_York',
+  'en-gb': 'Europe/London',
+  'en-au': 'Australia/Sydney',
+  'en-ca': 'America/Toronto',
+  'en-nz': 'Pacific/Auckland',
+  'en-in': 'Asia/Kolkata',
+  'en-sg': 'Asia/Singapore',
+  'en-ph': 'Asia/Manila',
+  zh: 'Asia/Shanghai',
+  'zh-cn': 'Asia/Shanghai',
+  'zh-hk': 'Asia/Hong_Kong',
+  'zh-tw': 'Asia/Taipei',
+  'zh-sg': 'Asia/Singapore',
+  ja: 'Asia/Tokyo',
+  ko: 'Asia/Seoul',
+  de: 'Europe/Berlin',
+  fr: 'Europe/Paris',
+  es: 'Europe/Madrid',
+  it: 'Europe/Rome',
+  pt: 'Europe/Lisbon',
+  'pt-br': 'America/Sao_Paulo',
+  ru: 'Europe/Moscow',
+  nl: 'Europe/Amsterdam',
+  pl: 'Europe/Warsaw',
+  tr: 'Europe/Istanbul',
+  uk: 'Europe/Kyiv',
+  vi: 'Asia/Ho_Chi_Minh',
+  th: 'Asia/Bangkok',
+  id: 'Asia/Jakarta',
+  ms: 'Asia/Kuala_Lumpur',
+  hi: 'Asia/Kolkata',
+  ar: 'Asia/Dubai',
+};
+
+/** 按语言挑一个代表性时区；认不出来就返回空串（空串表示"不伪装时区"，绝不瞎猜） */
+function timezoneForLanguage(language) {
+  // 传进来的可能是 `en-US,en` 这种整串 Accept-Language，先取第一个标签
+  const first = String(language || '').split(',')[0];
+  const tag = first.trim().toLowerCase().replace(/_/g, '-');
+  if (!tag) return '';
+  if (LANGUAGE_TIMEZONE[tag]) return LANGUAGE_TIMEZONE[tag];
+  const primary = tag.split('-')[0];
+  return LANGUAGE_TIMEZONE[primary] || '';
+}
+
 /** 国家码 → 语言列表（右侧回退与 proxy-service 的 languagesForCountry 保持一致） */
-function languagesForCountryLite(country) {
-  const code = String(country || '').trim().toUpperCase();
+function languagesForCountryLite(country) {  const code = String(country || '').trim().toUpperCase();
   const table = {
     CN: 'zh-CN,zh,en',
     HK: 'zh-HK,zh,en',
@@ -221,7 +279,12 @@ class PrivacyHardening {
 
     // 出口国家未知时仍按最中性的取值做"对齐"，并在状态里标注，界面上要提示用户
     const resolvedLanguage = acceptLanguage || DEFAULT_LANGUAGE;
-    const spoofTimezone = Boolean(timezone) && !egressUnknown;
+    // 出口给了可信时区就以出口为准；出口未知时，时区跟语言取同一地区——
+    // 「语言 en-US + 时区上海」这种组合现实里不存在，比不伪装时区更容易被认出来。
+    const alignedTz = isValidTimezone(timezone) && !egressUnknown
+      ? timezone
+      : timezoneForLanguage(resolvedLanguage);
+    const spoofTimezone = isValidTimezone(alignedTz);
 
     const profile = {
       mode: 'private',
@@ -237,8 +300,8 @@ class PrivacyHardening {
       navigatorPlatform: navigatorPlatform(),
       platformVersion: currentPlatformVersion(),
       country,
-      timezone: spoofTimezone ? timezone : '',
-      timezoneOffset: spoofTimezone ? timezoneOffsetMinutes(timezone) : null,
+      timezone: spoofTimezone ? alignedTz : '',
+      timezoneOffset: spoofTimezone ? timezoneOffsetMinutes(alignedTz) : null,
       acceptLanguage: resolvedLanguage,
       languages: parseAcceptLanguage(resolvedLanguage),
       exitIp: egress ? egress.ip : null,
