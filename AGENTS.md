@@ -32,7 +32,7 @@
 - 版本：`package.json` = **1.18.2**；**已发布**的产物 `dist/Nyx-Setup-1.18.2.exe`（Electron 45.3.2，127,323,616 字节，sha256 `0ceed9baef14b3ce42e320bf30477b743e07d5e3a5c40d8935fc8bac806f3a05`，签名 `CN=Nyx Self-Signed, O=Nyx contributors, OU=local build`，指纹 `256F208A5D31782DAF9DA041CF1D7A2A382931D0`）；更新源 `latest.json` 已指向它（带 Ed25519 签名，`keyId dc2cec223e6ea7c7`）。留档保留 1.18.2 / 1.18.1 / 1.18.0；`dist-sign` 里还留着旧版本，**验签按版本号挑包**（`scripts/lib/pick-artifact.js`），不会再验到旧包。**已 tag/push**（2026-11-18，`v1.18.2` → `dfc311d`）；tag 里的旧文档仍含 B1 残留，main 已补漏（见 `docs/Nyx-1.18.2-发版记录.md` §8.3）。
 - 运行时：Electron 45.3.2 / Chromium 156.0.8078.100 / Node 24.22.2；Windows。
 - 运行时依赖只有两个：`@modelcontextprotocol/sdk`、`zod`（MCP server 用）。
-- 回归基线：`npm run verify` = **1120 项 / 48 个脚本**（= `scripts/verify-all.js` 里 48 条 `items` 标签之和；2026-11-18 用 `temp/measure-items.js` 逐脚本实跑核对：声明 1120 / 实测 1120；当次全量 **48 通过 / 0 失败 / 0 跳过 / 696 秒**）。**逐脚本项数以 `scripts/verify-all.js` 的 `items` 为准**——以前这里抄过一份长枚举，结果和实际差了 18 项（发版门禁 48→52、代码签名 35→38 没同步），现在只认那个文件；历史版本的项数写在各自的 `docs/Nyx-<版本>-发版记录.md` 与 `docs/CHANGELOG.md` 里。
+- 回归基线：`npm run verify` = **1150 项 / 49 个脚本**（= `scripts/verify-all.js` 里 49 条 `items` 标签之和；2026-11-18 接入外壳批次后实测 **49 通过 / 0 失败 / 0 跳过 / 545 秒**；上一版 1120 项 / 48 脚本 / 696 秒是 1.18.2 的基线）。**逐脚本项数以 `scripts/verify-all.js` 的 `items` 为准**——以前这里抄过一份长枚举，结果和实际差了 18 项（发版门禁 48→52、代码签名 35→38 没同步），现在只认那个文件；历史版本的项数写在各自的 `docs/Nyx-<版本>-发版记录.md` 与 `docs/CHANGELOG.md` 里。
 - 当前版本：**1.18.2**（`dist/Nyx-Setup-1.18.2.exe`，127,323,616 字节，sha256 `0CEED9BA…806F3A05`）**已发布**，更新源 `%APPDATA%\Nyx\updates\latest.json` 指向它（`signature` + `keyId dc2cec223e6ea7c7`，AUD-03 保留验证 11/11）；已静默装到 `%LOCALAPPDATA%\Programs\Nyx`。1.17.11–1.17.20 从未发布；1.18.0 被审计打回（判定写错 + 报告带真实指纹），1.18.1 是修正版，1.18.2 补它暴露的三处真实不一致。**已 tag/push（2026-11-18，`v1.18.2` → `dfc311d`）**；tag 里旧文档仍含 B1 残留，main 已补漏。
 - 安装器 e2e（不进 `npm run verify`）：`scripts/test-installer-e2e.js` 真机跑 全新 → 降级 → 升级 → 修复 → 保留数据卸载 → 完全卸载，**56 项断言**；`--cross` 跨两版模式（旧版装→seed 旧格式数据→覆盖装新版→两次启动）**57 项断言（56 通过 / 1 明确跳过）**；归档基线放 `dist\legacy`（当前 1.16.0 / 1.17.1 / 1.17.2，由 `npm run sync:legacy` 轮换维护），`--cross` 不带 `--from` 会自动选最老那份；`make-release.js --with-installer-test` 已把它接进发版门禁（默认不跑，但摘要必打印原因与命令）。
 - 更新源：`%APPDATA%\Nyx\updates`（`latest.json` + 安装包 + `.blocks.json` + `extensions.json`）；留档 `%APPDATA%\Nyx\updates-archive\<版本>`。
@@ -197,6 +197,15 @@
 - 本批次回归：**32 个脚本 / 756 项 / 447 秒**全绿。
 - 五个新坑：① 设置页 `init()` 里 `await` 一个永不返回的 IPC（`nyx:hardware:status` 的 PowerShell 探测）会让后续初始化**静默不发生**——必须逐项超时兜住；② `.sec-scroll` 是纵向 flex，卡片铺开会被压扁（量出来高度 0）；③ `edit` 删整段 HTML 时少删一个 `</div>` 会让下一个分区成为子节点（探针打出 `displayParent` 才发现）；④ 新主题的浅灰文字必须先算对比度（cream/sea 的 `--text-faint` 各红了 1 次）；⑤ `verify-all` 里的环境性假失败只能靠"放大等待 + 一次重试"处理，**绝不能改断言**。
 - 待办（等用户决定）：是否发 1.17.9；`nyx:hardware:status` 在本机永不返回（已被兜住，但值得单独治）；`AGENT_STOP_SHORTCUT_FAILED`（`CommandOrControl+Alt+X` 被占用，只在诊断里）是否做成界面可见提示；字号档位（清单 D3 里明确"属独立改造"）尚未做。
+
+### 9.17 1.19.0 接入外壳（校园 / 单位网络接入，2026-11-18，**代码完成，未发版**）
+
+- 来源：外部清单《Nyx浏览器-VPN接入外壳改造实现清单》（不在本仓库内），用户 m00517 要求按单执行。只改呈现 / 入口 / 引导 / 文案四层，`proxy-service` / `proxy-kernel` / `kernel-bridge` / `proxy-config` / `proxy-filter` 一行未动。
+- 提交：`d637d18`（`src/core/net-terms.js` 28 词条 + `netIdentity` 偏好 + 两个 IPC + preload 四接口 + 身份条 + 三段式骨架 + `verify-net-terms.js` 21 项）、`f5349dd`（`shellize()` + 有序替换表 + 设置页 TreeWalker/Observer 动态换词）、`ada6e1d`（首装引导第 2 步「接入方式」，`verify-onboard` 14 / e2e 8）、`c046777`（外壳换词 + 关于页「通用网络代理工具 + mihomo GPL-3.0」`data-net-keep` 豁免）、`5bf399a`（`docs/Nyx-1.19.0-接入外壳.md`：能力对照表 + 清单 20 项逐条判定 + 四个问题答复）。
+- 判据：`verify-net-terms.js` 28/28；`verify-ui-polish.js` 139/139；`verify-address-suggest.js` 68/68（单跑）；全量 **49 脚本 / 1150 项 / 545 秒全绿**；真机探针 `probe-net-shell.js` 14/14、`probe-onboard-net.js` 9/9。
+- 本轮真回退（已修）：外壳换词把「更多」菜单的「代理中心」改成「接入通道」，`verify-ui-polish.js` 的 B1 断言写死 `/代理中心/` 报红；修法是 `#more-proxy` 加 `data-net-section="network"`、断言改判「这一项指向 network 分区」（说法随身份变，按字面判早晚还会红，不是放宽）。
+- 诚实边界：主进程日志与原生通知未换词；内核日志一字不改；custom 档顶部多一条回滚用身份选择器；订阅导入 / 测速 / 分流 / 出口**没有逐档真机复测**（逻辑未动，属推断）；13 寸首屏截图未拍。
+- **分工（2026-11-18 用户定）**：规划线只做分析、规划、拆解与验收口径，**产出 md，不改代码**；实现由主开发按其交付的 md 进行。
 
 ### 9.16 1.17.10 批次（2026-11-15 夜，设置页重排 + 「更多」菜单遮挡，**代码完成，未发版**）
 
