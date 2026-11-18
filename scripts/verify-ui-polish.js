@@ -4470,7 +4470,7 @@ async function main() {
           if (nav) nav.click();
           const read = () => ({
             statement: (document.getElementById('net-identity-statement') || {}).textContent || '',
-            scope: (document.getElementById('net-identity-scope') || {}).textContent || '',
+            scopeGone: !document.getElementById('net-identity-scope') && !document.getElementById('net-identity-note'),
             empty: (document.getElementById('sub-list') || {}).textContent || '',
             select: (document.getElementById('net-identity-select') || {}).value || '',
           });
@@ -4507,14 +4507,14 @@ async function main() {
         const settled = (netShell && netShell.campusSettled) || {};
         const custom = netShell && netShell.custom;
         check(
-          '接入外壳：校园档下合规声明原样保留，只有范围说明被换词（不静默篡改事实，非 F1）',
+          '接入外壳：校园档下合规声明原样保留，身份/范围两行小字已移除（不静默篡改事实，非 F1）',
           /通用网络代理工具/.test(campus.statement || '')
             && !/接入通道/.test(campus.statement || '')
             && /通用网络代理工具/.test(settled.statement || '')
             && !/接入通道/.test(settled.statement || '')
-            && /接入组件/.test(settled.scope || '')
+            && settled.scopeGone === true
             && /接入配置/.test(settled.empty || ''),
-          JSON.stringify({ statement: settled.statement, scope: settled.scope, empty: settled.empty }),
+          JSON.stringify({ statement: settled.statement, scopeGone: settled.scopeGone, empty: settled.empty }),
         );
         check(
           '接入外壳：切回自定义服务端后动态句子逐字回到旧词（空态不再是「接入配置」）',
@@ -4524,7 +4524,7 @@ async function main() {
             && /暂无订阅/.test(custom.empty || '')
             && !/暂无接入配置/.test(custom.empty || '')
             && /通用网络代理工具/.test(custom.statement || '')
-            && !/接入组件/.test(custom.scope || ''),
+            && custom.scopeGone === true,
           JSON.stringify(custom),
         );
         check(

@@ -1059,11 +1059,7 @@
 
     const label = byId('net-identity-label');
     if (label) label.textContent = `接入方式：${payload.label}`;
-    const note = byId('net-identity-note');
-    if (note) note.textContent = payload.note || '';
-    // 范围说明会被换词（它里面提到「内核」），事实陈述必须原样——分两个元素写，别拼成一句（审计 F1）
-    const scope = byId('net-identity-scope');
-    if (scope) scope.textContent = payload.scopeNote || '';
+    // 事实陈述必须原样；上面的身份说明与范围说明两行小字已移除（2026-11-19）
     const statement = byId('net-identity-statement');
     if (statement) statement.textContent = payload.statement || '';
     const bar = byId('net-identity-bar');

@@ -712,11 +712,8 @@
                   <span class="net-identity-label" id="net-identity-label">接入方式</span>
                   <select id="net-identity-select" title="选择接入方式"></select>
                 </div>
-                <p class="net-identity-note" id="net-identity-note"></p>
-                <!-- 定位声明拆成两段：上一段是"换了只改界面"的范围说明，会跟着换词；
-                     下一段是不可换词的合规事实陈述，所以挂换词豁免标记，扫描与 Observer 都跳过它（审计 F1）。
-                     以前两段拼成一句写进同一个 <p>，结果声明在 80ms 后被扫掉——事实被悄悄改掉。 -->
-                <p class="net-identity-statement" id="net-identity-scope"></p>
+                <!-- 只保留不可换词的合规事实陈述；上面的范围说明与身份说明两行小字已移除（2026-11-19）。
+                     事实陈述挂换词豁免标记，扫描与 Observer 都跳过它（审计 F1）。 -->
                 <p class="net-identity-statement net-identity-fact" id="net-identity-statement" data-net-keep="1"></p>
               </div>
 <div class="layout">

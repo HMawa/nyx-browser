@@ -413,6 +413,8 @@ check('28. 关于页与身份条都保留事实陈述：通用网络代理工具
   // 身份条很短，按固定长度切；不能用「下一个 data-sec="network"」——那个串在导航里先出现过一次
   const bar = settingsHtml.slice(barAt - 120, barAt + 1200);
   assert.ok(/id="net-identity-statement"[^>]*data-net-keep/.test(bar), '身份条的事实陈述必须单独一个元素并标 data-net-keep');
+  assert.ok(!/id="net-identity-scope"/.test(bar), '范围说明两行小字已按设计移除（2026-11-19）');
+  assert.ok(!/id="net-identity-note"/.test(bar), '身份说明两行小字已按设计移除（2026-11-19）');
   // 声明内容本身就是"通用网络代理工具"，换词表一定会改它 —— 用这条断言把风险钉住在词表层
   assert.notStrictEqual(netTerms.shellize(netTerms.SHELL_STATEMENT, 'campus'), netTerms.SHELL_STATEMENT,
     '换词表已经碰不动声明了，说明这条豁免断言失去了意义，请重新确认');
