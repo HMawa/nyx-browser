@@ -290,6 +290,54 @@ check('23. 三段式的样式只在 [data-net-layout="shell"] 下命中（自定
   assert.ok(!/linear-gradient|radial-gradient/.test(shellRules), '三段式样式里不许用渐变');
 });
 
+check('24. shellize：custom 原样返回、校园/单位换词、没命中返回同一字符串、幂等、auto 抛错', () => {
+  assert.strictEqual(netTerms.shellize('启动内置代理后显示策略组。', 'custom'), '启动内置代理后显示策略组。');
+  assert.strictEqual(netTerms.shellize('启动内置代理后显示策略组。', 'campus'), '连接接入通道后显示线路组。');
+  assert.strictEqual(netTerms.shellize('代理内核未启动', 'campus'), '接入组件未启动');
+  assert.strictEqual(netTerms.shellize('点「测速全部节点」', 'enterprise'), '点「线路质量检测全部线路」');
+  assert.strictEqual(netTerms.shellize('普通一句没有旧术语', 'campus'), '普通一句没有旧术语');
+  const once = netTerms.shellize('订阅里没有节点，测速一下', 'campus');
+  assert.strictEqual(netTerms.shellize(once, 'campus'), once, '换过一遍的词不应再被改写');
+  assert.throws(() => netTerms.shellize('订阅', 'auto'), /接入外壳接入方式不存在：auto/);
+  assert.strictEqual(netTerms.shellize('', 'campus'), '');
+  assert.strictEqual(netTerms.shellize(null, 'campus'), null);
+});
+
+check('25. 渲染层现有文案全量换词后零残留（含空态、状态条、按钮 title）', () => {
+  const literals = new Set();
+  const stripComments = (src) => src.split('\n').filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line)).join('\n');
+  const proxy = stripComments(read('src/renderer/proxy-center.js'));
+  for (const match of proxy.matchAll(/'([^'\\\n]{2,200})'/g)) {
+    if (/[\u4e00-\u9fa5]/.test(match[1])) literals.add(match[1]);
+  }
+  for (const match of proxy.matchAll(/`([^`]{2,300})`/g)) {
+    if (/[\u4e00-\u9fa5]/.test(match[1])) literals.add(match[1]);
+  }
+  for (const match of settingsHtml.matchAll(/>([^<>{}]{2,120})</g)) {
+    if (/[\u4e00-\u9fa5]/.test(match[1])) literals.add(match[1].trim());
+  }
+  assert.ok(literals.size > 300, `语料太少（${literals.size} 条），提取规则可能失效`);
+  const leftover = [];
+  for (const text of literals) {
+    const out = netTerms.shellize(text, 'campus');
+    for (const word of netTerms.LEGACY_WORDS) {
+      if (out.includes(word)) leftover.push(`${word} ← ${text}`);
+    }
+  }
+  assert.deepStrictEqual(leftover.slice(0, 5), [], `还有 ${leftover.length} 条换词后残留旧术语`);
+});
+
+check('26. 动态文案接上线：preload 同步接口 + 设置页扫描 + Observer 跳日志区 + custom 摘掉', () => {
+  assert.ok(/netShellizeText: \(text, identity\) => netTermsCore\.shellize\(text, identity\)/.test(preloadJs), 'preload 缺 netShellizeText');
+  assert.ok(/function sweepNetShellText/.test(settingsJs), '设置页缺动态文案扫描');
+  assert.ok(/function watchNetShellText/.test(settingsJs), '设置页缺 Observer 安装');
+  assert.ok(/watchNetShellText\(payload\.identity\)/.test(settingsJs), '铺身份时没接动态文案扫描');
+  const block = settingsJs.slice(settingsJs.indexOf('function sweepNetShellText'), settingsJs.indexOf('function applyNetIdentity'));
+  assert.ok(/\.log-box, pre, code/.test(block), '日志区必须跳过：那是内核原始输出');
+  assert.ok(/netShellObserver\.disconnect\(\)/.test(block), '切回 custom 或重装时必须先摘掉旧 Observer');
+  assert.ok(/!\[.campus., .enterprise.\]\.includes\(identity\)\) return/.test(block), '只有校园/单位两档才挂 Observer');
+});
+
 const failed = checks.filter((item) => !item.pass);
 if (failed.length) {
   console.log('[接入外壳回归] 未通过：');

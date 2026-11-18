@@ -901,6 +901,76 @@
    * 只改字：分区名、带 data-net-term 的标签、两个输入框的 placeholder、说明与声明。
    * 不碰任何控件的行为、不重启内核、不切换订阅——换身份是纯界面动作（清单验收第 3 条）。
    */
+  /** 三段式的动态文案兜底：只扫文本与提示属性，日志区一律不碰（诊断原文不许被改写） */
+  let netShellObserver = null;
+  let netShellSweepTimer = 0;
+  let netShellSweeping = false;
+  const NET_SHELL_TEXT_SKIP = new Set(['SCRIPT', 'STYLE', 'TEXTAREA', 'INPUT', 'SELECT', 'OPTION']);
+  const NET_SHELL_ATTRS = ['title', 'aria-label', 'placeholder'];
+
+  /**
+   * 把分区里已经渲染出来的旧术语换成外壳叫法（清单 §3 映射表）。
+   *
+   * 为什么要在显示层扫一遍：状态条、空态提示、按钮 title 是拼出来的句子，
+   * 逐条登记词条会漏；扫一遍能兜住现有与以后新增的句子。日志区（.log-box / pre / code）跳过：
+   * 那是内核原始输出，改字等于篡改证据。
+   */
+  function sweepNetShellText(identity) {
+    const panel = panelOf('network');
+    const shellize = window.nyx && window.nyx.netShellizeText;
+    if (!panel || typeof shellize !== 'function' || !['campus', 'enterprise'].includes(identity)) return;
+    netShellSweeping = true;
+    try {
+      const walker = document.createTreeWalker(panel, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          const parent = node.parentElement;
+          if (!parent || NET_SHELL_TEXT_SKIP.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
+          if (parent.closest('.log-box, pre, code')) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        },
+      });
+      const nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      for (const node of nodes) {
+        const next = shellize(node.nodeValue, identity);
+        if (next !== node.nodeValue) node.nodeValue = next;
+      }
+      for (const el of panel.querySelectorAll(NET_SHELL_ATTRS.map((name) => `[${name}]`).join(','))) {
+        for (const name of NET_SHELL_ATTRS) {
+          const value = el.getAttribute(name);
+          if (!value) continue;
+          const next = shellize(value, identity);
+          if (next !== value) el.setAttribute(name, next);
+        }
+      }
+    } finally {
+      netShellSweeping = false;
+    }
+  }
+
+  /** 只在校园 / 单位两档挂 Observer：状态推送、节点表重绘之后自动补一遍换词；切回 custom 立刻摘掉 */
+  function watchNetShellText(identity) {
+    if (netShellObserver) {
+      netShellObserver.disconnect();
+      netShellObserver = null;
+    }
+    if (netShellSweepTimer) {
+      window.clearTimeout(netShellSweepTimer);
+      netShellSweepTimer = 0;
+    }
+    const panel = panelOf('network');
+    sweepNetShellText(identity);
+    if (!panel || !['campus', 'enterprise'].includes(identity)) return;
+    netShellObserver = new MutationObserver(() => {
+      if (netShellSweeping || netShellSweepTimer) return;
+      netShellSweepTimer = window.setTimeout(() => {
+        netShellSweepTimer = 0;
+        sweepNetShellText(identity);
+      }, 80);
+    });
+    netShellObserver.observe(panel, { childList: true, subtree: true, characterData: true });
+  }
+
   function applyNetIdentity(payload) {
     if (!payload || payload.ok === false || !payload.terms) return;
     const terms = payload.terms;
@@ -927,6 +997,8 @@
 
     // 身份决定分区内部结构：校园/单位走三段式，自定义服务端原样搬回（逐项与旧版一致）
     applyNetShellLayout(payload.identity, terms);
+    // 静态字由 data-net-term 铺好，动态句子（状态条、空态、title）在这里兜一遍
+    watchNetShellText(payload.identity);
 
     const select = byId('net-identity-select');
     if (select) {

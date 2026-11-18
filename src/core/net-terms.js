@@ -136,6 +136,37 @@ const LEGACY_WORDS = [
 /** custom 档里允许出现「接入」的键：引导页本身就叫「选择接入方式」，属通用说法 */
 const SHELL_WORD_ALLOW = ['onboardTitle'];
 
+/**
+ * 动态句子的换词表（清单 §3 映射表）：长短优先，一次只跑一遍，避免替换结果被二次改写。
+ * 状态条、空态提示、按钮 title 里那些整句文案不适合逐条做成词条，用这张表在**显示层**换成外壳叫法；
+ * custom 档一个字都不换（界面与旧版逐项一致）。
+ */
+const SHELL_REPLACEMENTS = [
+  ['内置代理内核', '接入组件'],
+  ['启动内置代理', '连接接入通道'],
+  ['启动代理', '连接接入通道'],
+  ['强制走代理', '强制经接入通道'],
+  ['代理不可达', '通道不可达'],
+  ['代理中心', '接入通道'],
+  ['代理内核', '接入组件'],
+  ['智能巡航', '线路自愈'],
+  ['智能分流', '访问规则'],
+  ['分流规则', '访问规则'],
+  ['混合端口', '本地端口'],
+  ['出口 IP', '出口地址'],
+  ['出口IP', '出口地址'],
+  ['策略组', '线路组'],
+  ['订阅', '接入配置'],
+  ['节点', '线路'],
+  ['测速', '线路质量检测'],
+  ['直连', '直接访问'],
+  ['代理', '接入通道'],
+  ['内核', '接入组件'],
+];
+
+/** 换词前先看有没有命中：绝大多数文本不含旧术语，直接原样返回，不让 Observer 空转 */
+const SHELL_WATCH_WORDS = SHELL_REPLACEMENTS.map(([from]) => from);
+
 function assertIdentity(identity) {
   if (!IDENTITIES.includes(identity)) {
     throw new Error(`接入外壳接入方式不存在：${identity}`);
@@ -183,8 +214,29 @@ function resolveIdentity(saved, ctx) {
   return hasExistingConfig ? UPGRADE_IDENTITY : DEFAULT_IDENTITY;
 }
 
-/** 选择器要展示的三档：label 中文名、note 一句话说明 */
-function describeIdentities() {
+/**
+ * 把一句今天界面的文案换成外壳叫法（清单 §3 映射表的显示层实现）。
+ *
+ * 为什么整句换而不是逐条登记词条：状态条、空态提示、按钮 title 是拼出来的句子，
+ * 逐条登记会膨胀成几百个键，而且以后新增的句子还会漏。这里用有序替换表兜住所有动态句子；
+ * custom 档原样返回（老用户界面一个字不变），没有命中就直接返回（不让 MutationObserver 空转）。
+ *
+ * @param {string} text 原始文案
+ * @param {string} identity 具体身份（auto 属于调用方错误）
+ */
+function shellize(text, identity) {
+  if (typeof text !== 'string' || !text) return text;
+  assertIdentity(identity);
+  if (identity === 'custom') return text;
+  if (!SHELL_WATCH_WORDS.some((word) => text.includes(word))) return text;
+  let out = text;
+  for (const [from, to] of SHELL_REPLACEMENTS) {
+    if (out.includes(from)) out = out.split(from).join(to);
+  }
+  return out;
+}
+
+/** 选择器要展示的三档：label 中文名、note 一句话说明 */function describeIdentities() {
   return IDENTITIES.map((id) => ({
     id,
     label: IDENTITY_LABELS[id],
@@ -242,8 +294,10 @@ module.exports = {
   SHELL_STATEMENT,
   TERM_KEYS,
   LEGACY_WORDS,
+  SHELL_REPLACEMENTS,
   termsFor,
   t,
+  shellize,
   resolveIdentity,
   describeIdentities,
   assertCoverage,

@@ -83,6 +83,9 @@ contextBridge.exposeInMainWorld('nyx', {
   /** 三档选择器的选项（label + note），与主进程共用一份表 */
   netIdentityOptions: () => netTermsCore.describeIdentities(),
 
+  /** 把一句动态文案换成外壳叫法（custom 原样返回）；设置页扫动态句子时同步调用 */
+  netShellizeText: (text, identity) => netTermsCore.shellize(text, identity),
+
   /** 应用与运行时信息（版本、内核版本、安装与用户数据目录、主页、标签上限） */
   getAppInfo: () => ipcRenderer.invoke('nyx:app:info'),
 
