@@ -29,7 +29,7 @@
 
 ## 2. 固定事实（2026-11-18 基线）
 
-- 版本：`package.json` = **1.18.2**；**已发布**的产物 `dist/Nyx-Setup-1.18.2.exe`（Electron 45.3.2，127,323,616 字节，sha256 `0ceed9baef14b3ce42e320bf30477b743e07d5e3a5c40d8935fc8bac806f3a05`，签名 `CN=Nyx Self-Signed, O=Nyx contributors, OU=local build`，指纹 `256F208A5D31782DAF9DA041CF1D7A2A382931D0`）；更新源 `latest.json` 已指向它（带 Ed25519 签名，`keyId dc2cec223e6ea7c7`）。留档保留 1.18.2 / 1.18.1 / 1.18.0；`dist-sign` 里还留着旧版本，**验签按版本号挑包**（`scripts/lib/pick-artifact.js`），不会再验到旧包。**已 tag/push**（2026-11-18，`v1.18.2` → `dfc311d`）；tag 里的旧文档仍含 B1 残留，main 已补漏（见 `docs/Nyx-1.18.2-发版记录.md` §8.3）。
+- 版本：`package.json` = **1.19.0**；**已发布**的产物 `dist/Nyx-Setup-1.19.0.exe`（Electron 45.3.2，127,336,256 字节，sha256 `7ec6204bbb5304fc55f057503c91425199fd1b820a3ed0822d2e9af136966777`，签名 `CN=Nyx Self-Signed, O=Nyx contributors, OU=local build`，指纹 `256F208A5D31782DAF9DA041CF1D7A2A382931D0`）；更新源 `latest.json` 已指向它（带 Ed25519 签名，`keyId dc2cec223e6ea7c7`）。留档保留 1.19.0 / 1.18.2 / 1.18.1；`dist-sign` 里还留着旧版本，**验签按版本号挑包**（`scripts/lib/pick-artifact.js`），不会再验到旧包。上一版 1.18.2（127,323,616 / `0ceed9ba…`）的 tag `v1.18.2` → `dfc311d` 里仍含 B1 残留，main 已补漏（`docs/Nyx-1.18.2-脱敏补正.md`；补正后的树打了 `v1.18.2-post`）。
 - 运行时：Electron 45.3.2 / Chromium 156.0.8078.100 / Node 24.22.2；Windows。
 - 运行时依赖只有两个：`@modelcontextprotocol/sdk`、`zod`（MCP server 用）。
 - 回归基线：`npm run verify` = **1151 项 / 49 个脚本**（= `scripts/verify-all.js` 里 49 条 `items` 标签之和，实测也是 1151；2026-11-18 接线收口轮实测 **49 通过 / 0 失败 / 0 跳过 / 801 秒**；同一套脚本在轻载时测得 545 秒——**耗时随机器负载波动，别拿它当版本特征，项数与通过数才是**；上一版 1120 项 / 48 脚本 / 696 秒是 1.18.2 的基线）。**逐脚本项数以 `scripts/verify-all.js` 的 `items` 为准**——以前这里抄过一份长枚举，结果和实际差了 18 项（发版门禁 48→52、代码签名 35→38 没同步），现在只认那个文件；历史版本的项数写在各自的 `docs/Nyx-<版本>-发版记录.md` 与 `docs/CHANGELOG.md` 里。
