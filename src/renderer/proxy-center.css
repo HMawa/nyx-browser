@@ -230,6 +230,127 @@ select:focus {
   cursor: pointer;
 }
 
+/* ---------------- 接入方式条（VPN 接入外壳清单 B2） ---------------- */
+/* 一行选择器 + 两句说明：只改叫法，不改行为。旧版（自定义服务端）也显示这一条，
+   否则用户换了身份就再也换不回来。 */
+.net-identity-bar {
+  flex: 0 0 auto;
+  margin: 12px 12px 0;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.net-identity-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.net-identity-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.net-identity-row select {
+  min-width: 200px;
+  max-width: 280px;
+  padding: 5px 8px;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.net-identity-row select:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+}
+
+.net-identity-note,
+.net-identity-statement {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.net-identity-statement {
+  color: color-mix(in srgb, var(--text-dim) 78%, transparent);
+}
+
+/* ---- 三段式外壳（校园 / 单位）：一条竖线下来，① 接入通道 → ② 服务端与接入配置 → ③ 高级 ----
+   自定义服务端不加 data-net-layout，这里一条规则都不会命中，界面与旧版逐项一致。 */
+.sec-panel[data-net-layout="shell"] .layout {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.sec-panel[data-net-layout="shell"] .panel-main {
+  width: 100%;
+  max-width: none;
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+/* ② 整栏搬进 ① 之后：去掉它自己的卡片外观，免得框套框 */
+.sec-panel[data-net-layout="shell"] .panel-side {
+  width: 100%;
+  max-width: none;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  overflow: visible;
+  flex: 0 0 auto;
+}
+
+.net-step {
+  margin: 2px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.net-advanced {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.net-advanced > summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.net-advanced[open] > summary {
+  margin-bottom: 2px;
+}
+
+.net-advanced > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* ---------------- 主体布局 ---------------- */
 .layout {
   flex: 1;

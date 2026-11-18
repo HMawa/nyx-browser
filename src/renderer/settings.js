@@ -817,6 +817,184 @@
   /* 分区导航                                                            */
   /* ------------------------------------------------------------------ */
 
+  /* ------------------------------------------------------------------ */
+  /* 接入方式（VPN 接入外壳清单 B2）                                     */
+  /* ------------------------------------------------------------------ */
+
+  /** 最近一次生效的接入方式载荷；切换身份后复用，也用于保存失败时把选择器拨回去 */
+  let netIdentityState = null;
+
+  /** 三段式改造前的位置记录：只记搬过的东西，切回自定义服务端时原样搬回 */
+  const NET_SHELL_RESTORE = [];
+
+  /** 把节点搬到新父亲下，并记下"原来在哪、原来挨着谁"，用于还原 */
+  function netShellMove(node, parent) {
+    if (!node || !node.parentNode) return null;
+    const record = { node, parent: node.parentNode, next: node.nextSibling };
+    NET_SHELL_RESTORE.push(record);
+    parent.appendChild(node);
+    return record;
+  }
+
+  /** 三段式的小标题，每段一句、带序号；样式见 proxy-center.css 的 .net-step */
+  function netShellStep(text) {
+    const el = document.createElement('p');
+    el.className = 'net-step net-shell-only';
+    el.textContent = text;
+    return el;
+  }
+
+  /**
+   * 三段式外壳（VPN 接入外壳清单 B3）：① 接入通道 → ② 服务端与接入配置 → ③ 高级。
+   *
+   * 只在校园 / 单位两档生效：`自定义服务端` 必须与今天的界面**逐项一致**，
+   * 所以那一档一律原样搬回并删掉所有外壳元素，不做任何布局改造。
+   * 搬的是已有节点（id 与行为都不变），proxy-center.js 缓存的元素引用仍然有效。
+   */
+  function applyNetShellLayout(identity, terms) {
+    const panel = panelOf('network');
+    const layout = panel ? panel.querySelector('.layout') : null;
+    const main = panel ? panel.querySelector('.panel-main') : null;
+    const aside = panel ? panel.querySelector('.panel-side') : null;
+    if (!panel || !layout || !main) return;
+
+    if (identity === 'custom') {
+      while (NET_SHELL_RESTORE.length) {
+        const item = NET_SHELL_RESTORE.pop();
+        if (item.next && item.next.parentNode === item.parent) item.parent.insertBefore(item.node, item.next);
+        else item.parent.appendChild(item.node);
+      }
+      for (const el of panel.querySelectorAll('.net-shell-only')) el.remove();
+      delete panel.dataset.netLayout;
+      return;
+    }
+
+    if (panel.dataset.netLayout === 'shell') return;
+
+    const kernelBar = main.querySelector('.kernel-bar');
+    if (kernelBar) main.insertBefore(netShellStep('① 接入通道'), kernelBar);
+
+    // ② 服务端与接入配置：整栏搬到 ① 之后，于是三段是一条竖线，而不是左右两栏
+    if (aside) {
+      main.appendChild(netShellStep(terms.serverTitle || '服务端与接入配置'));
+      netShellMove(aside, main);
+    }
+
+    // ③ 高级：网卡、智能调度、统计、节点/自检/过滤/日志页全部收进可折叠的 details
+    const advanced = document.createElement('details');
+    advanced.className = 'net-advanced net-shell-only';
+    const summary = document.createElement('summary');
+    summary.textContent = `③ ${terms.advancedTitle || '高级'}`;
+    advanced.appendChild(summary);
+    for (const selector of ['#iface-card', '#smart-card', '#stat-grid', '#tabs', '.tab-panels']) {
+      const node = main.querySelector(selector);
+      if (node) netShellMove(node, advanced);
+    }
+    main.appendChild(advanced);
+
+    panel.dataset.netLayout = 'shell';
+  }
+
+  /**
+   * 把选定的身份铺到界面上。
+   *
+   * 只改字：分区名、带 data-net-term 的标签、两个输入框的 placeholder、说明与声明。
+   * 不碰任何控件的行为、不重启内核、不切换订阅——换身份是纯界面动作（清单验收第 3 条）。
+   */
+  function applyNetIdentity(payload) {
+    if (!payload || payload.ok === false || !payload.terms) return;
+    const terms = payload.terms;
+    netIdentityState = payload;
+
+    // 分区名跟着身份走：导航项、状态条、滚动记忆的键都读 SEC_LABELS
+    const sectionName = terms.sectionLabel || SEC_LABELS.network;
+    SEC_LABELS.network = sectionName;
+    const navBtn = navEl ? navEl.querySelector('.nav-item[data-sec="network"]') : null;
+    if (navBtn) navBtn.textContent = sectionName;
+
+    const panel = panelOf('network');
+    if (panel) {
+      panel.dataset.netIdentity = payload.identity;
+      for (const node of panel.querySelectorAll('[data-net-term]')) {
+        const key = node.dataset.netTerm;
+        if (typeof terms[key] === 'string' && terms[key]) node.textContent = terms[key];
+      }
+      for (const node of panel.querySelectorAll('[data-net-ph]')) {
+        const key = node.dataset.netPh;
+        if (typeof terms[key] === 'string' && terms[key]) node.placeholder = terms[key];
+      }
+    }
+
+    // 身份决定分区内部结构：校园/单位走三段式，自定义服务端原样搬回（逐项与旧版一致）
+    applyNetShellLayout(payload.identity, terms);
+
+    const select = byId('net-identity-select');
+    if (select) {
+      if (!select.options.length) {
+        const auto = document.createElement('option');
+        auto.value = 'auto';
+        select.appendChild(auto);
+        for (const opt of payload.options || []) {
+          const node = document.createElement('option');
+          node.value = opt.id;
+          node.textContent = opt.label;
+          node.title = opt.note || '';
+          select.appendChild(node);
+        }
+      }
+      // 「跟随默认」这一项必须带出当前解析结果，否则用户不知道自动选了哪一档
+      const auto = select.querySelector('option[value="auto"]');
+      if (auto) auto.textContent = `跟随默认（当前：${payload.label}）`;
+      select.value = payload.saved === 'auto' ? 'auto' : payload.identity;
+    }
+
+    const label = byId('net-identity-label');
+    if (label) label.textContent = `接入方式：${payload.label}`;
+    const note = byId('net-identity-note');
+    if (note) note.textContent = payload.note || '';
+    const statement = byId('net-identity-statement');
+    if (statement) statement.textContent = [payload.scopeNote, payload.statement].filter(Boolean).join(' ');
+    const bar = byId('net-identity-bar');
+    if (bar) bar.dataset.identity = payload.identity;
+  }
+
+  /** 从主进程读当前该用哪一档；失败只报在状态条，不挡住分区里别的卡片 */
+  async function loadNetIdentity() {
+    if (!window.nyx || typeof window.nyx.netIdentity !== 'function') return;
+    try {
+      applyNetIdentity(await window.nyx.netIdentity());
+    } catch (err) {
+      setStatus(`接入方式读取失败：${err && err.message ? err.message : err}`, true);
+    }
+  }
+
+  /** 只绑一次：改完立刻落盘并重铺界面，失败必须说出来并把选择器拨回去（不静默） */
+  function wireNetIdentity() {
+    const select = byId('net-identity-select');
+    if (!select || select.dataset.wired === '1') return;
+    select.dataset.wired = '1';
+    select.addEventListener('change', async () => {
+      const previous = netIdentityState && netIdentityState.saved ? netIdentityState.saved : 'auto';
+      select.disabled = true;
+      try {
+        const payload = await window.nyx.setNetIdentity(select.value);
+        if (!payload || payload.ok === false) {
+          setStatus(`接入方式没能保存：${(payload && payload.error) || '未知原因'}`, true);
+          select.value = previous;
+          return;
+        }
+        applyNetIdentity(payload);
+        setStatus(`接入方式已切换为「${payload.label}」`);
+        document.dispatchEvent(new CustomEvent('nyx:net-identity', { detail: payload }));
+      } catch (err) {
+        setStatus(`接入方式没能保存：${err && err.message ? err.message : err}`, true);
+        select.value = previous;
+      } finally {
+        select.disabled = false;
+      }
+    });
+  }
+
   function activate(section) {
     if (!SEC_LABELS[section]) return;
 
@@ -857,6 +1035,12 @@
 
     if (section === 'agent') {
       loadAgentSection();
+    }
+
+    // 接入方式（VPN 接入外壳清单 B2）：进分区回读一次，别的窗口改过也能跟上叫法
+    if (section === 'network') {
+      wireNetIdentity();
+      loadNetIdentity();
     }
 
     if (section === 'privacy') {
@@ -4919,6 +5103,9 @@ async function loadFootprint() {
     // 折叠只依赖界面偏好，所以先把偏好等到手、立刻增强卡片，再让另外两件慢慢来。
     // （硬件探测在部分驱动/远程会话下会挂住；把它排在折叠前面就等于"一颗钉子钉住整页"。）
     await settleInit('界面偏好', 8000, loadUiPrefs);
+    // 接入方式（清单 B2）：与界面偏好同批，失败不挡住折叠增强——词条没到手就还是 HTML 里的兜底中文
+    settleInit('接入方式', 8000, loadNetIdentity);
+    wireNetIdentity();
     auditPanels();
     setupCardFolding();
     // 结构图：入口先画出来，用户一进来就能点（不依赖任何网络/硬件信息）

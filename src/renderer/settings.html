@@ -704,21 +704,32 @@
             </section>
 
             <section class="sec-panel" data-sec="network">
+              <!-- 接入方式（VPN 接入外壳清单 B2）：一行说明 + 一个选择器，不新开窗口。
+                   三档只换叫法与默认文案；选「自定义服务端」逐字回到旧版界面。
+                   文案由 src/core/net-terms.js 提供，这里的中文只是脚本没到位时的兜底。 -->
+              <div class="net-identity-bar" id="net-identity-bar">
+                <div class="net-identity-row">
+                  <span class="net-identity-label" id="net-identity-label">接入方式</span>
+                  <select id="net-identity-select" title="选择接入方式"></select>
+                </div>
+                <p class="net-identity-note" id="net-identity-note"></p>
+                <p class="net-identity-statement" id="net-identity-statement"></p>
+              </div>
 <div class="layout">
             <!-- 左栏：订阅管理 -->
             <aside class="panel panel-side">
               <div class="panel-head">
-                <h2>订阅</h2>
+                <h2 data-net-term="subscriptionTitle">订阅</h2>
                 <span class="badge" id="sub-count">— 条</span>
               </div>
-              <p class="hint">启用的订阅决定节点来源，切换订阅会自动重启内核。</p>
+              <p class="hint" data-net-term="subscriptionHint">启用的订阅决定节点来源，切换订阅会自动重启内核。</p>
 
               <ul class="sub-list" id="sub-list"></ul>
 
               <form class="sub-form" id="sub-form" autocomplete="off">
-                <input type="text" id="sub-name" placeholder="备注名（可留空）" autocomplete="off">
-                <input type="text" id="sub-url" placeholder="订阅地址，以 https:// 开头" autocomplete="off" spellcheck="false">
-                <button type="submit" class="btn btn-primary" id="btn-add-sub">添加订阅</button>
+                <input type="text" id="sub-name" placeholder="备注名（可留空）" data-net-ph="subscriptionNameHint" autocomplete="off">
+                <input type="text" id="sub-url" placeholder="订阅地址，以 https:// 开头" data-net-ph="subscriptionUrlHint" autocomplete="off" spellcheck="false">
+                <button type="submit" class="btn btn-primary" id="btn-add-sub" data-net-term="subscriptionAdd">添加订阅</button>
               </form>
             </aside>
 
@@ -727,29 +738,29 @@
               <div class="kernel-bar">
                 <div class="brand">
                   <span class="status-dot" id="kernel-dot" aria-></span>
-                  <h2>内置代理内核</h2>
+                  <h2 data-net-term="channelTitle">内置代理内核</h2>
                   <span class="badge" id="kernel-badge">内核未启动</span>
                 </div>
 
                 <div class="topbar-meta">
                   <span class="meta">
-                    <span class="meta-k">当前订阅</span>
+                    <span class="meta-k" data-net-term="channelStateLabel">当前订阅</span>
                     <span class="meta-v" id="active-sub">未配置</span>
                   </span>
                   <span class="meta">
-                    <span class="meta-k">混合端口</span>
+                    <span class="meta-k" data-net-term="localPortTerm">混合端口</span>
                     <span class="meta-v num" id="mixed-port">—</span>
                   </span>
                   <span class="meta">
-                    <span class="meta-k">出口 IP</span>
+                    <span class="meta-k" data-net-term="exitIpTerm">出口 IP</span>
                     <span class="meta-v" id="exit-ip">未检测</span>
                   </span>
                 </div>
 
                 <div class="topbar-actions">
-                  <button type="button" class="btn btn-primary" id="btn-start">启动内置代理</button>
-                  <button type="button" class="btn" id="btn-stop">停止</button>
-                  <button type="button" class="btn" id="btn-restart">重新拉取配置</button>
+                  <button type="button" class="btn btn-primary" id="btn-start" data-net-term="channelConnect">启动内置代理</button>
+                  <button type="button" class="btn" id="btn-stop" data-net-term="channelDisconnect">停止</button>
+                  <button type="button" class="btn" id="btn-restart" data-net-term="channelRefetch">重新拉取配置</button>
                 </div>
               </div>
 

@@ -81,6 +81,8 @@ const {
 } = require('./core/permission-store');
 const { Vault } = require('./core/vault');
 const { ProxyService } = require('./core/proxy-service');
+// 接入外壳文案唯一真源（VPN 接入外壳清单）：三档身份的字都从这份表取，主进程只做存取
+const netTerms = require('./core/net-terms');
 const { TabManager, normalizeInput } = require('./core/tabs');
 const { createActionRunner, setNavigateBudgetProvider } = require('./core/actions');
 // 统一动作通道（清单 C）：所有 agent 动作唯一入口，权限/确认/留痕/急停都从这里过
@@ -7292,6 +7294,68 @@ function registerSettingsIpc() {
     if (runtime.tabManager) pushState(runtime.tabManager.snapshot());
 
     return { ok: true, ui: result.ui || currentUiPrefs() };
+  });
+
+  /**
+   * 接入方式（VPN 接入外壳清单 B1）。
+   *
+   * 只做三件事：读当前该用哪一档、判断"这台机器像不像老用户"、写用户显式选择的身份。
+   * 不碰内核、订阅、端口与分流——换身份不重启内核、不重连（清单验收第 3 条）。
+   */
+  function netHasExistingConfig() {
+    // 判断依据只有一条：已有接入配置（订阅）。服务没就绪或抛错时按"老用户"处理——
+    // 宁可让升级用户维持旧界面，也不要给一个用了很久的人突然换成校园口径。
+    try {
+      const status =
+        runtime.proxyService && typeof runtime.proxyService.status === 'function'
+          ? runtime.proxyService.status()
+          : null;
+      const subs = status && Array.isArray(status.subscriptions) ? status.subscriptions : [];
+      return subs.length > 0;
+    } catch {
+      return true;
+    }
+  }
+
+  function netIdentityPayload() {
+    const saved = (runtime.uiStore && runtime.uiStore.get().netIdentity) || netTerms.IDENTITY_AUTO;
+    const hasExistingConfig = netHasExistingConfig();
+    const identity = netTerms.resolveIdentity(saved, { hasExistingConfig });
+    return {
+      ok: true,
+      saved,
+      identity,
+      auto: saved === netTerms.IDENTITY_AUTO,
+      hasExistingConfig,
+      label: netTerms.IDENTITY_LABELS[identity],
+      note: netTerms.IDENTITY_NOTES[identity],
+      options: netTerms.describeIdentities(),
+      statement: netTerms.SHELL_STATEMENT,
+      scopeNote: netTerms.IDENTITY_SCOPE_NOTE,
+      terms: netTerms.termsFor(identity),
+    };
+  }
+
+  ipcMain.handle('nyx:net:identity', () => netIdentityPayload());
+
+  ipcMain.handle('nyx:net:identity-set', (_event, payload) => {
+    if (!runtime.uiStore) return { ok: false, error: '界面偏好存储未就绪' };
+
+    const identity = payload && payload.identity;
+    if (!netTerms.IDENTITIES.includes(identity)) {
+      const names = netTerms.IDENTITIES.map((id) => netTerms.IDENTITY_LABELS[id]).join(' / ');
+      return { ok: false, error: `接入方式只能是：${names}` };
+    }
+
+    const result = runtime.uiStore.set('netIdentity', identity);
+    if (!result || result.ok === false) {
+      return { ok: false, error: (result && result.error) || '接入方式没能保存' };
+    }
+
+    // 顶栏与设置页都读同一份偏好，改完立刻推一次状态，避免两边显示两套叫法
+    if (runtime.tabManager) pushState(runtime.tabManager.snapshot());
+
+    return Object.assign({ ok: true }, netIdentityPayload());
   });
 
   /**

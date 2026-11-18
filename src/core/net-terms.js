@@ -1,0 +1,250 @@
+'use strict';
+
+/**
+ * 接入外壳文案唯一真源（VPN 接入外壳改造清单 §3）。
+ *
+ * 为什么要有这个文件：同一句话以前散落在 settings.html、proxy-center.js、main.js 三处，
+ * 换一种叫法要改一地三份，漏一处就出现"半新半旧"的界面。这里把词条收成一份表，
+ * 三档身份（校园 / 单位 / 自定义）各自取一套，界面只许从 `termsFor()` 拿字，不许自己写死。
+ *
+ * 三条不可越的边界：
+ *   1. 只改字，不改行为——内核、订阅、端口、分流、已有偏好键一律不动。
+ *   2. `custom` 一档逐字等于今天的界面：切回它等于回到旧版外观，老用户不会被悄悄改词。
+ *   3. 校园 / 单位两档里不出现"代理"二字（合规要求见清单 §5），词条缺字直接抛错，
+ *      绝不静默回退到 `custom` 的字——那样会悄悄露出旧术语。
+ *
+ * 本模块是纯字符串表，不 require electron / fs / path，故界面侧（preload）也能同步取用。
+ */
+
+/** 三档身份：校园网络接入 / 单位网络接入 / 自定义服务端（= 今天的界面） */
+const IDENTITIES = ['campus', 'enterprise', 'custom'];
+
+/** 「跟随默认」：新装默认 campus、老用户首次升级默认 custom，由 resolveIdentity 决定 */
+const IDENTITY_AUTO = 'auto';
+
+/** 干净机器（没有历史配置）的默认身份 */
+const DEFAULT_IDENTITY = 'campus';
+
+/** 有历史配置的机器（升级用户）的默认身份 */
+const UPGRADE_IDENTITY = 'custom';
+
+const IDENTITY_LABELS = {
+  campus: '校园网络接入',
+  enterprise: '单位网络接入',
+  custom: '自定义服务端',
+};
+
+/** 设置页选择器里的一句话说明：只描述"该怎么填"，不替任何机构背书 */
+const IDENTITY_NOTES = {
+  campus: '按学校网络中心给的说明填写服务端地址与接入配置；具体以学校通知为准。',
+  enterprise: '按单位网络管理员给的说明填写服务端地址与接入配置；具体以单位通知为准。',
+  custom: '自己配置服务端与订阅，术语与旧版完全一致。',
+};
+
+/** 关于页与设置页都要能看到的定位声明（合规：不暗示官方背书） */
+const SHELL_STATEMENT =
+  'Nyx 是通用网络代理工具：不内置任何学校或单位的地址、标识与配色，也不代表任何机构认可或授权。';
+
+/** 换身份只影响界面，这句话必须让用户看见，避免以为换了网络实现 */
+const IDENTITY_SCOPE_NOTE = '换接入方式只改界面叫法与默认文案，不改网络、内核或已有配置。';
+
+/**
+ * custom 一档：逐字等于今天的界面，**改动这里的任何一个字都等于改老用户的界面**。
+ * 键的顺序即界面上出现的顺序，便于逐条核对。
+ */
+const CUSTOM_TERMS = {
+  sectionLabel: '网络与代理',
+  channelTitle: '内置代理内核',
+  channelStateLabel: '当前订阅',
+  channelConnect: '启动内置代理',
+  channelDisconnect: '停止',
+  channelRefetch: '重新拉取配置',
+  channelDown: '代理不可达',
+  channelForce: '强制走代理',
+  serverTitle: '服务端与订阅',
+  subscriptionTitle: '订阅',
+  subscriptionAdd: '添加订阅',
+  subscriptionCurrent: '当前订阅',
+  subscriptionHint: '启用的订阅决定节点来源，切换订阅会自动重启内核。',
+  subscriptionEmpty: '暂无订阅，请在下方添加。',
+  subscriptionNameHint: '备注名（可留空）',
+  subscriptionUrlHint: '订阅地址，以 https:// 开头',
+  advancedTitle: '高级',
+  coreTitle: '内置代理内核',
+  nodeTerm: '节点',
+  latencyTerm: '测速',
+  ruleTerm: '分流规则',
+  exitIpTerm: '出口 IP',
+  selfHealTerm: '智能巡航',
+  localPortTerm: '混合端口',
+  directTerm: '直连',
+  upstreamTerm: '出站链路',
+  onboardTitle: '选择接入方式',
+  onboardSkip: '先不定',
+};
+
+/** 校园 / 单位两档共用的外壳词：只换词，不新增功能 */
+const SHELL_TERMS = {
+  sectionLabel: '接入通道',
+  channelTitle: '接入通道',
+  channelStateLabel: '当前接入配置',
+  channelConnect: '连接接入通道',
+  channelDisconnect: '断开',
+  channelRefetch: '重新获取接入配置',
+  channelDown: '通道不可达',
+  channelForce: '强制经接入通道',
+  serverTitle: '服务端与接入配置',
+  subscriptionTitle: '接入配置',
+  subscriptionAdd: '添加接入配置',
+  subscriptionCurrent: '当前接入配置',
+  subscriptionHint: '启用的接入配置决定可用线路来源，切换会自动重启接入组件。',
+  subscriptionEmpty: '暂无接入配置，请在下方添加。',
+  subscriptionNameHint: '备注名（可留空）',
+  subscriptionUrlHint: '接入配置地址，以 https:// 开头',
+  advancedTitle: '高级',
+  coreTitle: '接入组件',
+  nodeTerm: '线路',
+  latencyTerm: '线路质量检测',
+  ruleTerm: '访问规则',
+  exitIpTerm: '出口地址',
+  selfHealTerm: '线路自愈',
+  localPortTerm: '本地端口',
+  directTerm: '直接访问',
+  upstreamTerm: '出站链路',
+  onboardTitle: '选择接入方式',
+  onboardSkip: '先不定',
+};
+
+/** 词条键全集：任何一档取字前都先按这份清单校验，缺键直接报错 */
+const TERM_KEYS = Object.keys(CUSTOM_TERMS);
+
+/** 校园 / 单位两档不许出现的旧术语（出现即视为漏改，宁可报错也不静默） */
+const LEGACY_WORDS = [
+  '代理中心',
+  '内置代理内核',
+  '订阅',
+  '节点',
+  '测速',
+  '分流规则',
+  '混合端口',
+  '智能巡航',
+  '直连',
+  '出口 IP',
+  '代理',
+];
+
+/** custom 档里允许出现「接入」的键：引导页本身就叫「选择接入方式」，属通用说法 */
+const SHELL_WORD_ALLOW = ['onboardTitle'];
+
+function assertIdentity(identity) {
+  if (!IDENTITIES.includes(identity)) {
+    throw new Error(`接入外壳接入方式不存在：${identity}`);
+  }
+  return identity;
+}
+
+/** 某档身份的完整词表（浅拷贝，调用方改不到真源） */
+function termsFor(identity) {
+  assertIdentity(identity);
+  return identity === 'custom'
+    ? Object.assign({}, CUSTOM_TERMS)
+    : Object.assign({}, CUSTOM_TERMS, SHELL_TERMS);
+}
+
+/**
+ * 取一个词条。
+ * @param {string} key     词条键（见 TERM_KEYS）
+ * @param {string} identity 具体身份；传 auto 属于调用方错误，直接抛
+ */
+function t(key, identity) {
+  const terms = termsFor(identity);
+  if (!Object.prototype.hasOwnProperty.call(terms, key)) {
+    throw new Error(`接入外壳词条不存在：${key}`);
+  }
+  const value = terms[key];
+  if (!value) throw new Error(`缺少「${identity}」的取值：${key}`);
+  return value;
+}
+
+/**
+ * 决定当前该用哪一档身份。
+ *
+ * 规则（清单 §2 默认值）：用户显式选过就用选的；没选过（auto）时，
+ * 机器上有历史接入配置 → custom（升级用户维持原样），干净机器 → campus（新装走引导）。
+ * 不传 ctx 时按"没配置"处理（= campus）：主进程传的是它算好的值，异常时它自己按老用户保守处理，
+ * 这个纯函数不替调用方猜。
+ *
+ * @param {string} saved 偏好里存的值（可能是 auto、空或脏数据）
+ * @param {{hasExistingConfig?: boolean}} [ctx]
+ */
+function resolveIdentity(saved, ctx) {
+  if (IDENTITIES.includes(saved)) return saved;
+  const hasExistingConfig = Boolean(ctx && ctx.hasExistingConfig);
+  return hasExistingConfig ? UPGRADE_IDENTITY : DEFAULT_IDENTITY;
+}
+
+/** 选择器要展示的三档：label 中文名、note 一句话说明 */
+function describeIdentities() {
+  return IDENTITIES.map((id) => ({
+    id,
+    label: IDENTITY_LABELS[id],
+    note: IDENTITY_NOTES[id],
+  }));
+}
+
+/**
+ * 自检：三档都必须齐全、非空，且不越边界。
+ * 返回问题列表（空数组 = 通过）；不抛错，便于回归脚本一次打印全部问题。
+ */
+function assertCoverage() {
+  const problems = [];
+  for (const identity of IDENTITIES) {
+    const terms = termsFor(identity);
+    for (const key of TERM_KEYS) {
+      const value = terms[key];
+      if (typeof value !== 'string' || !value.trim()) {
+        problems.push(`${identity} 缺少词条 ${key}`);
+      }
+    }
+    for (const key of Object.keys(terms)) {
+      if (!TERM_KEYS.includes(key)) problems.push(`${identity} 多出未登记词条 ${key}`);
+    }
+  }
+
+  // custom 是"今天的界面"，除引导标题外不许冒出「接入」
+  for (const key of TERM_KEYS) {
+    if (SHELL_WORD_ALLOW.includes(key)) continue;
+    if (CUSTOM_TERMS[key].includes('接入')) problems.push(`custom 的 ${key} 混入外壳词：${CUSTOM_TERMS[key]}`);
+  }
+
+  // 校园 / 单位两档不许留旧术语，尤其不许出现「代理」
+  for (const identity of ['campus', 'enterprise']) {
+    const terms = termsFor(identity);
+    for (const key of TERM_KEYS) {
+      const value = terms[key];
+      for (const word of LEGACY_WORDS) {
+        if (value.includes(word)) problems.push(`${identity} 的 ${key} 残留旧术语「${word}」：${value}`);
+      }
+    }
+  }
+
+  return problems;
+}
+
+module.exports = {
+  IDENTITIES,
+  IDENTITY_AUTO,
+  DEFAULT_IDENTITY,
+  UPGRADE_IDENTITY,
+  IDENTITY_LABELS,
+  IDENTITY_NOTES,
+  IDENTITY_SCOPE_NOTE,
+  SHELL_STATEMENT,
+  TERM_KEYS,
+  LEGACY_WORDS,
+  termsFor,
+  t,
+  resolveIdentity,
+  describeIdentities,
+  assertCoverage,
+};

@@ -11,6 +11,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 // 动效档位的时长与缓动只有一份（src/core/motion.js）；界面侧同步取用，避免两处各写一套数字
 const motionCore = require('./core/motion');
 const fontScaleCore = require('./core/font-scale');
+// 接入外壳词表（VPN 接入外壳清单 B1）：界面只许从这里取字，词表本身是纯字符串模块
+const netTermsCore = require('./core/net-terms');
 
 /**
  * 主题启动前置：渲染层要等 getState() 回调才知道主题，
@@ -66,6 +68,20 @@ contextBridge.exposeInMainWorld('nyx', {
 
   /** 写入单项界面偏好；仅接受白名单键与布尔值 */
   setUiPref: (key, value) => ipcRenderer.invoke('nyx:ui:prefs-set', { key, value }),
+
+  /* ---------------- 接入方式（VPN 接入外壳清单 B1） ---------------- */
+
+  /** 当前该用哪一档接入方式：identity / 是否自动推断 / 三档选项 / 词表 / 定位声明 */
+  netIdentity: () => ipcRenderer.invoke('nyx:net:identity'),
+
+  /** 写入用户显式选择的接入方式（campus / enterprise / custom），返回新载荷 */
+  setNetIdentity: (identity) => ipcRenderer.invoke('nyx:net:identity-set', { identity }),
+
+  /** 同步取某档的全部词条（不落盘、不走 IPC；界面渲染前先用它铺字） */
+  netTermsFor: (identity) => netTermsCore.termsFor(identity),
+
+  /** 三档选择器的选项（label + note），与主进程共用一份表 */
+  netIdentityOptions: () => netTermsCore.describeIdentities(),
 
   /** 应用与运行时信息（版本、内核版本、安装与用户数据目录、主页、标签上限） */
   getAppInfo: () => ipcRenderer.invoke('nyx:app:info'),

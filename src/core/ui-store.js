@@ -127,6 +127,18 @@ const UI_PREF_DEFAULTS = {
   privateSiteMode: 'all',
   privateSiteAllow: [],
   privateSiteBlock: [],
+
+  /**
+   * 接入方式（VPN 接入外壳清单 B1）。
+   *
+   * 'auto' 是关键的一档：它不写死 campus，而是交给 net-terms.resolveIdentity 在读取时判断——
+   * 有历史接入配置的老用户仍看到 custom（今天的界面，一个字都不变），
+   * 干净机器才走 campus（校园网络接入）。这样升级用户不会被悄悄改词，
+   * 而新装的机器又能按引导里的选择起步。用户显式选过之后这里存具体身份，不再自动推断。
+   *
+   * 只影响界面文案与默认叫法：不碰内核、订阅、端口、分流与任何既有偏好键。
+   */
+  netIdentity: 'auto',
 };
 
 /** 枚举型偏好的合法取值（键 → 允许值）。
@@ -141,6 +153,8 @@ const UI_PREF_ENUMS = {
   motionLevel: ['calm', 'lively'],
   /** 界面字号档位（清单 D3 遗留项）；倍率见 src/core/font-scale.js */
   fontScale: ['small', 'normal', 'large', 'huge'],
+  /** 接入方式（VPN 接入外壳清单 B1）：auto = 按有无历史配置自动推断 */
+  netIdentity: ['auto', 'campus', 'enterprise', 'custom'],
 };
 
 class UiStore {
