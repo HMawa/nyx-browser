@@ -3399,7 +3399,12 @@ async function main() {
       const opened = {
         hidden: menu.hidden,
         expanded: more.getAttribute('aria-expanded'),
-        items: Array.from(menu.querySelectorAll('.more-item')).map((el) => el.textContent.replace(/\\s+/g, ' ').trim()),
+        items: Array.from(menu.querySelectorAll('.more-item')).map((el) => ({
+          id: el.id,
+          // 网络那一项的说法会随接入方式换词（代理中心 / 接入通道），所以按它指向的分区判定，不按字面
+          netSection: el.getAttribute('data-net-section') || '',
+          text: el.textContent.replace(/\\s+/g, ' ').trim(),
+        })),
         rect: (() => { const r = menu.getBoundingClientRect(); return { top: Math.round(r.top), right: Math.round(r.right), w: Math.round(r.width) }; })(),
         innerWidth: window.innerWidth,
         // 菜单必须整个落在外壳里：落在外壳外的那截会被标签页的 WebContentsView 盖住
@@ -3426,10 +3431,10 @@ async function main() {
         && toolbarFlow.opened.hidden === false
         && toolbarFlow.opened.expanded === 'true'
         && toolbarFlow.opened.items.length === 4
-        && toolbarFlow.opened.items.some((t) => /页面截图/.test(t))
-        && toolbarFlow.opened.items.some((t) => /页面摘要/.test(t))
-        && toolbarFlow.opened.items.some((t) => /扩展开关/.test(t))
-        && toolbarFlow.opened.items.some((t) => /代理中心/.test(t))
+        && toolbarFlow.opened.items.some((it) => /页面截图/.test(it.text))
+        && toolbarFlow.opened.items.some((it) => /页面摘要/.test(it.text))
+        && toolbarFlow.opened.items.some((it) => /扩展开关/.test(it.text))
+        && toolbarFlow.opened.items.some((it) => it.netSection === 'network')
         && toolbarFlow.opened.rect.right <= toolbarFlow.opened.innerWidth
         && toolbarFlow.opened.rect.w >= 200
         && toolbarFlow.closed.hidden === true

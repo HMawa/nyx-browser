@@ -925,7 +925,8 @@
         acceptNode(node) {
           const parent = node.parentElement;
           if (!parent || NET_SHELL_TEXT_SKIP.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
-          if (parent.closest('.log-box, pre, code')) return NodeFilter.FILTER_REJECT;
+          // 日志区是内核原始输出；[data-net-keep] 是清单 §7.3 要求保留的「通用网络代理工具」事实陈述
+          if (parent.closest('.log-box, pre, code, [data-net-keep]')) return NodeFilter.FILTER_REJECT;
           return NodeFilter.FILTER_ACCEPT;
         },
       });
@@ -936,6 +937,7 @@
         if (next !== node.nodeValue) node.nodeValue = next;
       }
       for (const el of panel.querySelectorAll(NET_SHELL_ATTRS.map((name) => `[${name}]`).join(','))) {
+        if (el.closest('[data-net-keep]')) continue;
         for (const name of NET_SHELL_ATTRS) {
           const value = el.getAttribute(name);
           if (!value) continue;

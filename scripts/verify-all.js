@@ -52,7 +52,7 @@
  * 46. scripts/verify-font-scale.js（界面字号档位：四档倍率与中文名、未知值回标准档、style/settings/全部 theme-*.css 里字号全部乘 --font-scale 且不留裸 px、主窗口与设置页都会写到根元素、preload 三条同步 API、模块保持纯逻辑，15 项；纯 Node，不启动 Electron）
  * 47. scripts/verify-navigate-budget-e2e.js（应用页导航预算真机：从设置页出发，慢页按 3 秒预算返回 NAVIGATE_TIMEOUT 而不是 14ms 假成功、超时结果带 tabId、新标签确实开了、快页回 tabId/fromAppPage，7 项）
  * 48. scripts/verify-privacy-check.js（隐私自检判定引擎：五档各一例、矛盾即可疑、`truth=null` 一律测不到且不许拿观察值顶替、高熵版本号取不到即测不到、语言归一后比对、时区与地区双向对照、像素比不一致即可疑、报告默认脱敏（真实值与身份面观察值一并隐藏）、泄露与稳定画布的判定、报告里不许出现绝对化措辞与百分制评分、模块保持纯逻辑、报告 JSON 字段固定，29 项；纯 Node，不启动 Electron）
- * 49. scripts/verify-net-terms.js（接入外壳：词表纯字符串模块与三档身份、auto 推断（老用户 custom / 干净机器 campus）、custom 逐字冻结、校园与单位不许留「代理」等旧术语、缺词抛错不回退、uiStore 真写读回、两个 IPC 只碰偏好、三段式只在非 custom 生效且可原样搬回、动态句子换词零残留、三处接线齐全，26 项；纯 Node，不启动 Electron）
+ * 49. scripts/verify-net-terms.js（接入外壳：词表纯字符串模块与三档身份、auto 推断（老用户 custom / 干净机器 campus）、custom 逐字冻结、校园与单位不许留「代理」等旧术语、缺词抛错不回退、uiStore 真写读回、两个 IPC 只碰偏好、三段式只在非 custom 生效且可原样搬回、动态句子换词零残留、三处接线齐全、外壳（地址栏/状态条/提示）也换词、关于页事实陈述与 GPL 声明豁免换词，28 项；纯 Node，不启动 Electron）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -397,7 +397,7 @@ const STEPS = [
   {
     label: '接入外壳回归',
     script: 'verify-net-terms.js',
-    items: '26 项',
+    items: '28 项',
     timeoutMs: 60000,
   },
 ];

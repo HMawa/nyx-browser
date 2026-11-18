@@ -7356,7 +7356,13 @@ function registerSettingsIpc() {
     // 顶栏与设置页都读同一份偏好，改完立刻推一次状态，避免两边显示两套叫法
     if (runtime.tabManager) pushState(runtime.tabManager.snapshot());
 
-    return Object.assign({ ok: true }, netIdentityPayload());
+    // 外壳（地址栏 / 状态条 / 提示）不在设置页那棵 DOM 里，得单独通知它换词
+    const payloadForShell = netIdentityPayload();
+    if (runtime.mainWindow && !runtime.mainWindow.isDestroyed()) {
+      runtime.mainWindow.webContents.send('nyx:net-identity-changed', payloadForShell);
+    }
+
+    return Object.assign({ ok: true }, payloadForShell);
   });
 
   /**

@@ -26,6 +26,8 @@ const settingsJs = read('src/renderer/settings.js');
 const proxyCenterCss = read('src/renderer/proxy-center.css');
 const preloadJs = read('src/preload.js');
 const mainJs = read('src/main.js');
+const rendererJs = read('src/renderer/renderer.js');
+const indexHtml = read('src/renderer/index.html');
 
 const checks = [];
 function check(name, fn) {
@@ -336,6 +338,38 @@ check('26. 动态文案接上线：preload 同步接口 + 设置页扫描 + Obse
   assert.ok(/\.log-box, pre, code/.test(block), '日志区必须跳过：那是内核原始输出');
   assert.ok(/netShellObserver\.disconnect\(\)/.test(block), '切回 custom 或重装时必须先摘掉旧 Observer');
   assert.ok(/!\[.campus., .enterprise.\]\.includes\(identity\)\) return/.test(block), '只有校园/单位两档才挂 Observer');
+});
+
+check('27. 外壳（地址栏/状态条/提示）也换词：主进程改完推事件、外壳收到重扫、日志区仍跳过', () => {
+  assert.ok(/nyx:net-identity-changed/.test(mainJs), '主进程没推「接入方式改过」事件');
+  assert.ok(/onNetIdentityChanged: \(handler\)/.test(preloadJs), 'preload 缺 onNetIdentityChanged');
+  assert.ok(/function loadNetIdentityShell/.test(rendererJs), '外壳缺接入方式加载');
+  assert.ok(/loadNetIdentityShell\(\)/.test(rendererJs), '外壳初始化没调 loadNetIdentityShell');
+  assert.ok(/function sweepNetIdentityText/.test(rendererJs) && /function watchNetIdentityText/.test(rendererJs), '外壳缺换词扫描');
+  const block = rendererJs.slice(rendererJs.indexOf('function sweepNetIdentityText'), rendererJs.indexOf('function loadNetIdentityShell'));
+  assert.ok(/\.log-box, pre, code/.test(rendererJs), '外壳也要跳过内核日志区');
+  assert.ok(/\.log-box, pre, code/.test(block) || /NET_SWEEP_SKIP_SELECTOR/.test(block), '外壳扫描要用上跳过名单');
+  assert.ok(/netIdentityObserver\.disconnect\(\)/.test(block), '外壳重装前要摘旧 Observer');
+  // 外壳不许自己判断身份，只认主进程给的 identity
+  assert.ok(!/resolveIdentity/.test(rendererJs), '外壳不该自己推断接入方式');
+});
+
+check('28. 关于页保留事实陈述：通用网络代理工具 + mihomo GPL-3.0，换词扫描豁免 data-net-keep', () => {
+  const aboutAt = settingsHtml.indexOf('data-sec="about"');
+  assert.ok(aboutAt > 0, '设置页找不到关于分区');
+  const about = settingsHtml.slice(aboutAt);
+  const keepAt = about.indexOf('data-net-keep');
+  assert.ok(keepAt > 0, '关于页的事实陈述必须标 data-net-keep，否则会被换词扫掉');
+  const keep = about.slice(keepAt, keepAt + 700);
+  assert.ok(/通用网络代理工具/.test(keep), '关于页要保留「本产品是通用网络代理工具」的事实陈述（清单 §7.3）');
+  assert.ok(/mihomo/.test(keep) && /GPL-3\.0/.test(keep), '关于页要有 mihomo 的 GPL-3.0 声明');
+  assert.ok(/data-net-keep/.test(settingsJs), '设置页扫描要跳过 data-net-keep');
+  assert.ok(/\[data-net-keep\]/.test(rendererJs), '外壳扫描要跳过 data-net-keep');
+  // 清单验收 12：全隐私开关的可访问标签与可见文案同源；原生文案里本来写着「代理」，换词必须连 aria-label / title 一起换
+  const privacyBtn = indexHtml.slice(indexHtml.indexOf('id="mode-toggle"') - 200, indexHtml.indexOf('id="mode-toggle"') + 700);
+  assert.ok(/aria-label="全隐私模式开关/.test(privacyBtn), '隐私开关的 aria-label 不见了');
+  assert.ok(/强制走代理/.test(privacyBtn), '隐私开关原生 title 里应有「强制走代理」，否则这条断言没有意义');
+  assert.ok(/aria-label/.test(rendererJs) && /title/.test(rendererJs), '外壳扫描要连 title / aria-label 一起换');
 });
 
 const failed = checks.filter((item) => !item.pass);

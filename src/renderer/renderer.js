@@ -1125,12 +1125,118 @@ function showNotice(notice) {
   window.setTimeout(() => box.remove(), 10000);
 }
 
+/* ---------------- 接入外壳：外壳文本换词（清单 B6） ---------------- */
+
+/**
+ * 外壳（地址栏、状态条、提示、错误页）不是设置页那棵 DOM，观察器管不到，
+ * 所以这里再挂一份：拿主进程算好的身份，把外壳里已经画出来的字按词表换掉，
+ * 之后新冒出来的字（状态推送、通知）也由 MutationObserver 兜住。
+ *
+ * 两条边界：内核日志区（.log-box / pre / code）不许改字；自定义档原样不动。
+ */
+let netIdentityShell = 'custom';
+let netIdentityObserver = null;
+let netIdentitySweeping = false;
+let netIdentityTimer = 0;
+// 换词会把原来的字覆盖掉，切回「自定义服务端」时得能逐字还原：记住每个节点/属性原来的值
+const netSweepTextOriginals = new WeakMap();
+const netSweepAttrOriginals = new WeakMap();
+
+const NET_SWEEP_SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'TEXTAREA', 'INPUT', 'SELECT', 'OPTION']);
+const NET_SWEEP_SKIP_SELECTOR = '.log-box, pre, code, [data-net-keep]';
+
+function netShellizeText(text, identity) {
+  if (!text || identity === 'custom') return text;
+  const fn = window.nyx && window.nyx.netShellizeText;
+  if (typeof fn !== 'function') return text;
+  try {
+    return fn(text, identity);
+  } catch {
+    return text;
+  }
+}
+
+function sweepNetIdentityText(identity) {
+  if (!document.body) return;
+  netIdentitySweeping = true;
+  try {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const parent = node.parentElement;
+        if (!parent) return NodeFilter.FILTER_REJECT;
+        if (NET_SWEEP_SKIP_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
+        if (parent.closest(NET_SWEEP_SKIP_SELECTOR)) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      const current = node.nodeValue;
+      const original = netSweepTextOriginals.get(node);
+      // 记录的不是「我们换出来的字」，就说明这行是刚被渲染出来的新内容，重记一次
+      if (original === undefined || current !== netShellizeText(original, identity)) {
+        netSweepTextOriginals.set(node, current);
+      }
+      const source = netSweepTextOriginals.get(node);
+      const next = identity === 'custom' ? source : netShellizeText(source, identity);
+      if (next !== current) node.nodeValue = next;
+    }
+    for (const node of document.querySelectorAll('[title], [aria-label], [placeholder]')) {
+      if (node.closest('[data-net-keep]')) continue;
+      const stored = netSweepAttrOriginals.get(node) || {};
+      for (const attr of ['title', 'aria-label', 'placeholder']) {
+        if (!node.hasAttribute(attr)) continue;
+        const current = node.getAttribute(attr);
+        if (stored[attr] === undefined || current !== netShellizeText(stored[attr], identity)) {
+          stored[attr] = current;
+        }
+        const next = identity === 'custom' ? stored[attr] : netShellizeText(stored[attr], identity);
+        if (next !== current) node.setAttribute(attr, next);
+      }
+      netSweepAttrOriginals.set(node, stored);
+    }
+  } finally {
+    netIdentitySweeping = false;
+  }
+}
+
+function watchNetIdentityText(identity) {
+  netIdentityShell = identity;
+  sweepNetIdentityText(identity);
+  if (netIdentityObserver) {
+    netIdentityObserver.disconnect();
+    netIdentityObserver = null;
+  }
+  if (identity === 'custom' || !document.body) return;
+  netIdentityObserver = new MutationObserver(() => {
+    if (netIdentitySweeping || netIdentityShell === 'custom') return;
+    window.clearTimeout(netIdentityTimer);
+    netIdentityTimer = window.setTimeout(() => sweepNetIdentityText(netIdentityShell), 80);
+  });
+  netIdentityObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+}
+
+function loadNetIdentityShell() {
+  if (!window.nyx || typeof window.nyx.netIdentity !== 'function') return;
+  window.nyx
+    .netIdentity()
+    .then((payload) => watchNetIdentityText((payload && payload.identity) || 'custom'))
+    .catch(() => {});
+  if (typeof window.nyx.onNetIdentityChanged === 'function') {
+    window.nyx.onNetIdentityChanged((payload) => {
+      watchNetIdentityText((payload && payload.identity) || 'custom');
+    });
+  }
+}
+
 /* ---------------- 初始化 ---------------- */
 
 window.nyx.onState(applyState);
 window.nyx.onNotice(showNotice);
 // 先读「横幅看过没」，再拉状态：否则首次进隐私模式会先闪一下横幅又被收回去
 loadPrivacyBannerPref();
+loadNetIdentityShell();
 window.nyx.getState().then(applyState);
 
 /* ---------------- 下载中心（清单 A1） ---------------- */
