@@ -685,7 +685,36 @@ function installerE2eGate(setupPath, version) {
         '安装包已经写进更新源，但升级路径没有被验证过；先修，别当作已发布。',
     );
   }
+  // AUD-03：端到端过了不代表「装完之后更新源里的包还在」。这两条是两件事：
+  // 前者验升级链，后者验安装器会不会把刚写进去的包删掉（删掉了就再也没法自动升级）。
+  const retention = installerRetentionGate(setupPath, older);
+  if (!retention.ok) {
+    fail(`安装保留验证没通过（${retention.reason}）——装完之后更新源里的安装包不见了或对不上，自动升级会复发 404。`);
+  }
   return { ran: true, ok, reason: '已运行并全部通过', manualCmd, olderVersion: older ? older.version : '' };
+}
+
+/**
+ * AUD-03 功能判据：装完之后 %APPDATA%\Nyx\updates 里的安装包还在，且与 latest.json 一致。
+ *
+ * 为什么不能拿字节串当判据：交接单原本要求成品 exe 里出现 `nyx-keep-package`，
+ * 而那条字符串在 build/installer.nsh 里、被 LZMA 压过，成品里查不到 —— 用它会永远 false。
+ */
+function installerRetentionGate(setupPath, older) {
+  const scriptPath = path.join(__dirname, 'verify-installer-retention.js');
+  if (!fs.existsSync(scriptPath)) {
+    return { ok: false, reason: `找不到 ${scriptPath}` };
+  }
+  const args = [scriptPath, `--installer=${setupPath}`];
+  if (older) args.push(`--previous=${older.file}`);
+  console.log('');
+  info('验证「装完之后更新源里的安装包还在」（AUD-03）');
+  console.log(`  命令：node ${args.map((item) => (item.includes(' ') ? `"${item}"` : item)).join(' ')}`);
+  const result = spawnSync(process.execPath, args, { stdio: 'inherit', windowsHide: false });
+  return {
+    ok: result.status === 0,
+    reason: result.status === 0 ? '通过' : `exit ${result.status === null ? 'null' : result.status}`,
+  };
 }
 
 /**

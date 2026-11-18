@@ -92,6 +92,32 @@ check(
   '预演不能假装跑过'
 );
 
+// 4b) AUD-03：装完之后更新源里的包还在——必须是真装一遍的功能判据，不是字节串判据
+const retentionPath = path.join(ROOT, 'scripts', 'verify-installer-retention.js');
+check(
+  '有「装完之后包还在」的功能判据脚本（AUD-03）',
+  fs.existsSync(retentionPath),
+  '需要 scripts/verify-installer-retention.js：真装一遍再看 %APPDATA%\\Nyx\\updates'
+);
+const retentionCode = fs.existsSync(retentionPath) ? codeOnly(read(retentionPath)) : '';
+check(
+  '功能判据真的断言"新版安装包还在 + 与 latest.json 一致 + 旧包已清"',
+  /installerNameFor\(newVersion\)/.test(retentionCode) &&
+    /\bsha\s*===\s*wantSha/.test(retentionCode) &&
+    /已被清掉/.test(retentionCode),
+  '三件事缺一不可'
+);
+check(
+  '发版门禁真的调用它，且失败会中止发版',
+  /installerRetentionGate\(setupPath,\s*older\)/.test(releaseCode) && /installerRetentionGate/.test(gateBody),
+  'installerE2eGate 里要调 installerRetentionGate，而不是只在别处定义'
+);
+check(
+  '不许再用字节串 nyx-keep-package 当判据',
+  !/includes\(\s*'nyx-keep-package'\s*\)/.test(releaseCode) && !/includes\(\s*'nyx-keep-package'\s*\)/.test(retentionCode),
+  '那条字符串在 NSIS 脚本里、被 LZMA 压过，成品 exe 里查不到'
+);
+
 // 5) 跨版本基线能自动发现：dist\\legacy 目录参与查找
 check(
   '发版门禁会在 dist\\legacy 里找升级基线',
