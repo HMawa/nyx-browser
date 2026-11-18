@@ -33,7 +33,7 @@
 - 运行时：Electron 45.3.2 / Chromium 156.0.8078.100 / Node 24.22.2；Windows。
 - 运行时依赖只有两个：`@modelcontextprotocol/sdk`、`zod`（MCP server 用）。
 - 回归基线：`npm run verify` = **1151 项 / 49 个脚本**（= `scripts/verify-all.js` 里 49 条 `items` 标签之和，实测也是 1151；2026-11-18 接线收口轮实测 **49 通过 / 0 失败 / 0 跳过 / 801 秒**；同一套脚本在轻载时测得 545 秒——**耗时随机器负载波动，别拿它当版本特征，项数与通过数才是**；上一版 1120 项 / 48 脚本 / 696 秒是 1.18.2 的基线）。**逐脚本项数以 `scripts/verify-all.js` 的 `items` 为准**——以前这里抄过一份长枚举，结果和实际差了 18 项（发版门禁 48→52、代码签名 35→38 没同步），现在只认那个文件；历史版本的项数写在各自的 `docs/Nyx-<版本>-发版记录.md` 与 `docs/CHANGELOG.md` 里。
-- 当前版本：**1.18.2**（`dist/Nyx-Setup-1.18.2.exe`，127,323,616 字节，sha256 `0CEED9BA…806F3A05`）**已发布**，更新源 `%APPDATA%\Nyx\updates\latest.json` 指向它（`signature` + `keyId dc2cec223e6ea7c7`，AUD-03 保留验证 11/11）；已静默装到 `%LOCALAPPDATA%\Programs\Nyx`。1.17.11–1.17.20 从未发布；1.18.0 被审计打回（判定写错 + 报告带真实指纹），1.18.1 是修正版，1.18.2 补它暴露的三处真实不一致。**已 tag/push（2026-11-18，`v1.18.2` → `dfc311d`）**；tag 里旧文档仍含 B1 残留，main 已补漏。
+- 发布状态：1.17.11–1.17.20 从未发布；1.18.0 被审计打回（判定写错 + 报告带真实指纹），1.18.1 是修正版，1.18.2 补它暴露的三处真实不一致；`v1.18.2` tag → `dfc311d` 里旧文档仍含 B1 残留，main 已补漏并打了 `v1.18.2-post`。**1.19.0 已 tag/push**（`v1.19.0` → `7b9ff62`，main 同点），本机已装到 `%LOCALAPPDATA%\Programs\Nyx`。
 - 安装器 e2e（不进 `npm run verify`）：`scripts/test-installer-e2e.js` 真机跑 全新 → 降级 → 升级 → 修复 → 保留数据卸载 → 完全卸载，**56 项断言**；`--cross` 跨两版模式（旧版装→seed 旧格式数据→覆盖装新版→两次启动）**57 项断言（56 通过 / 1 明确跳过）**；归档基线放 `dist\legacy`（当前 1.16.0 / 1.17.1 / 1.17.2，由 `npm run sync:legacy` 轮换维护），`--cross` 不带 `--from` 会自动选最老那份；`make-release.js --with-installer-test` 已把它接进发版门禁（默认不跑，但摘要必打印原因与命令）。
 - 更新源：`%APPDATA%\Nyx\updates`（`latest.json` + 安装包 + `.blocks.json` + `extensions.json`）；留档 `%APPDATA%\Nyx\updates-archive\<版本>`。
 - 安装器：NSIS，`perMachine:false`（装到用户目录），自定义脚本 `build/installer.nsh`、打包后钩子 `build/after-pack.js`。
