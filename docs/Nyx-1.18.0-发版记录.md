@@ -48,7 +48,7 @@
 
 ### 3.4 三个真 bug（都是这一版挖出来的）
 
-1. **应用页从来不装配指纹**（严重）：起始页与设置页走 `TabManager.createAppPage()`，而指纹装配、UA 覆盖、工具箱粘性设置全挂在 `create()` 的 `onTabCreated` 上。结果是隐私模式第一屏读到的仍是 `Nyx/1.17.20 … Electron/45.3.2` 和真实 24 核——自检自己就报了「2 项泄漏」。修法：`createAppPage()` 也调 `onTabCreated`，等它落地再 `loadURL`。实测 `start.html` / `settings.html` 从 `cores 24 / surface null` 变成 `cores 8 / surface 2`。
+1. **应用页从来不装配指纹**（严重）：起始页与设置页走 `TabManager.createAppPage()`，而指纹装配、UA 覆盖、工具箱粘性设置全挂在 `create()` 的 `onTabCreated` 上。结果是隐私模式第一屏读到的仍是真 UA 与真实核数（具体值已隐去）——自检自己就报了「2 项泄漏」。修法：`createAppPage()` 也调 `onTabCreated`，等它落地再 `loadURL`。实测 `start.html` / `settings.html` 从「真实核数 / surface null」变成「画像核数 8 / surface 2」。
 2. **Emulation 身份对齐命令在导航前发不回执**：`Page.enable` 与三条 `Emulation.*` 在没有文档时发出去不报错、只沉默，每条等满 3 秒还占着同一个调试会话，和紧随其后的补打互斥。修法：这些命令移进 `applySurfaceToCurrentDocument()`（文档已存在）再发，单条超时 1.5 秒。
 3. **`judgeA2` 平台归一错**：`navigator.platform` 在 Windows 上返回 `Win32`，而判定用 `/windows/i` 匹配不到，于是自检自称「UA 说自己是 Linux，客户端提示却说 Windows」。改成 `/^win/i`。另一处 `judgeC2` 把对象 `str()` 成 `"[object Object]"`（非空）导致空出口地址判成通过，也已修。
 

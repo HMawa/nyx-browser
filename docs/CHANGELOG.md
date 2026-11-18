@@ -59,7 +59,7 @@
 | --- | --- |
 | 应用页也设 WebRTC 策略 | `createAppPage()` 漏了 `setWebRTCIPHandlingPolicy`；隐私模式第一屏（起始页/设置页）之前会吐出内网地址（实测 `172.24.x.x`） |
 | 像素比取系统缩放 | `devicePixelRatio` 之前写死 1，而系统缩放是 1.5——只改一半反而更好认 |
-| 时区跟语言同一地区 | 出口未知时不再出现「语言 en-US + 时区 Asia/Shanghai」这种现实里不存在的组合 |
+| 时区跟语言同一地区 | 出口未知时不再出现「语言 en-US + 中国时区」这种现实里不存在的组合 |
 | 时区偏移符号 | `timezoneOffsetMinutes()` 写成 `asUTC - local`，纽约算出 -300；改回 `getTimezoneOffset` 口径（纽约 +300、东京 -540） |
 | 1.18.0 存证补正 | 那份文件曾写出构建机真实指纹，已按脱敏口径补正 |
 
@@ -99,7 +99,7 @@
 | 观察值与真实值分离 | 真实值由主进程给（`os.cpus()`、主显示器、系统语言、显卡字符串），观察值由页面自报；`truth=null` 必须判「测不到」，不许拿观察值顶上 | 自检不能自己给自己作证 |
 | 首次进隐私模式横幅 | 外壳顶部一条提示，说明这一页做了什么、去哪看自检；只弹一次，可关 | 用户第一次进隐私模式时最容易不知道"现在到底有什么不同" |
 | 隐私自检存证 | `npm run privacy:audit`（`scripts/privacy-audit.js`）跑真实实例 → `docs/privacy-audit/<版本>.md`，含与上一版的差异行；`--check` 可做发版门禁 | 每版留一份，才能看出"这一版比上一版多了什么、退了什么" |
-| 应用页也装配指纹 | `TabManager.createAppPage()` 现在也调 `onTabCreated`，起始页/设置页在隐私模式下同样换上画像 UA 与核数 | 实测：切进隐私模式后第一屏（起始页）读到的仍是 `Nyx/… Electron/…` 与真实 24 核，自检自己就报「2 项泄漏」 |
+| 应用页也装配指纹 | `TabManager.createAppPage()` 现在也调 `onTabCreated`，起始页/设置页在隐私模式下同样换上画像 UA 与核数 | 实测：切进隐私模式后第一屏（起始页）读到的仍是真 UA 与真实核数（具体值已隐去），自检自己就报「2 项泄漏」 |
 | Emulation 命令改到文档就绪后 | `setUserAgentOverride` / `setTimezoneOverride` / `setLocaleOverride` 不再在"还没有文档"时发 | 那时它们不回执，每条等满 3 秒，还会和补打抢同一个调试会话——首个文档补丁时好时坏就是这么来的 |
 | 判定修正 | `judgeA2` 的平台归一改成 `/^win/i`（`navigator.platform` 报的是 `Win32`，以前被错判成 Linux）；`judgeC2` 不再把对象 `str()` 成 `"[object Object]"` 从而把空地址判成通过 | 自检报错比不报更糟 |
 

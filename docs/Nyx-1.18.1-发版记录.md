@@ -40,7 +40,7 @@
 
 - **A2**：`!chVersion || !uaFull` → `unknown`（浏览器只在 `getHighEntropyValues()` 里给完整版本号；
   观察脚本改成异步 IIFE 调高熵查询，脚本内不许出现反引号）。
-- **A3**：先 `canonicalLanguage()` 归一（`zh-Hans-CN`→`zh-cn`）再比：
+- **A3**：先 `canonicalLanguage()` 归一（`zh-Hans-CN`→`zh-CN`）再比：
   相同 → `leak`；私有模式下不同 → `masked`；**正常模式下不同 → `leak`**（之前恒判 masked，把真实泄漏报成已伪装）。
 - **A4**：语言地区 ↔ 时区地区双向查表，对不上 → `suspect`；偏移差 > 60 分钟 → `suspect`；时区认不出 → `unknown`。
 - **A6**：缺 `dpr` / `scaleFactor` → `unknown`；尺寸完全相同 → `suspect`；**`dpr` 与系统缩放不一致 → `suspect`**（之前写反成 pass）。

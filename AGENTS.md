@@ -27,13 +27,13 @@
 
 ---
 
-## 2. 固定事实（2026-11-12 基线）
+## 2. 固定事实（2026-11-18 基线）
 
-- 版本：`package.json` = **1.18.2**；**已发布**的产物 `dist/Nyx-Setup-1.18.2.exe`（Electron 45.3.2，127,323,616 字节，sha256 `0ceed9baef14b3ce42e320bf30477b743e07d5e3a5c40d8935fc8bac806f3a05`，签名 `CN=Nyx Self-Signed, O=Nyx contributors, OU=local build`，指纹 `256F208A5D31782DAF9DA041CF1D7A2A382931D0`）；更新源 `latest.json` 已指向它（带 Ed25519 签名，`keyId dc2cec223e6ea7c7`）。留档保留 1.18.2 / 1.18.1 / 1.18.0；`dist-sign` 里还留着旧版本，**验签按版本号挑包**（`scripts/lib/pick-artifact.js`），不会再验到旧包。**未打 tag 未 push**（1.18.0 被审计打回后一直等放行）。
+- 版本：`package.json` = **1.18.2**；**已发布**的产物 `dist/Nyx-Setup-1.18.2.exe`（Electron 45.3.2，127,323,616 字节，sha256 `0ceed9baef14b3ce42e320bf30477b743e07d5e3a5c40d8935fc8bac806f3a05`，签名 `CN=Nyx Self-Signed, O=Nyx contributors, OU=local build`，指纹 `256F208A5D31782DAF9DA041CF1D7A2A382931D0`）；更新源 `latest.json` 已指向它（带 Ed25519 签名，`keyId dc2cec223e6ea7c7`）。留档保留 1.18.2 / 1.18.1 / 1.18.0；`dist-sign` 里还留着旧版本，**验签按版本号挑包**（`scripts/lib/pick-artifact.js`），不会再验到旧包。**已 tag/push**（2026-11-18，`v1.18.2` → `dfc311d`）；tag 里的旧文档仍含 B1 残留，main 已补漏（见 `docs/Nyx-1.18.2-发版记录.md` §8.3）。
 - 运行时：Electron 45.3.2 / Chromium 156.0.8078.100 / Node 24.22.2；Windows。
 - 运行时依赖只有两个：`@modelcontextprotocol/sdk`、`zod`（MCP server 用）。
 - 回归基线：`npm run verify` = **1120 项 / 48 个脚本**（= `scripts/verify-all.js` 里 48 条 `items` 标签之和；2026-11-18 用 `temp/measure-items.js` 逐脚本实跑核对：声明 1120 / 实测 1120；当次全量 **48 通过 / 0 失败 / 0 跳过 / 696 秒**）。**逐脚本项数以 `scripts/verify-all.js` 的 `items` 为准**——以前这里抄过一份长枚举，结果和实际差了 18 项（发版门禁 48→52、代码签名 35→38 没同步），现在只认那个文件；历史版本的项数写在各自的 `docs/Nyx-<版本>-发版记录.md` 与 `docs/CHANGELOG.md` 里。
-- 当前版本：**1.18.2**（`dist/Nyx-Setup-1.18.2.exe`，127,323,616 字节，sha256 `0CEED9BA…806F3A05`）**已发布**，更新源 `%APPDATA%\Nyx\updates\latest.json` 指向它（`signature` + `keyId dc2cec223e6ea7c7`，AUD-03 保留验证 11/11）；已静默装到 `%LOCALAPPDATA%\Programs\Nyx`。1.17.11–1.17.20 从未发布；1.18.0 被审计打回（判定写错 + 报告带真实指纹），1.18.1 是修正版，1.18.2 补它暴露的三处真实不一致。**未打 tag、未 push**。
+- 当前版本：**1.18.2**（`dist/Nyx-Setup-1.18.2.exe`，127,323,616 字节，sha256 `0CEED9BA…806F3A05`）**已发布**，更新源 `%APPDATA%\Nyx\updates\latest.json` 指向它（`signature` + `keyId dc2cec223e6ea7c7`，AUD-03 保留验证 11/11）；已静默装到 `%LOCALAPPDATA%\Programs\Nyx`。1.17.11–1.17.20 从未发布；1.18.0 被审计打回（判定写错 + 报告带真实指纹），1.18.1 是修正版，1.18.2 补它暴露的三处真实不一致。**已 tag/push（2026-11-18，`v1.18.2` → `dfc311d`）**；tag 里旧文档仍含 B1 残留，main 已补漏。
 - 安装器 e2e（不进 `npm run verify`）：`scripts/test-installer-e2e.js` 真机跑 全新 → 降级 → 升级 → 修复 → 保留数据卸载 → 完全卸载，**56 项断言**；`--cross` 跨两版模式（旧版装→seed 旧格式数据→覆盖装新版→两次启动）**57 项断言（56 通过 / 1 明确跳过）**；归档基线放 `dist\legacy`（当前 1.16.0 / 1.17.1 / 1.17.2，由 `npm run sync:legacy` 轮换维护），`--cross` 不带 `--from` 会自动选最老那份；`make-release.js --with-installer-test` 已把它接进发版门禁（默认不跑，但摘要必打印原因与命令）。
 - 更新源：`%APPDATA%\Nyx\updates`（`latest.json` + 安装包 + `.blocks.json` + `extensions.json`）；留档 `%APPDATA%\Nyx\updates-archive\<版本>`。
 - 安装器：NSIS，`perMachine:false`（装到用户目录），自定义脚本 `build/installer.nsh`、打包后钩子 `build/after-pack.js`。
@@ -107,6 +107,7 @@
 | 建议浮层刚打开就被关 | `createTab` 触发的状态推送会关闭浮层 | 测试里等 1.5s 再 query |
 | 同名扩展出现两条记录 | 记录 id 由源路径派生 | 安装前先按名称复用已有条目 |
 | 提交信息里的中文变成 `?` | 用 `Out-File`/here-string 写 message 文件，按控制台代码页转码 | 用 `write` 工具写 `temp\commit-*.txt`，再 `git commit -F`（1.18.0 的 `dfb59c1` 就是这么坏的，已记录不改写历史） |
+| 隐私自检存证把真实指纹写进 docs | 存证默认打印观察值与真实值，直接提交就公开 | 生成脚本默认脱敏；原始 JSON 只落 `temp/privacy-audit/`；提交前 `git grep` 扫 UA/核数/屏幕/时区 |
 
 ---
 
