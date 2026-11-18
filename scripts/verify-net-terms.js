@@ -306,24 +306,39 @@ check('24. shellize：custom 原样返回、校园/单位换词、没命中返�
 });
 
 check('25. 渲染层现有文案全量换词后零残留（含空态、状态条、按钮 title）', () => {
+  // 语料从「proxy-center.js + settings.html 两个文件」扩到**整个渲染层**：
+  // 之前只扫这两个文件，别的文件（外壳 renderer.js、index.html、start.*、onboard.js）写了新文案
+  // 只要不含表里的短语就能悄悄漏过去；现在任何渲染层文件里的中文字面量都要过一遍换词表。
   const literals = new Set();
   const stripComments = (src) => src.split('\n').filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line)).join('\n');
-  const proxy = stripComments(read('src/renderer/proxy-center.js'));
-  for (const match of proxy.matchAll(/'([^'\\\n]{2,200})'/g)) {
-    if (/[\u4e00-\u9fa5]/.test(match[1])) literals.add(match[1]);
+  const files = fs
+    .readdirSync(path.join(ROOT, 'src/renderer'))
+    .filter((name) => /\.(js|html)$/.test(name))
+    .map((name) => `src/renderer/${name}`);
+  for (const rel of files) {
+    const src = stripComments(read(rel));
+    for (const match of src.matchAll(/'([^'\\\n]{2,200})'/g)) {
+      if (/[\u4e00-\u9fa5]/.test(match[1])) literals.add(match[1]);
+    }
+    for (const match of src.matchAll(/"([^"\\\n]{2,200})"/g)) {
+      if (/[\u4e00-\u9fa5]/.test(match[1])) literals.add(match[1]);
+    }
+    for (const match of src.matchAll(/`([^`]{2,300})`/g)) {
+      if (/[\u4e00-\u9fa5]/.test(match[1])) literals.add(match[1]);
+    }
+    for (const match of src.matchAll(/>([^<>{}]{2,120})</g)) {
+      if (/[\u4e00-\u9fa5]/.test(match[1])) literals.add(match[1].trim());
+    }
   }
-  for (const match of proxy.matchAll(/`([^`]{2,300})`/g)) {
-    if (/[\u4e00-\u9fa5]/.test(match[1])) literals.add(match[1]);
-  }
-  for (const match of settingsHtml.matchAll(/>([^<>{}]{2,120})</g)) {
-    if (/[\u4e00-\u9fa5]/.test(match[1])) literals.add(match[1].trim());
-  }
-  assert.ok(literals.size > 300, `语料太少（${literals.size} 条），提取规则可能失效`);
+  assert.ok(files.length >= 10, `渲染层文件只找到 ${files.length} 个，路径规则可能失效`);
+  assert.ok(literals.size > 1500, `语料太少（${literals.size} 条），提取规则可能失效`);
   const leftover = [];
   for (const text of literals) {
-    const out = netTerms.shellize(text, 'campus');
-    for (const word of netTerms.LEGACY_WORDS) {
-      if (out.includes(word)) leftover.push(`${word} ← ${text}`);
+    for (const identity of ['campus', 'enterprise']) {
+      const out = netTerms.shellize(text, identity);
+      for (const word of netTerms.LEGACY_WORDS) {
+        if (out.includes(word)) leftover.push(`${identity}/${word} ← ${text}`);
+      }
     }
   }
   assert.deepStrictEqual(leftover.slice(0, 5), [], `还有 ${leftover.length} 条换词后残留旧术语`);
@@ -370,6 +385,20 @@ check('28. 关于页保留事实陈述：通用网络代理工具 + mihomo GPL-3
   assert.ok(/aria-label="全隐私模式开关/.test(privacyBtn), '隐私开关的 aria-label 不见了');
   assert.ok(/强制走代理/.test(privacyBtn), '隐私开关原生 title 里应有「强制走代理」，否则这条断言没有意义');
   assert.ok(/aria-label/.test(rendererJs) && /title/.test(rendererJs), '外壳扫描要连 title / aria-label 一起换');
+});
+
+check('29. 单位档是同一张表的第二个标签，不是第三张表（词条逐字相同，只许 LABELS / NOTES 有差别）', () => {
+  // 2026-11-18 的决定：保留「单位网络接入」，但**不新增第三张术语表**。
+  // 这条断言就是那道闸：谁要是哪天给 enterprise 单独写一套词，这里会立刻红。
+  const campus = netTerms.termsFor('campus');
+  const enterprise = netTerms.termsFor('enterprise');
+  const diff = netTerms.TERM_KEYS.filter((key) => campus[key] !== enterprise[key]);
+  assert.deepStrictEqual(diff, [], `单位档和校园档的词条不许分叉，实际不同：${diff.join('、')}`);
+  assert.ok(netTerms.IDENTITY_LABELS.campus !== netTerms.IDENTITY_LABELS.enterprise, '两档的显示名必须不同（那就是它们的全部差别）');
+  assert.ok(netTerms.IDENTITY_NOTES.campus !== netTerms.IDENTITY_NOTES.enterprise, '两档的说明必须不同（分别指向学校 / 单位）');
+  // 说明里必须写清「照谁的说明填」，否则用户不知道该问谁
+  assert.ok(/学校/.test(netTerms.IDENTITY_NOTES.campus), '校园档说明要点名学校网络中心');
+  assert.ok(/单位/.test(netTerms.IDENTITY_NOTES.enterprise), '单位档说明要点名单位网络管理员');
 });
 
 const failed = checks.filter((item) => !item.pass);
