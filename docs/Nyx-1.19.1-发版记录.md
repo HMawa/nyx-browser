@@ -22,7 +22,7 @@
 | F4（P2） | `auto` 用订阅条数判老用户，加删订阅会把口径翻 | 删掉 `netHasExistingConfig()`，新增 `netIsUpgradeUser()`（先看 `onboarding.json` 的 `pending`，没有标记才看书签/历史/偏好文件）与 `netResolveAutoIdentity()`（一次落盘 `netIdentityResolved`，此后稳定） | `verify-net-terms` 第 20 项：载荷不含 `hasExistingConfig`、判据不看 `subscriptions`、结果确实写进 `netIdentityResolved` |
 | F5（P3） | 全局 `split/join` 换词会碰用户数据与错误原文 | `proxy-center.js` 给订阅备注名、订阅地址、`lastError` 文本与状态条打 `data-net-keep` | `verify-net-terms` 第 26 项：sweep 必须跳过 `[data-net-keep]`；`verify-ui-polish` 换词后读到的空态文案仍是旧词 |
 | F6（P3） | 测试盲区：没断言 custom 还原、只覆盖关于页 | 两个脚本共补 4 项端到端断言 + 若干静态断言 | 界面回归 139 → **143 项**；接入外壳回归仍 **29 项** |
-| F7（P3） | 交付包 HEAD 写 `e91a502` 与实际 `b79617c` 不一致 | `docs/Nyx-1.19.0-审计交付包.md` 补「发布后审计与 1.19.1 处置」一节，HEAD 改为实际值并注明 tag 指向 | 文档自查：HEAD 与 `git rev-parse HEAD` 一致 |
+| F7（P3） | 交付包 HEAD 写 `e91a502` 与实际 `b79617c` 不一致 | `docs/Nyx-1.19.0-审计交付包.md` §3 改成「本文件是 1.19.0 交付当时快照，当前 HEAD 现取」（写死任何提交号都会随下一次文档提交过期），§7 第一步改成 `git checkout v1.19.0`，并新增 §11「发布后审计与 1.19.1 的处置」 | 文档自查：§7 的 checkout 用 tag 不写死提交号；§11 的处置表与本文 §2 逐条对应 |
 
 ---
 
