@@ -8,9 +8,11 @@
  *      **不能**用"有没有配置文件"猜（老用户升级上来同样没有这个标记，猜就会把人骗进引导）。
  *   2. **「全部默认」一步进主界面**——不做成"必须走完五步"，点了就按默认值落盘并关窗。
  *
- * 引导里问的五件事（玄锋 11-15 定）：主题、按钮精简 / 完整、下载目录与是否询问、
- * 隐私与代理、起始页与默认书签。每一项都能选「先不定」，落地时不写这一项。
+ * 引导里问的六件事（玄锋 11-15 定，11-18 加「接入方式」）：主题、接入方式、按钮精简 / 完整、
+ * 下载目录与是否询问、隐私与接入通道、起始页与默认书签。每一项都能选「先不定」，落地时不写这一项。
  */
+
+const netTerms = require('./net-terms');
 
 const ONBOARD_MARKER_FILE = 'onboarding.json';
 
@@ -21,14 +23,19 @@ const ONBOARD_STEPS = [
     summary: '主题与按钮多少。之后随时能在「设置 → 主题与显示」里改。',
   },
   {
+    id: 'network',
+    title: '接入方式',
+    summary: '这份界面怎么称呼连接外部网络这件事：校园网络接入 / 单位网络接入 / 自定义服务端。只改叫法与版式，不改网络行为，之后能在「设置 → 接入通道」里改。',
+  },
+  {
     id: 'downloads',
     title: '下载',
     summary: '存到哪、要不要每次问。默认存系统下载目录、每次问。',
   },
   {
     id: 'privacy',
-    title: '隐私与代理',
-    summary: '隐私模式默认走代理；只有你明确选择才会用真实 IP，届时会写明边界。',
+    title: '隐私与接入通道',
+    summary: '隐私模式默认经接入通道；只有你明确选择才会用真实 IP，届时会写明边界。',
   },
   {
     id: 'start',
@@ -41,6 +48,8 @@ const ONBOARD_STEPS = [
 const THEME_CHOICES = ['ink', 'aurora', 'paper', 'quiet'];
 const DENSITY_CHOICES = ['compact', 'full'];
 const START_CHOICES = ['start', 'blank'];
+// 接入方式的白名单直接取词表，避免引导、设置页、主进程三处各写一份
+const NET_IDENTITY_CHOICES = netTerms.IDENTITIES.slice();
 
 const DEFAULT_CHOICES = {
   theme: 'ink',
@@ -49,6 +58,7 @@ const DEFAULT_CHOICES = {
   downloadDir: '',
   privacyLink: 'proxy',
   startPage: 'start',
+  netIdentity: netTerms.DEFAULT_IDENTITY,
 };
 
 /**
@@ -152,6 +162,15 @@ function planOnboardChoices(rawChoices, options) {
     entries.push({ key: 'startPage', value: startPage });
   }
 
+  const netIdentity = pick('netIdentity');
+  if (netIdentity !== undefined) {
+    if (!NET_IDENTITY_CHOICES.includes(netIdentity)) {
+      return { ok: false, entries: [], notes: [], error: `不认识的接入方式：${netIdentity}` };
+    }
+    entries.push({ key: 'netIdentity', value: netIdentity });
+    notes.push('接入方式只改界面上怎么称呼，不改实际走的通道；之后随时能在「设置 → 接入通道」里改。');
+  }
+
   if (entries.length === 0) notes.push('这次没有要改的，全部沿用默认值。');
   return { ok: true, entries, notes };
 }
@@ -169,14 +188,16 @@ function summarizeOnboardChoices(plan) {
     parts.push(byKey.downloadAsk ? '下载每次问' : '下载不问直接存');
   }
   if (byKey.downloadDir) parts.push(`下载到 ${byKey.downloadDir}`);
-  if (byKey.privacyLink) parts.push(byKey.privacyLink === 'direct' ? '隐私模式直连' : '隐私模式走代理');
+  if (byKey.privacyLink) parts.push(byKey.privacyLink === 'direct' ? '隐私模式直连' : '隐私模式经接入通道');
   if (byKey.startPage) parts.push(byKey.startPage === 'blank' ? '新标签空白' : '新标签起始页');
+  if (byKey.netIdentity) parts.push(`接入方式 ${netTerms.IDENTITY_LABELS[byKey.netIdentity] || byKey.netIdentity}`);
   return parts.length ? parts.join('、') : '全部沿用默认值。';
 }
 
 module.exports = {
   DEFAULT_CHOICES,
   DENSITY_CHOICES,
+  NET_IDENTITY_CHOICES,
   ONBOARD_MARKER_FILE,
   ONBOARD_STEPS,
   START_CHOICES,

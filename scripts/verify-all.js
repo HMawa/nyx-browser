@@ -32,8 +32,8 @@
  * 26. scripts/verify-agent-lamp.js（agent 三色状态灯：只在动作执行时算"正在被驱动"、审计缺口不混进灯、窄面板只给看与急停，11 项；纯 Node，不启动 Electron）
  * 27. scripts/verify-toolbar.js（工具栏：四个主路径固定、「更多」四项固定、小字标签开关、截图落点顺序、四处接线，10 项；纯 Node，不启动 Electron）
  * 28. scripts/verify-motion.js（动效档位：两档时长与缓动同源、减少动效时降级、按住有反馈、不做外发光，8 项；纯 Node，不启动 Electron）
- * 29. scripts/verify-onboard.js（首次安装引导：四种判定口径、选"先不定"不落盘、"全部默认"一步落盘、非法取值整组拒绝、空白页不是 about:blank、安装标记容忍 BOM，13 项；纯 Node，不启动 Electron）
- * 30. scripts/verify-onboard-e2e.js（首次引导真机：全新安装弹一次、点默认后落盘并关窗、再启动与升级安装都不弹，7 项）
+ * 29. scripts/verify-onboard.js（首次安装引导：四种判定口径、选"先不定"不落盘、"全部默认"一步落盘、接入方式一步只改叫法、非法取值整组拒绝、空白页不是 about:blank、安装标记容忍 BOM，14 项；纯 Node，不启动 Electron）
+ * 30. scripts/verify-onboard-e2e.js（首次引导真机：全新安装弹一次、点默认后落盘并关窗、默认接入方式是校园、再启动与升级安装都不弹，8 项）
  * 31. scripts/verify-agent-doc.js（agent 接入说明：端点来自运行时、两种模式边界、会被拦下的四种情况、复制回读，9 项；纯 Node，不启动 Electron）
  * 32. scripts/verify-themes.js（主题：六套主题与枚举一一对应、新主题令牌齐全、对比度实算、不许有渐变、主题与显示分区，7 项；纯 Node，不启动 Electron）
  * 33. scripts/verify-shell-guard.js（外壳导航守卫：只许停在自己那份文档、网络地址与伪协议全拦、弹窗只放行 http(s)、不许内嵌 webview、接线与提示，13 项；纯 Node，不启动 Electron）
@@ -277,13 +277,13 @@ const STEPS = [
   {
     label: '首次引导回归',
     script: 'verify-onboard.js',
-    items: '13 项',
+    items: '14 项',
     timeoutMs: 60000,
   },
   {
     label: '首次引导 e2e',
     script: 'verify-onboard-e2e.js',
-    items: '7 项',
+    items: '8 项',
     timeoutMs: 240000,
   },
   {

@@ -86,16 +86,17 @@ check('6. 选「先不定」的项一律不写进偏好（不替用户拍板）'
   assert.deepStrictEqual(onlyTheme.entries.map((e) => e.key), ['theme']);
 });
 
-check('7. 「全部默认」一步落盘：五组默认值都写，且下载默认是"每次问"', () => {
+check('7. 「全部默认」一步落盘：六组默认值都写，且下载默认是"每次问"、接入方式默认是校园', () => {
   const plan = onboard.planOnboardChoices({ useDefaults: true });
   assert.strictEqual(plan.ok, true);
   const map = Object.fromEntries(plan.entries.map((e) => [e.key, e.value]));
   assert.strictEqual(map.theme, 'ink');
   assert.strictEqual(map.toolbarLabels, true, '默认应是"完整"（带小字）');
   assert.strictEqual(map.downloadAsk, true, '默认应每次问');
-  assert.strictEqual(map.privacyLink, 'proxy', '隐私模式默认走代理');
+  assert.strictEqual(map.privacyLink, 'proxy', '隐私模式默认经接入通道');
   assert.strictEqual(map.startPage, 'start');
-  assert.ok(plan.entries.length >= 5);
+  assert.strictEqual(map.netIdentity, 'campus', '全新安装默认按校园网络接入显示');
+  assert.ok(plan.entries.length >= 6);
 });
 
 check('8. 精简档复用 B1 的小字开关；直连必须给出边界提醒；非法取值整组拒绝', () => {
@@ -104,11 +105,34 @@ check('8. 精简档复用 B1 的小字开关；直连必须给出边界提醒；
   const direct = onboard.planOnboardChoices({ privacyLink: 'direct' });
   assert.strictEqual(direct.ok, true);
   assert.ok(direct.notes.some((n) => /真实 IP|边界/.test(n)), '直连要写明边界');
-  for (const bad of [{ theme: 'neon' }, { density: 'tiny' }, { privacyLink: 'both' }, { startPage: 'x' }]) {
+  for (const bad of [{ theme: 'neon' }, { density: 'tiny' }, { privacyLink: 'both' }, { startPage: 'x' }, { netIdentity: 'official' }]) {
     const res = onboard.planOnboardChoices(bad);
     assert.strictEqual(res.ok, false, `${JSON.stringify(bad)} 应被拒绝`);
     assert.ok(res.error && res.error.length > 4);
   }
+});
+
+check('8b. 引导多了一步「接入方式」：三档都能选，只写叫法不碰网络，摘要里说人话', () => {
+  const step = onboard.ONBOARD_STEPS.find((item) => item.id === 'network');
+  assert.ok(step, 'ONBOARD_STEPS 里没有接入方式这一步');
+  assert.match(step.title, /接入方式/);
+  assert.match(step.summary, /校园网络接入|单位网络接入|自定义服务端|只改叫法/);
+  for (const identity of ['campus', 'enterprise', 'custom']) {
+    const plan = onboard.planOnboardChoices({ netIdentity: identity });
+    assert.strictEqual(plan.ok, true, `${identity} 应被接受`);
+    assert.deepStrictEqual(plan.entries, [{ key: 'netIdentity', value: identity }]);
+    assert.ok(plan.notes.some((n) => /只改界面/.test(n)), '必须说清只改叫法');
+    const summary = onboard.summarizeOnboardChoices(plan);
+    assert.match(summary, /接入方式/);
+  }
+  assert.deepStrictEqual(onboard.NET_IDENTITY_CHOICES, ['campus', 'enterprise', 'custom']);
+  // 引导自己的文案不许出现旧叫法（隐私与接入通道那一步同理）
+  for (const item of onboard.ONBOARD_STEPS) {
+    assert.ok(!/代理/.test(`${item.title}${item.summary}`), `引导第 ${item.id} 步仍在说「代理」`);
+  }
+  // 界面与主进程都要把三档递进去
+  assert.ok(/id: 'ob-net-identity'|'ob-net-identity'/.test(js), '引导页缺接入方式选择器');
+  assert.ok(/identities: netTerms\.describeIdentities\(\)/.test(mainJs), '主进程没把三档递给引导页');
 });
 
 check('9. 主题清单与 ui-store 的白名单一致（否则引导里选完存不进去）', () => {

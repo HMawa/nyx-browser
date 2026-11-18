@@ -173,7 +173,7 @@ async function main() {
       let form = null;
       for (let i = 0; i < 40; i += 1) {
         form = await page.eval(`(() => {
-          const ids = ['ob-theme', 'ob-density', 'ob-download-dir', 'ob-download-ask', 'ob-privacy-link', 'ob-start'];
+          const ids = ['ob-theme', 'ob-density', 'ob-download-dir', 'ob-download-ask', 'ob-privacy-link', 'ob-start', 'ob-net-identity'];
           const missing = ids.filter((id) => !document.getElementById(id));
           return {
             missing,
@@ -187,7 +187,7 @@ async function main() {
         await sleep(250);
       }
       check(
-        '2. 引导页里五件事都在，且没有"必须下一步"的强制流程',
+        '2. 引导页里六件事都在（含接入方式），且没有"必须下一步"的强制流程',
         form && form.missing.length === 0 && form.skip && form.done && form.cards >= 4 && form.hasNextStep === false,
         JSON.stringify(form),
       );
@@ -230,9 +230,14 @@ async function main() {
         await sleep(250);
       }
       check(
-        '5. 「全部默认」真的把偏好写进了磁盘（主题 / 下载询问 / 隐私链路 / 起始页）',
+        '5. 「全部默认」真的把偏好写进了磁盘（主题 / 下载询问 / 隐私链路 / 起始页 / 接入方式）',
         !!prefs && typeof prefs.theme === 'string' && prefs.downloadAsk === true && prefs.privacyLink !== undefined,
         JSON.stringify(prefs && { theme: prefs.theme, downloadAsk: prefs.downloadAsk, privacyLink: prefs.privacyLink, startPage: prefs.startPage }),
+      );
+      check(
+        '5b. 全新安装的默认接入方式是「校园网络接入」（不是留空等推断）',
+        !!prefs && prefs.netIdentity === 'campus',
+        JSON.stringify(prefs && { netIdentity: prefs.netIdentity }),
       );
       page.close();
     }

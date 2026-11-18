@@ -4398,6 +4398,7 @@ function registerIpc() {
     themes: THEME_CHOICES,
     densities: DENSITY_CHOICES,
     startPages: START_CHOICES,
+    identities: netTerms.describeIdentities(),
     current: runtime.uiStore ? runtime.uiStore.get() : {},
   }));
 

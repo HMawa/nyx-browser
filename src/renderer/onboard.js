@@ -80,6 +80,10 @@ function render(info) {
     { value: 'start', label: 'Nyx 起始页' },
     { value: 'blank', label: '空白页' },
   ];
+  const identityOptions = [
+    { value: '', label: '先不定' },
+    ...(info.identities || []).map((item) => ({ value: item.id, label: item.label })),
+  ];
 
   // ① 界面
   box.append(
@@ -91,30 +95,42 @@ function render(info) {
     ]),
   );
 
-  // ② 下载
+  // ② 接入方式：只换说法的档位，选了立刻决定设置页里那些词怎么叫
+  box.append(
+    el('section', { class: 'onboard-card' }, [
+      el('h2', { text: '2 · 接入方式' }),
+      el('p', {
+        class: 'onboard-desc',
+        text: '这份界面怎么称呼「连接外部网络」这件事。只改叫法与版式，不改任何网络行为；选「先不定」就按校园网络接入显示。',
+      }),
+      selectRow('ob-net-identity', '接入方式', identityOptions, ''),
+    ]),
+  );
+
+  // ③ 下载
   const dir = el('input', { type: 'text', id: 'ob-download-dir', class: 'onboard-input', placeholder: '留空 = 系统下载目录' });
   box.append(
     el('section', { class: 'onboard-card' }, [
-      el('h2', { text: '2 · 下载' }),
+      el('h2', { text: '3 · 下载' }),
       el('p', { class: 'onboard-desc', text: '存到哪、要不要每次问。留空就用系统下载目录。' }),
       el('label', { class: 'onboard-row' }, [el('span', { class: 'onboard-row-label', text: '保存目录' }), dir]),
       switchRow('ob-download-ask', '每次下载都问我', true),
     ]),
   );
 
-  // ③ 隐私与代理
+  // ④ 隐私与接入通道
   box.append(
     el('section', { class: 'onboard-card' }, [
-      el('h2', { text: '3 · 隐私与代理' }),
-      el('p', { class: 'onboard-desc', text: '隐私模式默认走代理；只有你明确选「真实 IP」才会直连，并且会一直标注这个边界。' }),
+      el('h2', { text: '4 · 隐私与接入通道' }),
+      el('p', { class: 'onboard-desc', text: '隐私模式默认经接入通道；只有你明确选「真实 IP」才会直连，并且会一直标注这个边界。' }),
       selectRow('ob-privacy-link', '隐私模式的链路', linkOptions, ''),
     ]),
   );
 
-  // ④ 起始页
+  // ⑤ 起始页
   box.append(
     el('section', { class: 'onboard-card' }, [
-      el('h2', { text: '4 · 起始页' }),
+      el('h2', { text: '5 · 起始页' }),
       el('p', { class: 'onboard-desc', text: '新标签打开时看到什么。' }),
       selectRow('ob-start', '新标签页', startOptions, ''),
     ]),
@@ -142,6 +158,8 @@ function collectChoices() {
   if (link) choices.privacyLink = link;
   const start = value('ob-start');
   if (start) choices.startPage = start;
+  const identity = value('ob-net-identity');
+  if (identity) choices.netIdentity = identity;
   return choices;
 }
 
