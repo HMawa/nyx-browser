@@ -699,14 +699,21 @@ FunctionEnd
   ; 首次安装引导标记（清单 D2）：只有全新安装才置 pending=1。
   ; 升级 / 覆盖 / 降级一律 pending=0——判定不许靠"有没有配置文件"猜，
   ; 否则老用户升级上来也会被领进引导。
+  ; fresh=1 只给全新安装：引导走完后 pending 会变 0，不能再拿 pending=0 当"老用户"
+  ; （审计 F4 回归：新装走完引导后会被判成升级用户，默认档从 campus 翻成 custom）。
   ${If} $nyxMode == "全新安装"
     FileOpen $0 "$APPDATA\Nyx\onboarding.json" w
-    FileWrite $0 '{"pending":true,"version":"${VERSION}"}'
+    FileWrite $0 '{"pending":true,"fresh":true,"version":"${VERSION}"}'
     FileClose $0
   ${Else}
-    FileOpen $0 "$APPDATA\Nyx\onboarding.json" w
-    FileWrite $0 '{"pending":false,"version":"${VERSION}"}'
-    FileClose $0
+    ; 升级 / 覆盖 / 修复：已有标记就原样保留（尤其 fresh=1），只补一个没有标记的机器。
+    ; 否则「新装 → 走完引导（pending=0）→ 第一次自动更新」会把 fresh 抹掉，
+    ; 默认档又从 campus 翻回 custom（审计 F4 的二次回归）。
+    ${IfNot} ${FileExists} "$APPDATA\Nyx\onboarding.json"
+      FileOpen $0 "$APPDATA\Nyx\onboarding.json" w
+      FileWrite $0 '{"pending":false,"fresh":false,"version":"${VERSION}"}'
+      FileClose $0
+    ${EndIf}
   ${EndIf}
 
   ; 兜底：关闭仍在运行的 Nyx（模板在复制文件前已处理过一次）

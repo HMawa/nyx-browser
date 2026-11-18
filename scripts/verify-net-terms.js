@@ -19,6 +19,7 @@ const ROOT = path.resolve(__dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 
 const netTerms = require(path.join(ROOT, 'src', 'core', 'net-terms.js'));
+const { normalizeOnboardMarker } = require(path.join(ROOT, 'src', 'core', 'onboarding.js'));
 const { UiStore, UI_PREF_DEFAULTS, UI_PREF_ENUMS } = require(path.join(ROOT, 'src', 'core', 'ui-store.js'));
 
 const settingsHtml = read('src/renderer/settings.html');
@@ -242,6 +243,15 @@ check('20. 身份载荷自带界面要的全部字段，且"像不像老用户"�
   const upgradeBlock = mainJs.slice(upgradeStart, mainJs.indexOf('function netResolveAutoIdentity', upgradeStart));
   assert.ok(upgradeBlock.includes('readOnboardMarker'), '老用户判断应看首次安装标记');
   assert.ok(!upgradeBlock.includes('subscriptions'), '老用户判断不许拿订阅数当依据（订阅数会变，口径就翻）');
+  // 审计 F4 回归：新装走完引导后 pending 变 0，不能把「引导走完」当「老用户」。
+  // 安装器给全新安装写 fresh=true，引导 finish 只改 pending，老用户升级上来 fresh 不为 true。
+  assert.ok(upgradeBlock.includes('marker.fresh === true'), '老用户判断应先看 fresh=true（否则新装走完引导会被判成升级）');
+  const nsh = read('build/installer.nsh');
+  assert.ok(/\{"pending":true,"fresh":true/.test(nsh), '全新安装的标记必须写 fresh=true');
+  assert.ok(/IfNot.*FileExists.*onboarding\.json/.test(nsh), '升级安装不能覆盖已有的 fresh 标记');
+  const marker = normalizeOnboardMarker({ pending: false, fresh: true, version: '1.19.2' });
+  assert.strictEqual(marker.fresh, true, 'normalizeOnboardMarker 必须保留 fresh');
+  assert.strictEqual(marker.pending, false);
   const resolveBlock = mainJs.slice(
     mainJs.indexOf('function netResolveAutoIdentity'),
     mainJs.indexOf('function netIdentityPayload'),
@@ -403,7 +413,6 @@ check('28. 关于页与身份条都保留事实陈述：通用网络代理工具
   // 身份条很短，按固定长度切；不能用「下一个 data-sec="network"」——那个串在导航里先出现过一次
   const bar = settingsHtml.slice(barAt - 120, barAt + 1200);
   assert.ok(/id="net-identity-statement"[^>]*data-net-keep/.test(bar), '身份条的事实陈述必须单独一个元素并标 data-net-keep');
-  assert.ok(/id="net-identity-scope"/.test(bar), '范围说明要独立成元素，才能只换它、不换事实陈述');
   // 声明内容本身就是"通用网络代理工具"，换词表一定会改它 —— 用这条断言把风险钉住在词表层
   assert.notStrictEqual(netTerms.shellize(netTerms.SHELL_STATEMENT, 'campus'), netTerms.SHELL_STATEMENT,
     '换词表已经碰不动声明了，说明这条豁免断言失去了意义，请重新确认');

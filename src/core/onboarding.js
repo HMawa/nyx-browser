@@ -62,18 +62,20 @@ const DEFAULT_CHOICES = {
 };
 
 /**
- * 标记文件归一：安装器写的形状是 `{ pending: true, installedAt }`；
- * 升级安装写 `{ pending: false }`；用户走完引导后我们补 `doneAt`。
+ * 标记文件归一：安装器写的形状是 `{ pending: true, fresh: true, installedAt }`；
+ * 升级安装写 `{ pending: false }`（已有标记时保留原样）；用户走完引导后我们补 `doneAt`。
+ * `fresh` 是「曾经全新安装」的持久事实，不能因为 pending 变 0 就丢掉（审计 F4）。
  */
 function normalizeOnboardMarker(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const pending = raw.pending === true;
+  const fresh = raw.fresh === true;
   const doneAt = Number.isFinite(Number(raw.doneAt)) && Number(raw.doneAt) > 0 ? Number(raw.doneAt) : 0;
   const skipped = raw.skipped === true;
   const installedAt = Number.isFinite(Number(raw.installedAt)) && Number(raw.installedAt) > 0
     ? Number(raw.installedAt)
     : 0;
-  return { pending, doneAt, skipped, installedAt, version: String(raw.version || '') };
+  return { pending, fresh, doneAt, skipped, installedAt, version: String(raw.version || '') };
 }
 
 /**

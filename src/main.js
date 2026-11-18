@@ -4232,7 +4232,7 @@ function readOnboardMarker() {
 }
 
 function writeOnboardMarker(patch) {
-  const current = readOnboardMarker() || { pending: false, doneAt: 0, skipped: false, installedAt: 0, version: '' };
+  const current = readOnboardMarker() || { pending: false, fresh: false, doneAt: 0, skipped: false, installedAt: 0, version: '' };
   const next = Object.assign({}, current, patch || {});
   if (next.doneAt && !next.installedAt) next.installedAt = next.doneAt;
   try {
@@ -7309,13 +7309,17 @@ function registerSettingsIpc() {
    * 审计 F4 的口径：**不能拿「当前有几条订阅」判断**——那个数会变，用户后来加一条订阅，
    * 界面口径就跟着翻，而且升级用户若没订阅会被判成新装（反过来也一样）。
    * 迁移判断只该发生一次，判据也必须是不随时间漂移的东西：
-   *   1. 首次安装标记里 `pending === true` → 全新安装，走引导选；
-   *   2. `pending === false` → 引导已经走过（或明确跳过），是老用户；
-   *   3. 没有标记（早于引导功能的版本装上来）→ 看磁盘上有没有老版本留下的数据文件。
+   *   1. 标记里 `fresh === true` → 这台机器曾经全新安装（引导走完 pending 会变 0，fresh 不会）；
+   *   2. `pending === true` → 全新安装且还没走引导；
+   *   3. `pending === false` 且 `fresh !== true` → 升级上来的老用户；
+   *   4. 没有标记（早于引导功能的版本装上来）→ 看磁盘上有没有老版本留下的数据文件。
    */
   function netIsUpgradeUser() {
     try {
       const marker = readOnboardMarker();
+      // fresh 是安装器在全新安装时写下的持久事实：引导 finish 只改 pending，不抹 fresh。
+      // 以前只看 pending=false，会把「新装走完引导」误判成老用户，默认档从 campus 翻成 custom（审计 F4）。
+      if (marker && marker.fresh === true) return false;
       if (marker && marker.pending === true) return false;
       if (marker && marker.pending === false) return true;
     } catch {
