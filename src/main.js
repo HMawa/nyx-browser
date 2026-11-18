@@ -80,8 +80,6 @@ const {
   serializeWhitelist: serializePermissionWhitelist,
 } = require('./core/permission-store');
 const { Vault } = require('./core/vault');
-// 接入外壳文案真源（外部清单 VPN 外壳 §1）：三档身份与全部用户可见词都在这里，主进程只转发
-const netTerms = require('./core/net-terms');
 const { ProxyService } = require('./core/proxy-service');
 const { TabManager, normalizeInput } = require('./core/tabs');
 const { createActionRunner, setNavigateBudgetProvider } = require('./core/actions');
@@ -7244,44 +7242,6 @@ function readSigningStatus(options = {}) {
   });
 }
 
-/**
- * 判断这台机器是不是「升级上来的老用户」：已经有订阅就算有历史配置。
- *
- * 为什么不用别的信号：订阅是接入外壳唯一真正关心的既有状态——有订阅的人一升级
- * 就看见「接入配置 / 接入线路」，等于在不知道的情况下被换了界面，所以必须留旧词。
- * 订阅读不出来（服务未就绪 / 文件坏了）时**按老用户处理**：宁可保守地保住旧界面，
- * 也不要让升级的人突然面对一套陌生说法。
- */
-function netHasExistingConfig() {
-  const service = runtime.proxyService;
-  if (!service || typeof service.status !== 'function') return true;
-  try {
-    const listed = service.status();
-    return Array.isArray(listed && listed.subscriptions) && listed.subscriptions.length > 0;
-  } catch {
-    return true;
-  }
-}
-
-/** 生效身份 + 三档选项 + 整套词（设置页与首装引导共用这一份载荷） */
-function netIdentityPayload() {
-  const saved = (runtime.uiStore && runtime.uiStore.get().netIdentity) || netTerms.IDENTITY_AUTO;
-  const hasExistingConfig = netHasExistingConfig();
-  const identity = netTerms.resolveIdentity(saved, { hasExistingConfig });
-
-  return {
-    ok: true,
-    saved,
-    identity,
-    auto: saved === netTerms.IDENTITY_AUTO,
-    hasExistingConfig,
-    label: netTerms.IDENTITY_LABELS[identity],
-    options: netTerms.describeIdentities(),
-    statement: netTerms.SHELL_STATEMENT,
-    terms: netTerms.termsFor(identity),
-  };
-}
-
 /** 设置中心 IPC：界面偏好读写、应用与运行时信息 */
 function registerSettingsIpc() {
   // 安装包签名状态（第五轮 ②）：读自身 exe 的签名与证书有效期，如实翻译
@@ -7309,38 +7269,6 @@ function registerSettingsIpc() {
     if (runtime.tabManager) pushState(runtime.tabManager.snapshot());
 
     return { ok: true, ui: result.ui || currentUiPrefs() };
-  });
-
-  /**
-   * 接入外壳身份（外部清单《VPN 接入外壳改造实现清单》§1 第 2、4 条）。
-   *
-   * 读：生效身份 + 三档选项 + 整套词 + 「这只是通用代理工具」的陈述。
-   * 写：只收三档显式身份，落到 `netIdentity` 界面偏好里——**不改订阅、不改端口、
-   *     不改任何已落盘的路径**（清单 §4 的迁移约束）。
-   *
-   * 为什么写入走既有 ui:prefs 存储而不是另开文件：回滚就是改回 custom 一个值，
-   * 不留第二份真源，也不给「两份配置对不上」留缝隙。
-   */
-  ipcMain.handle('nyx:net:identity', () => netIdentityPayload());
-
-  ipcMain.handle('nyx:net:identity-set', (_event, payload) => {
-    if (!runtime.uiStore) return { ok: false, error: '界面偏好存储未就绪' };
-
-    const identity = payload && payload.identity;
-    if (!netTerms.IDENTITIES.includes(identity)) {
-      return {
-        ok: false,
-        error: `接入方式只能是：${netTerms.IDENTITIES.map((key) => netTerms.IDENTITY_LABELS[key]).join(' / ')}`,
-      };
-    }
-
-    const saved = runtime.uiStore.set('netIdentity', identity);
-    if (!saved || saved.ok === false) {
-      return { ok: false, error: (saved && saved.error) || '这个接入方式存不下来' };
-    }
-
-    if (runtime.tabManager) pushState(runtime.tabManager.snapshot());
-    return Object.assign({ ok: true }, netIdentityPayload());
   });
 
   /**

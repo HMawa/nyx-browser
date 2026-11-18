@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把四十九个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把四十八个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
@@ -51,8 +51,7 @@
  * 45. scripts/verify-navigate-budget.js（agent 导航预算：默认 15 秒、3–60 秒边界、越界与小数一律拒绝不夹值、按站点的规则解析与最长匹配/子域继承、坏行整条拒收并点行号、动作执行器按目标地址挑预算、应用页 navigate 也按剩余预算等加载并回 tabId、主进程读写与留痕、设置页按秒填并带站点文本框，24 项；纯 Node，不启动 Electron）
  * 46. scripts/verify-font-scale.js（界面字号档位：四档倍率与中文名、未知值回标准档、style/settings/全部 theme-*.css 里字号全部乘 --font-scale 且不留裸 px、主窗口与设置页都会写到根元素、preload 三条同步 API、模块保持纯逻辑，15 项；纯 Node，不启动 Electron）
  * 47. scripts/verify-navigate-budget-e2e.js（应用页导航预算真机：从设置页出发，慢页按 3 秒预算返回 NAVIGATE_TIMEOUT 而不是 14ms 假成功、超时结果带 tabId、新标签确实开了、快页回 tabId/fromAppPage，7 项）
- * 48. scripts/verify-net-terms.js（接入外壳词表：三档文案齐全、custom 逐字等于今天的界面、campus/enterprise 不夹旧词、缺项抛错不静默回落、老用户升级走 custom 而新装走 campus、只写 netIdentity 一个键不碰订阅与端口、预加载与主进程都接同一份词表，21 项；纯 Node，不启动 Electron）
- * 49. scripts/verify-privacy-check.js（隐私自检判定引擎：五档各一例、矛盾即可疑、`truth=null` 一律测不到且不许拿观察值顶替、泄露与稳定画布的判定、报告里不许出现绝对化措辞与百分制评分、模块保持纯逻辑、报告 JSON 字段固定，18 项；纯 Node，不启动 Electron）
+ * 48. scripts/verify-privacy-check.js（隐私自检判定引擎：五档各一例、矛盾即可疑、`truth=null` 一律测不到且不许拿观察值顶替、泄露与稳定画布的判定、报告里不许出现绝对化措辞与百分制评分、模块保持纯逻辑、报告 JSON 字段固定，18 项；纯 Node，不启动 Electron）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -387,12 +386,6 @@ const STEPS = [
     script: 'verify-navigate-budget-e2e.js',
     items: '7 项',
     timeoutMs: 180000,
-  },
-  {
-    label: '接入外壳词表回归',
-    script: 'verify-net-terms.js',
-    items: '21 项',
-    timeoutMs: 60000,
   },
   {
     label: '隐私自检判定引擎回归',
