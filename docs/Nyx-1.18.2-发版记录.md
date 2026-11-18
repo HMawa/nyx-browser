@@ -11,8 +11,8 @@
 
 | 现象（自检原话） | 真实原因 |
 | --- | --- |
-| C1「WebRTC 吐出了内网地址（172.24.x.x）」 | 隐私模式第一屏（起始页 / 设置页）走 `createAppPage()`，那条路径**没设 WebRTC 策略** → 用默认策略，`RTCPeerConnection` 照样给 host 候选 |
-| A6「像素比 1 与系统缩放不一致」 | `privacy-surface.js` 把 `devicePixelRatio` 默认写死 1，而本机系统缩放是 1.5 |
+| C1「WebRTC 吐出了内网地址（具体值已隐去）」 | 隐私模式第一屏（起始页 / 设置页）走 `createAppPage()`，那条路径**没设 WebRTC 策略** → 用默认策略，`RTCPeerConnection` 照样给 host 候选 |
+| A6「像素比 1 与系统缩放不一致」 | `privacy-surface.js` 把 `devicePixelRatio` 默认写死 1，而本机系统缩放与 1 不同 |
 | A4「语言 en-US（地区 US），时区地区却说 CN」 | 出口未知时不发 `setTimezoneOverride`，时区留在本机；语言却换成了画像里的 en-US |
 | （修 A4 时又挖出）偏移与时区名自相矛盾 | `timezoneOffsetMinutes()` 符号写反：纽约算出 -300，而 `getTimezoneOffset()` 口径应为 +300 |
 
@@ -52,7 +52,7 @@ wc.setWebRTCIPHandlingPolicy(this.getWebrtcPolicy(this.getMode()));
 新增 `currentScreenScaleFactor()`（`screen.getPrimaryDisplay().scaleFactor`，异常回 1），
 `attachPrivacySurface()` 里把 profile 展开成 `{ ...baseProfile, devicePixelRatio: currentScreenScaleFactor() }`。
 
-真实浏览器里 `devicePixelRatio` 恒等于系统缩放；只在 JS 里改成 1、而系统缩放是 1.5，
+真实浏览器里 `devicePixelRatio` 恒等于系统缩放；只在 JS 里改成 1、而系统缩放与 1 不同，
 是"只改了一半"，比不改更容易被认出来。
 
 ### ③ 时区跟语言取同一地区（`src/core/privacy-hardening.js`）

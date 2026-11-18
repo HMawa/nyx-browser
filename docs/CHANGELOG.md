@@ -57,8 +57,8 @@
 
 | 变更 | 说明 |
 | --- | --- |
-| 应用页也设 WebRTC 策略 | `createAppPage()` 漏了 `setWebRTCIPHandlingPolicy`；隐私模式第一屏（起始页/设置页）之前会吐出内网地址（实测 `172.24.x.x`） |
-| 像素比取系统缩放 | `devicePixelRatio` 之前写死 1，而系统缩放是 1.5——只改一半反而更好认 |
+| 应用页也设 WebRTC 策略 | `createAppPage()` 漏了 `setWebRTCIPHandlingPolicy`；隐私模式第一屏（起始页/设置页）之前会吐出内网地址（实测值已隐去） |
+| 像素比取系统缩放 | `devicePixelRatio` 之前写死 1，而系统缩放与 1 不同——只改一半反而更好认 |
 | 时区跟语言同一地区 | 出口未知时不再出现「语言 en-US + 中国时区」这种现实里不存在的组合 |
 | 时区偏移符号 | `timezoneOffsetMinutes()` 写成 `asUTC - local`，纽约算出 -300；改回 `getTimezoneOffset` 口径（纽约 +300、东京 -540） |
 | 1.18.0 存证补正 | 那份文件曾写出构建机真实指纹，已按脱敏口径补正 |

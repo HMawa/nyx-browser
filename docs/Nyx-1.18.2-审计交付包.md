@@ -81,12 +81,12 @@ Electron **45.3.2** / Chromium **156.0.8078.100** / Node **24.22.2**，Windows�
 | 项 | 现象 | 改法 |
 | --- | --- | --- |
 | 应用页没有 WebRTC 策略 | 隐私模式第一屏（起始页/设置页）是 `createAppPage()` 造的，漏了 `setWebRTCIPHandlingPolicy` → `RTCPeerConnection` 吐内网地址 | 与 `create()` 同口径设策略 |
-| 像素比写死 1 | 系统缩放 1.5，真浏览器 dpr 恒等于系统缩放 → 改一半更好认 | 取 `screen.getPrimaryDisplay().scaleFactor` |
+| 像素比写死 1 | 系统缩放不是 1（具体值已隐去），真浏览器 dpr 恒等于系统缩放 → 改一半更好认 | 取 `screen.getPrimaryDisplay().scaleFactor` |
 | 时区与语言不同地区 | 出口未知时不发 `setTimezoneOverride`，留下「语言 en-US + 中国时区」 | 出口未知时按语言隐含地区选时区；顺手修了 `timezoneOffsetMinutes()` 的符号（原来纽约算成 -300） |
 
 ### 4.3 发布之后同一天（都不改二进制，只补证据与口径）
 
-B2 历史存证脱敏（含 CHANGELOG、四份发版记录、审计交付包、两份 privacy-audit 存证；全树扫描 **0 命中**）、
+B2 历史存证脱敏（含 CHANGELOG、四份发版记录、审计交付包、两份 privacy-audit 存证；全树扫描 **0 命中**，含内网 IP 与系统缩放）、
 B3 计数统一（48 脚本逐个真跑 = **1120 项**，与 `items` 求和对齐）、B4 安装保留验证存证、
 残余风险三项补证（见 §5）、B1 选 A 的正式披露（`docs/Nyx-1.18.2-发版记录.md` §8.3）。
 
@@ -102,7 +102,7 @@ B3 计数统一（48 脚本逐个真跑 = **1120 项**，与 `items` 求和对�
 | 发版门禁 | `node scripts/verify-release-gate.js` | **52/52** |
 | 隐私指纹面 | `node scripts/verify-privacy-surface.js` | **70/70** |
 | AUD-03 安装保留 | `node scripts/verify-installer-retention.js --installer=dist/Nyx-Setup-1.18.2.exe --previous=dist/Nyx-Setup-1.18.1.exe` | **11/11**（原始输出见 `docs/安装保留验证-1.18.2.md`） |
-| 真值扫描 | 见 §7 第 6 步（形状式扫描：UA 串 / 两位数核数 / 四位数分辨率 / Asia 时区 / 小写语言地区标签五类形状；**模式不写进仓库**，避免文档自己变成真值副本） | **0 命中** |
+| 真值扫描 | 见 §7 第 6 步（形状式扫描：UA 串 / 两位数核数 / 四位数分辨率 / Asia 时区 / 小写语言地区标签 / 内网 IP / 系统缩放七类形状；**模式不写进仓库**，避免文档自己变成真值副本） | **0 命中** |
 | 小屏布局 | `node temp/probe-small2.js`（临时探针） | 1024×700 与 1366×768：横向溢出 0、竖排标题 0；结构图列 300px，内容超出时自己滚动 |
 | AUD-09 代理不可达 | `node temp/probe-small-and-aud09.js` | 切隐私被拒 `PROXY_UNREACHABLE`（写明不降级直连）；普通模式自检 2,843ms、16 项、C2/C3 `unknown` |
 | 升级弹窗与首启引导 | `node temp/probe-upgrade-dialog.js` | 1.18.1 报 `phase: available`；原生弹窗「Nyx 有新版本可用：1.18.2」（截图）；覆盖装后 FileVersion 1.18.2；再启动**无 `onboard.html`**、`onboarding.json` 仍 `pending:false` |
@@ -183,14 +183,16 @@ node scripts\privacy-audit.js --check
 node scripts\verify-release-gate.js
 node scripts\verify-installer-retention.js --installer=dist\Nyx-Setup-1.18.2.exe --previous=dist\Nyx-Setup-1.18.1.exe
 
-# 6) 真值扫描（当前树）：模式不写进仓库，按下面五类形状临时拼一条 grep，跑完不落盘
+# 6) 真值扫描（当前树）：模式不写进仓库，按下面七类形状临时拼一条 grep，跑完不落盘
 #    形状：① UA 串（Nyx/数字.数字.数字 或 Electron/数字.数字.数字）
 #          ② 两位数核数（数字 + 空格 + 核）
 #          ③ 四位数分辨率（四位 x 四位，如 NNNNxNNNN）
 #          ④ Asia/ 开头的时区
 #          ⑤ 小写语言地区标签（两字母-两字母）
+#          ⑥ 内网 IP（RFC1918 三类私有网段）
+#          ⑦ 系统缩放/像素比（非 1 的 dpr / scaleFactor 数值）
 #    期望 exit 1（0 命中）。若命中，把那行改成「—（已隐藏）」再复扫。
-git grep -n -E "<上面五类形状拼成的正则>" -- docs
+git grep -n -E "<上面七类形状拼成的正则>" -- docs
 #    想按当年确切值复查，就把构建机真值临时拼进模式（别写进任何 .md）。
 
 # 7) 真机看一眼（人眼项）

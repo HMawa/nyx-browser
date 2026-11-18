@@ -107,7 +107,7 @@
 | 建议浮层刚打开就被关 | `createTab` 触发的状态推送会关闭浮层 | 测试里等 1.5s 再 query |
 | 同名扩展出现两条记录 | 记录 id 由源路径派生 | 安装前先按名称复用已有条目 |
 | 提交信息里的中文变成 `?` | 用 `Out-File`/here-string 写 message 文件，按控制台代码页转码 | 用 `write` 工具写 `temp\commit-*.txt`，再 `git commit -F`（1.18.0 的 `dfb59c1` 就是这么坏的，已记录不改写历史） |
-| 隐私自检存证把真实指纹写进 docs | 存证默认打印观察值与真实值，直接提交就公开 | 生成脚本默认脱敏；原始 JSON 只落 `temp/privacy-audit/`；提交前 `git grep` 扫 UA/核数/屏幕/时区 |
+| 隐私自检存证把真实指纹写进 docs | 存证默认打印观察值与真实值，直接提交就公开 | 生成脚本默认脱敏；原始 JSON 只落 `temp/privacy-audit/`；提交前 `git grep` 扫 UA/核数/屏幕/时区/内网 IP/缩放 |
 
 ---
 
