@@ -25,7 +25,7 @@
  * 19. scripts/verify-packaged-smoke.js（打包产物冒烟，11 项；dist\win-unpacked 不存在时跳过）
  * 20. scripts/verify-runtime-compat.js（运行时兼容：剪贴板异步化、版本三处一致、加密可用性走异步探一次，10 项；纯 Node，不启动 Electron）
  * 21. scripts/verify-release-gate.js（发版门禁、安装器 e2e 接线、验签挑包、差分命中率实测与过期判定、asar 差分结论、夜间 e2e 注册计划任务与状态卡、计划任务改时间/删任务的界面入口、发版后自动量差分、安装后保留清单指向的安装包，48 项；纯 Node，不跑安装包）
- * 22. scripts/verify-signing.js（安装包签名、密码存凭据管理器、证书有效期、签名状态进界面与打包接线，35 项；不看签名包时只跑静态守卫）
+ * 22. scripts/verify-signing.js（安装包签名、密码存凭据管理器、证书有效期、签名状态进界面与打包接线，38 项；不看签名包时只跑静态守卫）
  * 23. scripts/verify-agent-settings.js（agent 改设置：白名单 / 锁死 / 确认 / 限流 / 多步撤销 / 场景预设 / 改动聚合视图与按时间筛选、CSV 导出 / 动作聚合（按类型与站点、被拦下单独报数）、动作记录也导出 CSV，34 项；纯 Node）
  * 24. scripts/verify-process-args.js（进程可辨识：命令行身份参数、进程表与 PID、不承诺改映像名，11 项；纯 Node，不启动 Electron）
  * 25. scripts/verify-toolbox-follow.js（网络面板跟随 / 锁定、锁定标签关掉后如实回退、每标签 500 条上限、关闭即释放监听，13 项；纯 Node，不启动 Electron）
@@ -217,13 +217,13 @@ const STEPS = [
   {
     label: '发版门禁接线',
     script: 'verify-release-gate.js',
-    items: '48 项',
+    items: '52 项',
     timeoutMs: 60000,
   },
   {
     label: '代码签名',
     script: 'verify-signing.js',
-    items: '35 项',
+    items: '38 项',
     timeoutMs: 60000,
     /** 没打签名包时只跑静态守卫（脚本自己会打印「跳过真实签名检查」） */
     args: ['--no-artifact'],
