@@ -58,6 +58,7 @@
  * 52. scripts/verify-extensions-startup.js（扩展启动自检：隔离 profile 预置扩展后真实启动主程序，核对主窗口、普通分区装载、隐私分区零扩展、索引仍为启用、子进程环境已清 ELECTRON_RUN_AS_NODE，10 项）
  * 53. scripts/verify-extensions-e2e.js（扩展注入 e2e：MV2/MV3 内容脚本真的注入页面、隐私分区零扩展且页面不被改写、停用后不再注入，7 项；必须由 Electron 二进制执行）
  * 54. scripts/verify-media-collector.js（本页媒体收集：采集脚本只读页面、地址补全与去重、drop 有理由、文件名能落 Windows、种类兜底、排序与截断、筛选与汇总、坏输入兜住、接线三条通道、保存三约束、预览的隐私与上限，16 项；纯 Node）
+ * 55. scripts/verify-fullshot.js（整页长截图：尺寸上限与截断交代、量不出就拒绝、总量超限按比例缩、文件名与提示、量尺寸脚本只读、主进程先弹框再截且只摘自己挂的调试通道、界面三处接线，11 项；纯 Node）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -436,6 +437,12 @@ const STEPS = [
     label: '本页媒体收集',
     script: 'verify-media-collector.js',
     items: '16 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '整页长截图',
+    script: 'verify-fullshot.js',
+    items: '11 项',
     timeoutMs: 60000,
   },
 ];

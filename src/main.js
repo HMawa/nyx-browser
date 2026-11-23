@@ -64,6 +64,7 @@ const privacyCheck = require('./core/privacy-check');
 const privacyBaseline = require('./core/privacy-baseline');
 const mediaCollector = require('./core/media-collector');
 const digestAssets = require('./core/digest-assets');
+const fullshot = require('./core/fullshot');
 // 设备权限的默认档位：自检里的 D3 要看"普通模式默认放行了什么"
 const { baselineFor } = require('./core/permissions');
 const { PrivacyHardening } = require('./core/privacy-hardening');
@@ -12137,6 +12138,102 @@ function registerDigestIpc() {
       const reason = err && err.message ? err.message : String(err);
       diagnostics.error('PAGE_SCREENSHOT_FAILED', '页面截图没能保存', { reason });
       return { ok: false, error: `截图没能保存：${reason}` };
+    }
+  });
+
+  /**
+   * 整页长截图（M3）：把滚动区域一起截进一张 PNG。
+   *
+   * 为什么不用 capturePage：它只截可视区，拼图要滚动多次再贴，滚动会让
+   * 固定定位的导航栏重复出现，还会把懒加载内容截成半张。这里走 CDP 的
+   * `Page.captureScreenshot` + `captureBeyondViewport: true`，一次拿到整页。
+   *
+   * 三条边界：
+   *   1. 先量尺寸再决定截多大（`src/core/fullshot.js` 的上限），量不出来就拒绝；
+   *   2. 保存框先弹，用户不选就一张图都不生成；
+   *   3. 调试通道是共用的：别人已经挂在上面（工具箱抓包、DevTools）时只借用、
+   *      绝不 detach，只有自己挂的才摘。
+   */
+  ipcMain.handle('nyx:page:fullshot', async () => {
+    const manager = runtime.tabManager;
+    const wc = manager && typeof manager.getActiveWebContents === 'function' ? manager.getActiveWebContents() : null;
+    if (!wc) return { ok: false, code: 'NO_PAGE', error: '当前没有可截图的页面。' };
+
+    let metrics = null;
+    try {
+      metrics = await wc.executeJavaScript(fullshot.buildMetricsScript(), false);
+    } catch (err) {
+      const reason = err && err.message ? err.message : String(err);
+      diagnostics.error('PAGE_FULLSHOT_METRICS_FAILED', '量不出页面尺寸', { reason });
+      return { ok: false, code: 'NO_METRICS', error: `量不出这一页的尺寸：${reason}` };
+    }
+    const plan = fullshot.planFullshot(metrics);
+    if (!plan.ok) return { ok: false, code: 'NO_METRICS', error: plan.error };
+
+    const win = runtime.win || undefined;
+    // 验证旋钮：自动验收没法点模态保存框，允许用环境变量指定落点。
+    // 与 NYX_TAB_SLEEP_MS 同一性质——只在跑探针时设，界面永远走保存框。
+    const forcedPath = String(process.env.NYX_FULLSHOT_PATH || '');
+    const picked = forcedPath || dialog.showSaveDialogSync(win, {
+      title: '保存整页长图',
+      defaultPath: path.join(app.getPath('pictures'), fullshot.fullshotFilename(new Date())),
+      filters: [{ name: 'PNG 图片', extensions: ['png'] }],
+    });
+    if (!picked) return { ok: false, code: 'CANCELED', error: '已取消截图。' };
+
+    let attachedHere = false;
+    try {
+      if (!wc.debugger.isAttached()) {
+        wc.debugger.attach('1.3');
+        attachedHere = true;
+      }
+      // Page 域要先开；某些时刻它不回执（没有文档），这里最多等 2 秒就继续，
+      // 真正的失败由 captureScreenshot 抛出——不在这里假装成功。
+      await Promise.race([
+        wc.debugger.sendCommand('Page.enable'),
+        new Promise((resolve) => setTimeout(resolve, 2000)),
+      ]).catch(() => {});
+
+      const shot = await wc.debugger.sendCommand('Page.captureScreenshot', {
+        format: 'png',
+        captureBeyondViewport: true,
+        clip: { x: 0, y: 0, width: plan.width, height: plan.height, scale: 1 },
+      });
+      const base64 = shot && typeof shot.data === 'string' ? shot.data : '';
+      if (!base64) return { ok: false, code: 'EMPTY', error: '这一页现在截不出内容（可能还没加载完）。' };
+      const buffer = Buffer.from(base64, 'base64');
+      if (!buffer.length) return { ok: false, code: 'EMPTY', error: '截出来的图是空的。' };
+
+      fs.writeFileSync(picked, buffer);
+      const bytes = buffer.length;
+      diagnostics.info('PAGE_FULLSHOT', '保存了一张整页长图', {
+        bytes,
+        width: plan.width,
+        height: plan.height,
+        capped: plan.capped,
+      });
+      return {
+        ok: true,
+        path: picked,
+        bytes,
+        width: plan.width,
+        height: plan.height,
+        capped: plan.capped,
+        note: plan.note,
+        summary: fullshot.describeFullshot(plan),
+      };
+    } catch (err) {
+      const reason = err && err.message ? err.message : String(err);
+      diagnostics.error('PAGE_FULLSHOT_FAILED', '整页长图没能保存', { reason });
+      return { ok: false, error: `整页截图没能保存：${reason}` };
+    } finally {
+      if (attachedHere) {
+        try {
+          wc.debugger.detach();
+        } catch {
+          // 摘不掉不是用户的事：调试通道空闲时会被下次使用重新接管
+        }
+      }
     }
   });
 

@@ -77,6 +77,7 @@ const els = {
   btnMore: document.getElementById('btn-more'),
   moreMenu: document.getElementById('more-menu'),
   moreScreenshot: document.getElementById('more-screenshot'),
+  moreFullshot: document.getElementById('more-fullshot'),
   moreExtensions: document.getElementById('more-extensions'),
   moreProxy: document.getElementById('more-proxy'),
   toolbarLabels: [
@@ -1927,11 +1928,53 @@ if (els.btnMore) {
     event.stopPropagation();
     toggleMoreMenu();
   });
+}/**
+ * 整页长截图（M3）：连滚动区域一起截。
+ *
+ * 与「页面截图」的差别只在范围——普通截图只截看得见的那一屏。这里让主进程
+ * 先量页面高度，再决定截多大（超高会截断），所以提示里必须把「截到了多少」
+ * 说出来，别让人以为拿到的是完整页面。
+ */
+async function takeFullshot() {
+  if (!window.nyx || typeof window.nyx.pageFullshot !== 'function') {
+    showNotice({ level: 'warn', title: '当前内核不支持整页长截图', message: '这一版的界面没有接上整页截图接口。' });
+    return;
+  }
+  try {
+    const res = await window.nyx.pageFullshot();
+    if (res && res.ok) {
+      const kb = Math.max(1, Math.round((res.bytes || 0) / 1024));
+      showNotice({
+        level: res.capped ? 'info' : 'ok',
+        title: res.capped ? '整页长图已保存（有截断）' : '整页长图已保存',
+        message: `${res.summary || `${res.width}×${res.height}`}　${res.path}（${kb} KB）`,
+      });
+      return;
+    }
+    if (res && res.code === 'CANCELED') {
+      showNotice({ level: 'info', title: '已取消截图', message: '没有生成任何文件。' });
+      return;
+    }
+    showNotice({ level: 'warn', title: '没能截整页图', message: (res && res.error) || '原因未知。' });
+  } catch (err) {
+    showNotice({
+      level: 'warn',
+      title: '没能截整页图',
+      message: String(err && err.message ? err.message : err),
+    });
+  }
 }
+
 if (els.moreScreenshot) {
   els.moreScreenshot.addEventListener('click', () => {
     closeMoreMenu();
     takeScreenshot();
+  });
+}
+if (els.moreFullshot) {
+  els.moreFullshot.addEventListener('click', () => {
+    closeMoreMenu();
+    takeFullshot();
   });
 }
 if (els.moreExtensions) {

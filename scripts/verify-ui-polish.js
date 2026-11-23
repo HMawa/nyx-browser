@@ -3437,8 +3437,9 @@ async function main() {
         && toolbarFlow.before.hidden === true
         && toolbarFlow.opened.hidden === false
         && toolbarFlow.opened.expanded === 'true'
-        && toolbarFlow.opened.items.length === 4
+        && toolbarFlow.opened.items.length === 5
         && toolbarFlow.opened.items.some((it) => /页面截图/.test(it.text))
+        && toolbarFlow.opened.items.some((it) => /整页长截图/.test(it.text))
         && toolbarFlow.opened.items.some((it) => /页面摘要/.test(it.text))
         && toolbarFlow.opened.items.some((it) => /扩展开关/.test(it.text))
         && toolbarFlow.opened.items.some((it) => it.netSection === 'network')

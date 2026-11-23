@@ -245,6 +245,7 @@ contextBridge.exposeInMainWorld('nyx', {
   processList: () => ipcRenderer.invoke('nyx:proc:list'),
   processCopy: (payload) => ipcRenderer.invoke('nyx:proc:copy', payload || {}),
   pageScreenshot: () => ipcRenderer.invoke('nyx:page:screenshot'),
+  pageFullshot: () => ipcRenderer.invoke('nyx:page:fullshot'),
   digestSet: (payload) => ipcRenderer.invoke('nyx:digest:set', payload || {}),
   digestRun: (payload) => ipcRenderer.invoke('nyx:digest:run', payload || {}),
   digestCopy: (text) => ipcRenderer.invoke('nyx:digest:copy', { text: String(text || '') }),
