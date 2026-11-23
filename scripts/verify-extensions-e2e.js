@@ -13,6 +13,16 @@ const path = require('node:path');
 
 app.disableHardwareAcceleration();
 
+/* 输出管道可能是别的进程给的（比如把本脚本的输出重定向到文件、或上层只读了一部分就退出）。
+ * 那种情况下控制台写入会抛 EPIPE，而它在主进程里是被当成未捕获异常弹框的 ——
+ * 一条"日志没人读了"就把被测进程打断，属于工具自身噪音，不该算程序错误。
+ * 只吞 EPIPE，其它未捕获异常照旧打出来并失败退出。 */
+process.on('uncaughtException', (err) => {
+  if (err && err.code === 'EPIPE') return;
+  console.error('未捕获异常：', err);
+  app.exit(1);
+});
+
 const workDir = path.join(os.tmpdir(), `nyx-ext-e2e-${Date.now()}`);
 app.setPath('userData', path.join(workDir, 'userdata'));
 
@@ -74,10 +84,10 @@ app.whenReady().then(async () => {
   await new Promise((resolve) => setTimeout(resolve, 2500));
   report.normalTitle = await win.webContents.executeJavaScript('document.title');
   report.normalInjected = report.normalTitle === 'INJECTED-MV2';
-  report.normalExtensions = normalSession.getAllExtensions().map((ext) => `${ext.name}@${ext.version}`);
+  report.normalExtensions = normalSession.extensions.getAllExtensions().map((ext) => `${ext.name}@${ext.version}`);
 
   /* ---- 验证隐私分区：零扩展、页面不被改写 ---- */
-  report.privateExtensionCount = privateSession.getAllExtensions().length;
+  report.privateExtensionCount = privateSession.extensions.getAllExtensions().length;
   const privWin = new BrowserWindow({ show: false, webPreferences: { session: privateSession } });
   await privWin.loadFile(pageFile);
   await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -111,7 +121,7 @@ app.whenReady().then(async () => {
   await new Promise((resolve) => setTimeout(resolve, 2000));
   report.afterDisableTitle = await win4.webContents.executeJavaScript('document.title');
   report.afterDisableUntouched = report.afterDisableTitle === 'plain';
-  report.afterDisableLoadedExtensions = normalSession.getAllExtensions().length;
+  report.afterDisableLoadedExtensions = normalSession.extensions.getAllExtensions().length;
   win4.destroy();
 
   report.storeFiles = fs.existsSync(manager.storePath) ? fs.readdirSync(manager.storePath) : [];
