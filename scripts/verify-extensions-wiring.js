@@ -72,9 +72,19 @@ if (missingApi.length) problems.push(`preload 未暴露 settings.js 调用的接
 else notes.push(`settings.js 调用的 ${called.size} 个 nyx 接口均已在 preload 暴露`);
 
 /* ---------- C) preload 接口 vs main.js ipcMain 通道 ---------- */
-const extChannels = [...mainJs.matchAll(/ipcMain\.handle\(\s*['"](nyx:ext:[^'"]+)['"]/g)].map((m) => m[1]);
-if (extChannels.length !== 8) problems.push(`扩展 IPC 通道数量异常：期望 8，实际 ${extChannels.length}（${extChannels.join(', ')}）`);
-else notes.push(`扩展 IPC 通道已注册：${extChannels.join(', ')}`);
+/* 通道数量不写死：过去这里钉着「期望 8」，扩展功能长到 13 个通道后这条就开始误报，
+ * 而它想守的东西其实是「preload 声明的扩展通道，主进程是否都注册了」。
+ * 现在按声明逐条比对，数量只作记录。 */
+const extChannels = [...new Set([...mainJs.matchAll(/ipcMain\.handle\(\s*['"](nyx:ext:[^'"]+)['"]/g)].map((m) => m[1]))];
+const extInvoked = [...new Set([...preload.matchAll(/ipcRenderer\.invoke\(\s*['"](nyx:ext:[^'"]+)['"]/g)].map((m) => m[1]))];
+const extMissing = extInvoked.filter((channel) => !extChannels.includes(channel));
+if (!extChannels.length) {
+  problems.push('main.js 里没有任何 nyx:ext:* 的 ipcMain.handle：扩展管理器的 IPC 通道一个都没注册');
+} else if (extMissing.length) {
+  problems.push(`preload 声明了扩展通道但主进程未注册：${extMissing.join(', ')}`);
+} else {
+  notes.push(`扩展 IPC 通道 ${extChannels.length} 个（preload 声明的 ${extInvoked.length} 个全部已注册）`);
+}
 
 /* preload 中 invoke 的通道是否都被注册 */
 const invoked = [...preload.matchAll(/ipcRenderer\.invoke\(\s*['"]([^'"]+)['"]/g)].map((m) => m[1]);
