@@ -113,7 +113,18 @@ app.whenReady().then(async () => {
   );
 
   /* ---------- 3. 真实启动 ---------- */
-  const run = spawnSync(electronBin, [ENTRY], { cwd: ROOT, encoding: 'utf8', timeout: 120_000 });
+  /* 红线 10：本机与 CI 的环境里可能带着 ELECTRON_RUN_AS_NODE=1（给纯 Node 用的），
+   * 原样传给子进程会让 Electron 退化成纯 Node 直接崩，表现为「主程序没退出 + 启动报告写不出来」，
+   * 看着像产品 bug，其实是脚本自己把环境带歪了。这里显式构造子进程环境并删掉这一个变量。 */
+  const childEnv = {
+    ...process.env,
+    NYX_USER_DATA: USER_DATA,
+    ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
+  };
+  delete childEnv.ELECTRON_RUN_AS_NODE;
+  check('子进程环境已清掉 ELECTRON_RUN_AS_NODE（红线 10）', !('ELECTRON_RUN_AS_NODE' in childEnv));
+
+  const run = spawnSync(electronBin, [ENTRY], { cwd: ROOT, env: childEnv, encoding: 'utf8', timeout: 120_000 });
   const stdout = run.stdout || '';
   const stderr = run.stderr || '';
 
