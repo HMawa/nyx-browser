@@ -39,7 +39,7 @@
  * 33. scripts/verify-shell-guard.js（外壳导航守卫：只许停在自己那份文档、网络地址与伪协议全拦、弹窗只放行 http(s)、不许内嵌 webview、接线与提示，13 项；纯 Node，不启动 Electron）
  * 34. scripts/verify-update-policy.js（更新通道准入：只许 https、本地目录必须显式确认、版本必须单调、缺 sha256 一律拒绝，10 项；纯 Node，不启动 Electron）
  * 35. scripts/verify-update-signature.js（更新签名：清单 Ed25519 签名往返、改任一受保护字段即失效、安装包六种验签结果、私钥不入库，17 项；纯 Node，不启动 Electron）
- * 36. scripts/verify-privacy-surface.js（隐私指纹面：加固脚本放进假页面世界真跑一遍核对 UA/语言/时区/Canvas/WebGL、显卡与字体统一上报值、CDP 五步顺序、userAgentMetadata、两个平台分开、完整版本号、语言去 q、Worker 版脚本与 Target.setAutoAttach 接管、文档就绪补打与接线可见、应用页也走新标签回调、隐私自检的接线与口径、应用页 WebRTC 策略、像素比取系统缩放、时区与语言同一地区、偏移符号，70 项；纯 Node，不启动 Electron）
+ * 36. scripts/verify-privacy-surface.js（隐私指纹面：加固脚本放进假页面世界真跑一遍核对 UA/语言/时区/Canvas/WebGL、显卡与字体统一上报值、CDP 五步顺序、userAgentMetadata、两个平台分开、完整版本号、语言去 q、Worker 版脚本与 Target.setAutoAttach 接管、文档就绪补打与接线可见、应用页也走新标签回调、隐私自检的接线与口径、应用页 WebRTC 策略、像素比取系统缩放、时区与语言同一地区、偏移符号、对外基准存证（只存结论不存真值、入库守卫、四种对照输出、离线守卫、读基准只读不写），84 项；纯 Node，不启动 Electron）
  * 37. scripts/verify-ipc-guard.js（IPC 发送方校验：只认同项目 renderer 下的 html、子框架与网络地址全拒、三个注册口都被包上、页面上下文通道单独列，10 项；纯 Node，不启动 Electron）
  * 38. scripts/verify-http-api-auth.js（本地接口鉴权：只认请求头 token、查询串不再接受、无 token 的 health 不泄露版本、请求体超限回 413，9 项；纯 Node，不启动 Electron）
  * 39. scripts/verify-audit-p2.js（安全审计 P2 批次：隐私模式 agent 内容边界、state 只读豁免、截图重试、密码框 name 抹除、limits 传参、设置只读不确认、MCP 参数转发、回归只清理自己那棵进程树，17 项；纯 Node，不启动 Electron）
@@ -323,7 +323,7 @@ const STEPS = [
   {
     label: '隐私指纹面回归',
     script: 'verify-privacy-surface.js',
-    items: '70 项',
+    items: '84 项',
     timeoutMs: 60000,
   },
   {

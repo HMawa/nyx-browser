@@ -524,6 +524,182 @@ check(
   /return Math\.round\(\(local - asUTC\) \/ 60000\);/.test(hardeningSource),
 );
 
+/* ---- 任务卡 T2：对外基准存证（只存结论，不存真值） ---- */
+const baselineModule = require(path.join(ROOT, 'src', 'core', 'privacy-baseline.js'));
+const baselineScript = read('scripts/privacy-baseline.js');
+
+// 造一份「像真自检」的结论：真值故意写成能被人肉认出来的样子，
+// 后面要证明它们不会出现在基准里。
+const FAKE_ROWS = [
+  {
+    id: 'A1',
+    group: 'identity',
+    title: 'User-Agent',
+    level: 'masked',
+    observed: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/156.0.0.0',
+    truth: 'Chrome/156.0.8078.100',
+    reason: '页面上报的是伪装后的完整版本号，真实版本是 Chrome/156.0.8078.100。',
+  },
+  {
+    id: 'A6',
+    group: 'identity',
+    title: '屏幕',
+    level: 'pass',
+    observed: { width: 1707, height: 1067, scaleFactor: 1.5 },
+    truth: { width: 2560, height: 1440, scaleFactor: 1.5 },
+    reason: '页面看到 1707×1067，系统是 2560×1440、缩放 1.5。',
+  },
+  {
+    id: 'C1',
+    group: 'network',
+    title: 'WebRTC',
+    level: 'pass',
+    observed: { candidates: [] },
+    truth: '172.24.64.1',
+    reason: '没有吐出内网地址 172.24.64.1。',
+  },
+];
+
+const FAKE_META = {
+  version: '9.9.9',
+  electron: '45.3.2',
+  chromium: '156.0.8078.100',
+  at: '2026-11-23T00:00:00.000Z',
+  identity: '隐私',
+  kernelRunning: true,
+};
+
+const builtBaseline = baselineModule.buildBaseline(FAKE_ROWS, FAKE_META);
+const builtText = JSON.stringify(builtBaseline);
+
+check(
+  '基准只存四件事：项号、结论、标题、理由（T2）',
+  builtBaseline.rows.length === FAKE_ROWS.length &&
+    builtBaseline.rows.every(
+      (row) =>
+        Object.keys(row).sort().join(',') === 'id,level,reason,title',
+    ) &&
+    !('observed' in builtBaseline.rows[0]) &&
+    !('truth' in builtBaseline.rows[0]),
+  JSON.stringify(builtBaseline.rows[0] || null),
+);
+
+check(
+  '基准里没有任何可反推本机的真值（UA / 分辨率 / 内网地址都被抹掉）',
+  (() => {
+    const rowsText = JSON.stringify(builtBaseline.rows);
+    return (
+      !/156\.0\.8078\.100/.test(rowsText) &&
+      !/2560/.test(rowsText) &&
+      !/1440/.test(rowsText) &&
+      !/172\.24\.64\.1/.test(rowsText) &&
+      /—（已隐藏）/.test(rowsText)
+    );
+  })(),
+  JSON.stringify(builtBaseline.rows).slice(0, 200),
+);
+
+check(
+  '理由里的真值被替换成「—（已隐藏）」，句子的其余部分照旧可读',
+  builtBaseline.rows.some((row) => row.id === 'C1' && /没有吐出内网地址/.test(row.reason)) &&
+    builtBaseline.rows.filter((row) => /—（已隐藏）/.test(row.reason)).length >= 2,
+  builtBaseline.rows.map((row) => `${row.id}:${row.reason}`).join(' | ').slice(0, 240),
+);
+
+const parsedGood = baselineModule.parseBaseline(JSON.stringify(builtBaseline));
+check(
+  '自己写出来的基准能被自己读回来（往返一致）',
+  parsedGood.ok === true && parsedGood.baseline.rows.length === FAKE_ROWS.length,
+  parsedGood.ok ? 'ok' : parsedGood.error,
+);
+
+const withObserved = JSON.parse(JSON.stringify(builtBaseline));
+withObserved.rows[0].observed = 'Mozilla/5.0';
+const parsedDirty = baselineModule.parseBaseline(JSON.stringify(withObserved));
+check(
+  '入库守卫：带观察值的文件读不进来（先拦住，而不是悄悄忽略那个字段）',
+  parsedDirty.ok === false && /observed|观察值/.test(parsedDirty.error || ''),
+  parsedDirty.error || '（没报错）',
+);
+
+const wrongKind = JSON.parse(JSON.stringify(builtBaseline));
+wrongKind.kind = 'something-else';
+check(
+  '入库守卫：kind 不对的文件读不进来（防止把别的 JSON 当基准）',
+  baselineModule.parseBaseline(JSON.stringify(wrongKind)).ok === false,
+);
+
+const sameCompare = baselineModule.compareBaseline(FAKE_ROWS, builtBaseline);
+check(
+  '跟同一份结论比：判为一致，并说清「几项完全一致」',
+  sameCompare.comparable === true && sameCompare.changed.length === 0 && /完全一致/.test(sameCompare.lines.join(' ')),
+  JSON.stringify(sameCompare.changed),
+);
+
+const changedRows = FAKE_ROWS.map((row) => (row.id === 'A1' ? Object.assign({}, row, { level: 'leak' }) : row));
+const changedCompare = baselineModule.compareBaseline(changedRows, builtBaseline);
+check(
+  '结论变了要说清「从什么变成什么」，而不是只报一句「有变化」',
+  changedCompare.changed.some((item) => item.id === 'A1') &&
+    /A1 已伪装 → 泄漏/.test(changedCompare.lines.join(' ')),
+  changedCompare.lines.join(' | '),
+);
+
+const missingCompare = baselineModule.compareBaseline(
+  FAKE_ROWS.filter((row) => row.id !== 'C1'),
+  builtBaseline,
+);
+check(
+  '这一版没有的项要单列（不许当成"没变化"混过去）',
+  missingCompare.missing.some((item) => item.id === 'C1') &&
+    /C1 基准里有、这一次没有（正常）/.test(missingCompare.lines.join(' ')),
+  missingCompare.lines.join(' | '),
+);
+
+check(
+  '没有基准时给一句中文原因，不要说成「一致」',
+  (() => {
+    const empty = baselineModule.compareBaseline(FAKE_ROWS, null);
+    return empty.comparable === false && typeof empty.error === 'string' && empty.error.length > 0;
+  })(),
+);
+
+check(
+  '基准文件按日期命名，归档只留最近若干份（默认 12）', 
+  /^\d{4}-\d{2}-\d{2}\.json$/.test(baselineModule.baselineFileName(Date.parse('2026-11-23T10:00:00Z') + 9 * 3600 * 1000)) &&
+    (() => {
+      const names = Array.from({ length: 20 }, (_, index) => `2026-11-${String(index + 1).padStart(2, '0')}.json`);
+      const kept = baselineModule.keepLatestNames(names, 12);
+      return kept.keep.length === 12 && kept.drop.length === 8;
+    })(),
+);
+
+check(
+  '脏文本洗得掉：IPv4、IPv6、24 位以上十六进制串（理由里混进来也不放行）', 
+  (() => {
+    const dirty = baselineModule.scrubText('地址 192.168.1.20 与 2001:db8::1，哈希 ' + 'a'.repeat(32));
+    return !/192\.168\.1\.20/.test(dirty) && !/2001:db8::1/.test(dirty) && !/a{24}/.test(dirty);
+  })(),
+);
+
+check(
+  '生成脚本不联网：不许出现 fetch / http(s) 地址（基准必须能离线重现）', 
+  !/fetch\(/.test(baselineScript) && !/https?:\/\//.test(baselineScript.replace(/127\.0\.0\.1:\$\{port\}/g, '')),
+);
+
+const baselineHandler = (() => {
+  const start = main.indexOf("ipcMain.handle('nyx:privacy:baseline'");
+  if (start < 0) return '';
+  const end = main.indexOf("ipcMain.handle('nyx:permissions:list'", start);
+  return main.slice(start, end > start ? end : start + 4000);
+})();
+check(
+  '界面读基准要同时覆盖「打包版（用户数据目录）」与「源码运行（仓库 docs）」，而且只读不写', 
+  /userDataFile\('privacy-baseline'\)/.test(baselineHandler) &&
+    /'docs',\s*'privacy-baseline'/.test(baselineHandler) &&
+    !/writeFileSync|appendFileSync|rmSync/.test(baselineHandler),
+);
+
 console.log('');
 console.log(`隐私指纹面回归：通过 ${passed} 项，失败 ${failed} 项`);
 if (failed > 0) {

@@ -1,0 +1,114 @@
+{
+  "kind": "nyx-privacy-baseline",
+  "at": "2026-11-23T14:04:28.742Z",
+  "version": "1.19.2",
+  "electron": "45.3.2",
+  "chromium": "156.0.8078.100",
+  "identity": "private",
+  "kernelRunning": false,
+  "counts": {
+    "leak": 0,
+    "suspect": 0,
+    "unknown": 4,
+    "masked": 3,
+    "pass": 9
+  },
+  "rows": [
+    {
+      "id": "A1",
+      "level": "masked",
+      "title": "User-Agent",
+      "reason": "UA 已被换成 Chrome 口径，与本机真实值不同。"
+    },
+    {
+      "id": "A2",
+      "level": "pass",
+      "title": "客户端提示（UA-CH）与 UA 是否自洽",
+      "reason": "UA 与客户端提示自洽（主版本 156 一致）。"
+    },
+    {
+      "id": "A3",
+      "level": "masked",
+      "title": "语言列表",
+      "reason": "语言列表已换成画像里的值（本机是 zh-cn）。"
+    },
+    {
+      "id": "A4",
+      "level": "pass",
+      "title": "时区与地区是否冲突",
+      "reason": "时区、语言与偏移之间没有明显矛盾。"
+    },
+    {
+      "id": "A5",
+      "level": "masked",
+      "title": "CPU 核数",
+      "reason": "页面读到的核数 8 与真实核数 —（已隐藏） 不同。"
+    },
+    {
+      "id": "A6",
+      "level": "pass",
+      "title": "屏幕尺寸与像素比",
+      "reason": "屏幕尺寸已被调整过，像素比与系统缩放一致。"
+    },
+    {
+      "id": "B1",
+      "level": "unknown",
+      "title": "显卡型号（WebGL）",
+      "reason": "没拿到这台机器的真实值，所以无法判断是被伪装过还是本来就一样——不猜。"
+    },
+    {
+      "id": "B2",
+      "level": "pass",
+      "title": "画布指纹是否稳定",
+      "reason": "同一张画布两次取样哈希一致，指纹是稳定的。"
+    },
+    {
+      "id": "B3",
+      "level": "unknown",
+      "title": "音频指纹",
+      "reason": "没拿到这台机器的真实值，所以无法判断是被伪装过还是本来就一样——不猜。"
+    },
+    {
+      "id": "C1",
+      "level": "pass",
+      "title": "WebRTC 直连候选",
+      "reason": "没拿到任何直连候选（要么没有 WebRTC，要么被拦下了）。"
+    },
+    {
+      "id": "C2",
+      "level": "unknown",
+      "title": "出口地址",
+      "reason": "代理没给出出口地址（未连接或还没取到），这一项只能算测不到。"
+    },
+    {
+      "id": "C3",
+      "level": "unknown",
+      "title": "DNS 出口",
+      "reason": "浏览器测不到 DNS 解析走了哪条链路，这一项恒为「测不到」，不是没做完。"
+    },
+    {
+      "id": "D1",
+      "level": "pass",
+      "title": "录屏 / 被远控",
+      "reason": "没检测到已知的录屏或远程控制程序。"
+    },
+    {
+      "id": "D2",
+      "level": "pass",
+      "title": "隐私模式下 agent 读取",
+      "reason": "隐私模式下 agent 读取页面内容被拒绝，符合预期。"
+    },
+    {
+      "id": "D3",
+      "level": "pass",
+      "title": "设备权限默认",
+      "reason": "高敏感权限在隐私模式里都不是默认放行。"
+    },
+    {
+      "id": "D4",
+      "level": "pass",
+      "title": "隐私快照加密",
+      "reason": "隐私快照是整条加密落盘的。"
+    }
+  ]
+}

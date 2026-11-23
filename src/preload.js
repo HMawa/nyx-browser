@@ -135,6 +135,12 @@ contextBridge.exposeInMainWorld('nyx', {
   privacyCheck: () => ipcRenderer.invoke('nyx:privacy:check'),
 
   /**
+   * 对照基准（任务卡 T2）：读最近一份基准并跟这次自检的结论比。
+   * 基准里没有观察值与真实值，返回值也不含；传 rows 才出 compare。
+   */
+  privacyBaseline: (payload) => ipcRenderer.invoke('nyx:privacy:baseline', payload || {}),
+
+  /**
    * 隐私模式的出站方式（proxy / direct）与其边界文案。
    * 返回值的 options[].lost 是「真实 IP」会失去的保护，设置页原样展示。
    */

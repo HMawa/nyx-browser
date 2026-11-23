@@ -113,6 +113,28 @@ async function waitHealthy(port) {
   return false;
 }
 
+/**
+ * 本地接口**实际**监听的端口。
+ *
+ * 为什么不能直接用 `NYX_API_PORT`：`startHttpApi` 在偏好端口被占时会换一个，
+ * 然后把真端口写进 `api-port.txt`。只看环境变量就会一直等一个没人听的端口，
+ * 表现成"本地接口没就绪"，把真正的原因（端口被占）掩盖掉。
+ */
+async function readApiPort(userData, fallback) {
+  const file = path.join(userData, 'api-port.txt');
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    try {
+      const value = Number(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '').trim());
+      if (Number.isInteger(value) && value > 0) return value;
+    } catch (error) {
+      /* 还没写出来 */
+    }
+    await sleep(200);
+  }
+  return fallback;
+}
+
 async function readDevtoolsPort(userData, child) {
   const file = path.join(userData, 'DevToolsActivePort');
   const deadline = Date.now() + 20_000;
@@ -170,9 +192,9 @@ async function callCheck(cdpPort) {
 
 async function measure() {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'nyx-audit-'));
-  const port = await pickFreePort();
+  const preferredPort = await pickFreePort();
   const cdpPort = await pickFreePort();
-  const env = { ...process.env, NYX_USER_DATA: userData, NYX_API_PORT: String(port), NYX_VERIFY: '1' };
+  const env = { ...process.env, NYX_USER_DATA: userData, NYX_API_PORT: String(preferredPort), NYX_VERIFY: '1' };
   delete env.ELECTRON_RUN_AS_NODE;
 
   const electron = path.join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe');
@@ -182,7 +204,10 @@ async function measure() {
   try {
     const token = await readToken(userData, child);
     if (!token) throw new Error('没拿到本地接口 token（实例可能没起来）');
-    if (!(await waitHealthy(port))) throw new Error('本地接口没就绪');
+    const port = await readApiPort(userData, preferredPort);
+    if (!(await waitHealthy(port))) {
+      throw new Error(`本地接口没就绪（试的是 127.0.0.1:${port}，偏好端口 ${preferredPort}）`);
+    }
 
     // 切到隐私模式：自检要证明的是"隐私模式伪装了什么"，不是普通模式
     const switchRes = await fetch(`http://127.0.0.1:${port}/mode/switch`, {
@@ -191,7 +216,9 @@ async function measure() {
       body: JSON.stringify({ mode: 'private' }),
     }).then((res) => res.json());
     if (!switchRes || switchRes.ok === false) {
-      throw new Error(`切不到隐私模式：${(switchRes && switchRes.error) || '未知原因'}`);
+      // 接口的失败字段是 `message`（早期版本这里读的是不存在的 `error`，一直显示"未知原因"）
+      const why = (switchRes && (switchRes.message || switchRes.error || switchRes.reason)) || '返回为空';
+      throw new Error(`切不到隐私模式：${why}`);
     }
     await sleep(1500);
 
@@ -382,8 +409,14 @@ async function main() {
   console.log(`[隐私自检存证] 结论：${result.summary ? result.summary.headline : ''}｜用时 ${result.elapsedMs} 毫秒`);
 }
 
-main().catch((error) => {
-  console.error(`[隐私自检存证] 失败：${error.message}`);
-  console.error('  这一步失败不会自动跳过：发版前必须能跑出存证；跑不出来说明自检本身坏了。');
-  process.exitCode = 1;
-});
+// 被 `scripts/privacy-baseline.js` 复用：那条脚本要跑同一套「起实例 → 切隐私 → 自检」流程，
+// 抄一份就会两处漂移（比如水位线、token 口径）。所以这里导出，只在直接执行时才跑 main。
+module.exports = { buildMarkdown, measure };
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(`[隐私自检存证] 失败：${error.message}`);
+    console.error('  这一步失败不会自动跳过：发版前必须能跑出存证；跑不出来说明自检本身坏了。');
+    process.exitCode = 1;
+  });
+}

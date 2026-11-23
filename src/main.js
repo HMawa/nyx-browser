@@ -61,6 +61,7 @@ const sessions = require('./core/sessions');
 const nodeOs = require('node:os');
 // 隐私自检的判定引擎（纯逻辑）：主进程只负责把观测值和真实值喂给它
 const privacyCheck = require('./core/privacy-check');
+const privacyBaseline = require('./core/privacy-baseline');
 // 设备权限的默认档位：自检里的 D3 要看"普通模式默认放行了什么"
 const { baselineFor } = require('./core/permissions');
 const { PrivacyHardening } = require('./core/privacy-hardening');
@@ -5268,6 +5269,75 @@ function registerPrivacyIpc() {
       reportJson,
       notes,
       elapsedMs,
+    };
+  });
+
+  /**
+   * 对照基准（任务卡 T2）：把「某一版、某一台机器上跑出来的结论」跟这次自检比一比。
+   *
+   * 三条口径，缺一条这条功能就没意义：
+   * 1. 只读不写——基准文件的生成在仓库里（`node scripts/privacy-baseline.js`），
+   *    界面永远不改它，否则"拿今天的结论去改昨天的基准"就等于自己给自己发合格证。
+   * 2. 只用 id/level/reason 比——基准里本来就没有观察值与真实值（生成时就抹成
+   *    「—（已隐藏）」），所以这里也不该有地方能把真值读出来。
+   * 3. 找不到就直说原因——不返回空对象冒充"一致"，那是最坏的一种静默。
+   */
+  ipcMain.handle('nyx:privacy:baseline', async (_event, payload) => {
+    const input = payload && typeof payload === 'object' ? payload : {};
+    const currentRows = Array.isArray(input.rows) ? input.rows : null;
+    // 打包产物只含 src/**，docs/ 不进安装包，所以优先读用户数据目录里那份副本，
+    // 源码运行时再回落到仓库里的 docs/privacy-baseline。
+    const dirs = [userDataFile('privacy-baseline'), path.join(app.getAppPath(), 'docs', 'privacy-baseline')];
+    const candidates = [];
+    for (const dir of dirs) {
+      let names = [];
+      try {
+        names = fs.readdirSync(dir).filter((name) => name.endsWith('.json'));
+      } catch (err) {
+        // 目录不存在是正常情况（没生成过 / 打包版没有 docs），不是错误
+        continue;
+      }
+      for (const name of names) candidates.push({ dir, name });
+    }
+    if (!candidates.length) {
+      return {
+        ok: true,
+        baseline: null,
+        compare: null,
+        source: '',
+        error: '还没有对照基准：在仓库里跑 node scripts/privacy-baseline.js',
+      };
+    }
+    // 文件名是 YYYY-MM-DD.json，字符串倒序就是时间倒序；同一天有多份时取同名即可
+    candidates.sort((a, b) => (a.name < b.name ? 1 : a.name > b.name ? -1 : 0));
+    const newest = candidates[0];
+    let text = '';
+    try {
+      text = fs.readFileSync(path.join(newest.dir, newest.name), 'utf8');
+    } catch (err) {
+      return { ok: false, error: `基准读不出来：${err.message}` };
+    }
+    const parsed = privacyBaseline.parseBaseline(text);
+    if (!parsed.ok) {
+      return { ok: false, error: `${newest.name} 不能用：${parsed.error}` };
+    }
+    const baseline = parsed.baseline;
+    const compare = currentRows ? privacyBaseline.compareBaseline(currentRows, baseline) : null;
+    return {
+      ok: true,
+      baseline: {
+        at: baseline.at,
+        version: baseline.version,
+        identity: baseline.identity,
+        headline: privacyBaseline.describeBaseline(baseline),
+        counts: baseline.counts,
+        rows: baseline.rows,
+        fileName: newest.name,
+        fromUserData: newest.dir === dirs[0],
+      },
+      compare,
+      source: path.join(newest.dir, newest.name),
+      error: null,
     };
   });
 

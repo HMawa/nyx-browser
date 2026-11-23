@@ -466,6 +466,15 @@
                 <p class="hint" id="privacy-check-summary" role="status" aria-live="polite">还没跑过。点「运行自检」，大约一秒出结果。</p>
                 <div class="privacy-check-table" id="privacy-check-table" hidden></div>
                 <p class="hint" id="privacy-check-notes"></p>
+                <div class="privacy-baseline" id="privacy-baseline">
+                  <p class="hint" id="privacy-baseline-head" role="status" aria-live="polite">对照基准：还没检查。</p>
+                  <ul class="privacy-baseline-diff" id="privacy-baseline-diff" hidden></ul>
+                  <p class="hint">
+                    基准是「某一版、某一台机器上跑出来的结论」的快照，只存 <strong>项号、结论、理由</strong>——
+                    观察值与真实值在生成时就抹成「—（已隐藏）」，所以这份文件可以入库、可以给别人看。
+                    跑 <code>node scripts/privacy-baseline.js</code> 在你自己的机器上另存一份，再回来看差异。
+                  </p>
+                </div>
                 <p class="hint">
                   这张表只证明它测到的面：TLS 指纹、HTTP/2 帧序、字体全量枚举都不在范围内；
                   DNS 出口永远显示「测不到」，因为自检不去向第三方要答案。这里也没有分数。

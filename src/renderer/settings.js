@@ -6436,6 +6436,71 @@ async function loadFootprint() {
     if (copyBtn) copyBtn.disabled = !privacyCheckReport;
   }
 
+  /**
+   * 对照基准（任务卡 T2）：把「基准那一版说的」跟「这次跑出来的」摆在一起。
+   *
+   * 只画差异，不画分数：基准里的结论也是人看的，没有"及格线"这回事。
+   * 拿不到基准不算错——源码运行时本来就可能还没生成，给一句能照着做的提示即可。
+   */
+  async function loadPrivacyBaseline(rows) {
+    const headEl = byId('privacy-baseline-head');
+    const diffEl = byId('privacy-baseline-diff');
+    if (!headEl) return;
+    if (!window.nyx || !window.nyx.privacyBaseline) {
+      headEl.textContent = '对照基准：当前内核没有这个接口。';
+      headEl.className = 'hint is-warn';
+      if (diffEl) diffEl.hidden = true;
+      return;
+    }
+    headEl.textContent = '对照基准：正在读…';
+    headEl.className = 'hint';
+    if (diffEl) {
+      diffEl.textContent = '';
+      diffEl.hidden = true;
+    }
+    let res = null;
+    try {
+      res = await window.nyx.privacyBaseline({ rows: rows || null });
+    } catch (err) {
+      headEl.textContent = `对照基准：读不到（${err.message}）`;
+      headEl.className = 'hint is-warn';
+      return;
+    }
+    if (!res || res.ok === false) {
+      headEl.textContent = `对照基准：${(res && res.error) || '读不到原因未知'}`;
+      headEl.className = 'hint is-warn';
+      return;
+    }
+    if (!res.baseline) {
+      headEl.textContent = `对照基准：${res.error || '还没有基准'}`;
+      headEl.className = 'hint is-warn';
+      return;
+    }
+    const head = `${res.baseline.headline || '已读到基准'}｜${res.baseline.fileName}${res.baseline.fromUserData ? '' : '（仓库副本）'}`;
+    headEl.textContent = `对照基准：${head}`;
+    headEl.className = 'hint';
+
+    // 没传 rows（比如只是打开设置页）就只显示基准本身，不编造"一致"
+    if (!res.compare) return;
+    const lines = res.compare.lines || [];
+    if (!diffEl) return;
+    diffEl.textContent = '';
+    if (!res.compare.comparable) {
+      diffEl.hidden = true;
+      headEl.textContent = `对照基准：${res.compare.error || '这两份没法比'}`;
+      headEl.className = 'hint is-warn';
+      return;
+    }
+    diffEl.hidden = false;
+    for (const line of lines) {
+      const li = document.createElement('li');
+      li.textContent = line;
+      if (/→|和基准不一样/.test(line)) li.className = 'is-changed';
+      if (/这一次没有/.test(line)) li.className = 'is-missing';
+      diffEl.appendChild(li);
+    }
+  }
+
   /** 观察值/真实值可能是对象：压平成一句人话，别把 JSON 原样糊在表格里 */
   function privacyCheckValueText(value) {
     if (value === null || value === undefined) return '';
@@ -6485,6 +6550,14 @@ async function loadFootprint() {
         return;
       }
       renderPrivacyCheck(res);
+      // 自检跑完顺手比一次基准：失败只在基准那一行说明，不影响自检结果本身
+      loadPrivacyBaseline((res && res.rows) || []).catch((err) => {
+        const headEl = byId('privacy-baseline-head');
+        if (headEl) {
+          headEl.textContent = `对照基准：读不到（${err.message}）`;
+          headEl.className = 'hint is-warn';
+        }
+      });
       setStatus(`隐私自检完成：${(res.summary && res.summary.headline) || '结果已更新'}`);
     } finally {
       if (btn) btn.disabled = false;
