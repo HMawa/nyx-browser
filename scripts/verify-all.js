@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Nyx 一键回归：把四十八个验证脚本串成一条命令（npm run verify）。
+ * Nyx 一键回归：把五十三个验证脚本串成一条命令（npm run verify）。
  *
  * 依次执行：
  *  1. scripts/verify-address-suggest.js（地址栏建议，68 项）
@@ -53,6 +53,10 @@
  * 47. scripts/verify-navigate-budget-e2e.js（应用页导航预算真机：从设置页出发，慢页按 3 秒预算返回 NAVIGATE_TIMEOUT 而不是 14ms 假成功、超时结果带 tabId、新标签确实开了、快页回 tabId/fromAppPage，7 项）
  * 48. scripts/verify-privacy-check.js（隐私自检判定引擎：五档各一例、矛盾即可疑、`truth=null` 一律测不到且不许拿观察值顶替、高熵版本号取不到即测不到、语言归一后比对、时区与地区双向对照、像素比不一致即可疑、报告默认脱敏（真实值与身份面观察值一并隐藏）、泄露与稳定画布的判定、报告里不许出现绝对化措辞与百分制评分、模块保持纯逻辑、报告 JSON 字段固定，29 项；纯 Node，不启动 Electron）
  * 49. scripts/verify-net-terms.js（接入外壳：词表纯字符串模块与三档身份、auto 推断（老用户 custom / 干净机器 campus）、custom 逐字冻结、校园与单位不许留「代理」等旧术语、**全渲染层语料全集换词零残留**、单位档只是同表的第二个标签（词条不许分叉）、缺词抛错不回退、uiStore 真写读回、两个 IPC 只碰偏好、三段式只在非 custom 生效且可原样搬回、动态句子换词零残留、三处接线齐全、外壳（地址栏/状态条/提示）也换词、关于页事实陈述与 GPL 声明豁免换词，29 项；纯 Node，不启动 Electron）
+ * 50. scripts/verify-extensions.js（扩展装载：manifest 解析与 i18n、能力评级、ZIP/CRX 解包与目录穿越防护、管理器安装/启停/删除/更新复用条目、索引损坏时备份并拒绝覆盖、夹具与产品同用 session.extensions.* 新命名空间，25 项；纯 Node，不启动 Electron）
+ * 51. scripts/verify-extensions-wiring.js（扩展接线：分区元素与导航配套、settings.js 调用的 nyx 接口都在 preload、preload 声明的扩展通道都在主进程注册、扩展管理器只面向普通分区，8 项；纯 Node，不启动 Electron）
+ * 52. scripts/verify-extensions-startup.js（扩展启动自检：隔离 profile 预置扩展后真实启动主程序，核对主窗口、普通分区装载、隐私分区零扩展、索引仍为启用、子进程环境已清 ELECTRON_RUN_AS_NODE，10 项）
+ * 53. scripts/verify-extensions-e2e.js（扩展注入 e2e：MV2/MV3 内容脚本真的注入页面、隐私分区零扩展且页面不被改写、停用后不再注入，7 项；必须由 Electron 二进制执行）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -400,10 +404,47 @@ const STEPS = [
     items: '29 项',
     timeoutMs: 60000,
   },
+  {
+    label: '扩展装载与启停回归',
+    script: 'verify-extensions.js',
+    items: '25 项',
+    timeoutMs: 120000,
+  },
+  {
+    label: '扩展接线回归',
+    script: 'verify-extensions-wiring.js',
+    items: '8 项',
+    timeoutMs: 60000,
+  },
+  {
+    label: '扩展启动自检',
+    script: 'verify-extensions-startup.js',
+    items: '10 项',
+    timeoutMs: 180000,
+  },
+  {
+    label: '扩展注入 e2e',
+    script: 'verify-extensions-e2e.js',
+    items: '7 项',
+    // 这个脚本自己就调 app/BrowserWindow，必须由 Electron 二进制跑；
+    // 用 node 跑会在 require('electron') 处拿到路径字符串，一上来就崩。
+    runner: 'electron',
+    timeoutMs: 180000,
+  },
 ];
 
 function nowMs() {
   return Date.now();
+}
+
+/** Electron 二进制路径：纯 Node 下 require('electron') 返回的就是 exe 的绝对路径 */
+function electronBinary() {
+  try {
+    const value = require('electron');
+    return typeof value === 'string' && value ? value : '';
+  } catch {
+    return '';
+  }
 }
 
 function formatDuration(ms) {
@@ -555,13 +596,28 @@ function runStepOnce(step, index, total) {
   cleanupLeftovers(`[${index}/${total}] 前置清理`);
 
   const started = nowMs();
+  /* 默认用当前 Node 跑；`runner: 'electron'` 的步骤换成 Electron 二进制
+   * （脚本自己 require('electron') 拿 app/BrowserWindow/session 的那种）。
+   * 红线 10：spawn Electron 前必须删掉 ELECTRON_RUN_AS_NODE，否则它退化成纯 Node 直接崩。 */
+  let command = process.execPath;
+  let childEnv = process.env;
+  if (step.runner === 'electron') {
+    const electronPath = electronBinary();
+    if (!electronPath) {
+      console.log(`[回归] [${index}/${total}] 失败：找不到 Electron 二进制（请先 npm install）`);
+      return { status: 'failed', ms: 0, reason: '找不到 Electron 二进制' };
+    }
+    command = electronPath;
+    childEnv = { ...process.env };
+    delete childEnv.ELECTRON_RUN_AS_NODE;
+  }
   // stdio 直通：子脚本的输出原样打到当前控制台，方便定位失败项
-  const result = spawnSync(process.execPath, [scriptPath].concat(Array.isArray(step.args) ? step.args : []), {
+  const result = spawnSync(command, [scriptPath].concat(Array.isArray(step.args) ? step.args : []), {
     cwd: ROOT,
     stdio: 'inherit',
     timeout: step.timeoutMs,
     windowsHide: false,
-    env: process.env,
+    env: childEnv,
   });
   const ms = nowMs() - started;
 
