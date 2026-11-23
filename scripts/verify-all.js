@@ -419,7 +419,7 @@ const STEPS = [
   {
     label: '扩展启动自检',
     script: 'verify-extensions-startup.js',
-    items: '10 项',
+    items: '11 项',
     timeoutMs: 180000,
   },
   {

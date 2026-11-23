@@ -25,9 +25,16 @@ const REPORT_FILE = path.join(WORK, 'report.json');
 
 let electronBin;
 try {
-  electronBin = require('electron');
-} catch {
-  console.error('缺少依赖 electron：请先在项目根执行 npm install');
+  const mod = require('electron');
+  /* 纯 Node 下 require('electron') 返回的是可执行文件**路径字符串**；
+   * 但如果有人用 electron.exe 直接跑本脚本，返回的是 API 对象——
+   * 直接丢给 spawnSync 会报 `The "file" argument must be of type string. Received an instance of Object`
+   * 然后挂在那里什么都打印不出来。这里两种入口都兜住。 */
+  electronBin = typeof mod === 'string' ? mod : process.execPath;
+  if (typeof electronBin !== 'string' || !electronBin) throw new Error('拿不到 Electron 可执行文件路径');
+  if (!fs.existsSync(electronBin)) throw new Error(`Electron 可执行文件不存在：${electronBin}`);
+} catch (err) {
+  console.error(`缺少可用的 Electron：${err.message || err}（请先在项目根执行 npm install）`);
   process.exit(2);
 }
 
@@ -90,10 +97,18 @@ process.on('uncaughtException', (err) => console.log('E2E-APP: 未捕获异常 �
 require(${JSON.stringify(path.join(ROOT, 'src', 'main.js'))});
 app.whenReady().then(async () => {
   await new Promise((r) => setTimeout(r, 12000));
+  // Electron 45 起 getAllExtensions 迁到 session.extensions.*；旧写法只剩弃用告警，写 stderr 会在管道关闭时抛 EPIPE。
+  // 这里只认新命名空间，缺了就直接报错——宁可红，也不静默退回去用已弃用的 API。
+  const readExts = (label, ses) => {
+    if (!ses.extensions || typeof ses.extensions.getAllExtensions !== 'function') {
+      throw new Error('当前内核没有 session.extensions.getAllExtensions（' + label + '），新命名空间缺失');
+    }
+    return ses.extensions.getAllExtensions();
+  };
   const report = {
     windows: BrowserWindow.getAllWindows().length,
-    normalExtensions: session.fromPartition('persist:nyx-normal').getAllExtensions().map((e) => e.name + '@' + e.version),
-    privateExtensions: session.fromPartition('nyx-private').getAllExtensions().length,
+    normalExtensions: readExts('persist:nyx-normal', session.fromPartition('persist:nyx-normal')).map((e) => e.name + '@' + e.version),
+    privateExtensions: readExts('nyx-private', session.fromPartition('nyx-private')).length,
   };
   const indexFile = path.join(process.env.NYX_USER_DATA, 'extensions', 'extensions.json');
   report.indexItems = fs.existsSync(indexFile)
@@ -110,6 +125,15 @@ app.whenReady().then(async () => {
 });
 `,
     'utf8',
+  );
+
+  /* 静态守卫：被测入口必须走 session.extensions.*（Electron 45 新命名空间）。
+   * 旧写法 session.getAllExtensions() 只剩"弃用告警"，而告警是写 stderr 的——
+   * 管道被关时会抛 EPIPE，看起来像被测程序坏了。这条钉住命名空间，别等内核移除旧 API 才红。 */
+  const entrySource = fs.readFileSync(ENTRY, 'utf8');
+  check(
+    '被测入口用 session.extensions 新命名空间（不碰已弃用的 session.getAllExtensions）',
+    entrySource.includes('.extensions.getAllExtensions(') && !/fromPartition\([^)]*\)\.getAllExtensions\(/.test(entrySource),
   );
 
   /* ---------- 3. 真实启动 ---------- */
