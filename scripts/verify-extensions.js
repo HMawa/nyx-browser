@@ -104,27 +104,39 @@ function wrapCrx3(zipBuffer) {
   return Buffer.concat([head, header, zipBuffer]);
 }
 
-/** 造一个假的分区（只实现用到的两个方法） */
+/** 造一个假的分区（只实现用到的两个方法）
+ *
+ * 注意 API 形状：Electron 45 把扩展 API 挪到了 `session.extensions.*`
+ * （旧写法 `session.loadExtension()` 会走弃用告警）。`src/core/extensions.js` 用的是新命名空间，
+ * 所以假分区必须挂在 `extensions` 下面——只实现旧写法会让「装载成功」这条永远是 false，
+ * 看起来像产品装不上扩展，其实是夹具没跟着迁移。
+ * 两种形状都挂上同一份实现，是为了让假分区与真实 API 的调用方式保持一致，
+ * 而不是替产品代码兜底。
+ */
 function createFakeSession() {
   const loaded = new Map();
+  const loadExtensionCalls = [];
+  const loadExtension = async (dir, options) => {
+    loadExtensionCalls.push({ dir, options });
+    if (loaded.has(dir)) {
+      const err = new Error(`Extension at ${dir} is already loaded.`);
+      throw err;
+    }
+    const id = `fake-${Buffer.from(dir).toString('hex').slice(0, 8)}`;
+    loaded.set(dir, id);
+    return { id, path: dir };
+  };
+  const removeExtension = (id) => {
+    for (const [dir, value] of loaded) {
+      if (value === id) loaded.delete(dir);
+    }
+  };
   return {
     loaded,
-    loadExtensionCalls: [],
-    async loadExtension(dir, options) {
-      this.loadExtensionCalls.push({ dir, options });
-      if (loaded.has(dir)) {
-        const err = new Error(`Extension at ${dir} is already loaded.`);
-        throw err;
-      }
-      const id = `fake-${Buffer.from(dir).toString('hex').slice(0, 8)}`;
-      loaded.set(dir, id);
-      return { id, path: dir };
-    },
-    removeExtension(id) {
-      for (const [dir, value] of loaded) {
-        if (value === id) loaded.delete(dir);
-      }
-    },
+    loadExtensionCalls,
+    loadExtension,
+    removeExtension,
+    extensions: { loadExtension, removeExtension },
   };
 }
 
@@ -234,6 +246,15 @@ function createFakeSession() {
   });
 
   /* ---------- 用例 5：管理器全流程 ---------- */
+  check('装载走 Electron 45 的新命名空间 session.extensions.*', () => {
+    // 守的是「夹具与产品用同一套 API」这件事：Electron 45 把扩展方法挪进了 session.extensions，
+    // 旧的 session.loadExtension 只剩弃用告警。这里钉死产品代码用的是新命名空间，
+    // 谁改回旧写法都会红，避免下次又变成"夹具比产品新/产品比夹具新"的错位。
+    const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'core', 'extensions.js'), 'utf8');
+    assert.match(source, /ses\.extensions\.loadExtension\(/);
+    assert.doesNotMatch(source, /\bses\.loadExtension\(/);
+  });
+
   console.log('\n[3] 管理器安装 / 启停 / 删除');
   const session = createFakeSession();
   const logs = [];
