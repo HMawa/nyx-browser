@@ -62,6 +62,7 @@ const nodeOs = require('node:os');
 // 隐私自检的判定引擎（纯逻辑）：主进程只负责把观测值和真实值喂给它
 const privacyCheck = require('./core/privacy-check');
 const privacyBaseline = require('./core/privacy-baseline');
+const mediaCollector = require('./core/media-collector');
 // 设备权限的默认档位：自检里的 D3 要看"普通模式默认放行了什么"
 const { baselineFor } = require('./core/permissions');
 const { PrivacyHardening } = require('./core/privacy-hardening');
@@ -2678,6 +2679,190 @@ function downloadResource(url) {
   }
 
   return { ok: true, path: savePath };
+}
+
+/**
+ * 扫描当前标签页上的图片 / 图标 / 背景图 / 内联矢量图 / 视频封面。
+ *
+ * 与资源嗅探的分工：
+ *   嗅探走 CDP 的 Network 域，只看得见"真的请求过"的资源；
+ *   本页扫描回到 DOM 里数，能覆盖 CSS 背景、内联 SVG、favicon 这些没有独立请求、
+ *   或者走浏览器内部请求的东西——用户要的是「页面上看得见图的都能存下来」。
+ */
+async function scanPageMedia() {
+  const wc = runtime.tabManager ? runtime.tabManager.getActiveWebContents() : null;
+  if (!wc || wc.isDestroyed()) return { ok: false, error: '当前没有可用标签' };
+
+  let raw = null;
+  try {
+    raw = await wc.executeJavaScript(mediaCollector.buildCollectorScript(), false);
+  } catch (err) {
+    return { ok: false, error: `扫描失败：${err.message}` };
+  }
+  if (!raw || raw.ok !== true) return { ok: false, error: '页面没有返回可用的结果（可能还在加载）' };
+
+  const pageUrl = wc.getURL() || (raw.page && raw.page.url) || '';
+  const result = mediaCollector.normalizeCandidates(raw, pageUrl);
+  diagnostics.info('MEDIA_SCAN', `扫描本页媒体：列出 ${result.items.length} 条`, {
+    listed: result.items.length,
+    total: result.total,
+    dropped: result.dropped.count,
+    truncated: result.truncated,
+  });
+  return Object.assign({ ok: true }, result, { summary: mediaCollector.describeCandidates(result.items) });
+}
+
+/** 一批最多下多少条：再多会把下载队列与磁盘 IO 压死，剩下的让用户分批点 */
+const MEDIA_BATCH_MAX = 120;
+
+/**
+ * 把用户勾选的那几条存到本地。
+ *
+ * 三条硬约束：
+ *   1. 必须是用户选的目录（弹一次目录选择框），不许偷偷丢进下载目录后就完事；
+ *   2. 隐私模式一律拒绝——隐私模式不落盘是产品红线，扫出来的清单只能看；
+ *   3. 每条都要有结果：存成功的给落点，失败的给中文原因，不许静默跳过。
+ */
+function downloadSelectedMedia(payload) {
+  const list = payload && Array.isArray(payload.items) ? payload.items : [];
+  if (!list.length) return { ok: false, error: '没有选中任何内容' };
+
+  if (sessions.getMode() === 'private') {
+    return {
+      ok: false,
+      error: '隐私模式不把页面媒体写到磁盘。需要保存的话，切到普通模式再扫一次。',
+    };
+  }
+
+  const wc = runtime.tabManager ? runtime.tabManager.getActiveWebContents() : null;
+  if (!wc || wc.isDestroyed()) return { ok: false, error: '当前没有可用标签' };
+
+  const win = runtime.mainWindow && !runtime.mainWindow.isDestroyed() ? runtime.mainWindow : null;
+  const pick = dialog.showSaveDialogSync(win, {
+    title: '把选中的图片存到哪里',
+    buttonLabel: '保存到这里',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (!pick) return { ok: false, cancelled: true, error: '已取消，没有保存任何文件' };
+
+  const dir = String(pick);
+  const batch = list.slice(0, MEDIA_BATCH_MAX);
+  const saved = [];
+  const failed = [];
+
+  for (const item of batch) {
+    const url = String((item && item.url) || '');
+    if (!/^(https?:|data:|blob:)/i.test(url)) {
+      failed.push({ url, reason: '不是可下载的地址' });
+      continue;
+    }
+    let name = 'nyx-media';
+    try {
+      name = mediaCollector.sanitizeFileStem(item.name || 'nyx-media');
+      if (!/\.[a-z0-9]{1,5}$/i.test(name)) name += '.jpg';
+    } catch {
+      /* 取名失败用兜底名 */
+    }
+    const savePath = uniqueSavePath(dir, name);
+    pendingDownloadPaths.push(savePath);
+    try {
+      wc.downloadURL(url);
+      saved.push({ url, path: savePath });
+    } catch (err) {
+      const idx = pendingDownloadPaths.indexOf(savePath);
+      if (idx >= 0) pendingDownloadPaths.splice(idx, 1);
+      failed.push({ url, reason: err.message || '下载启动失败' });
+    }
+  }
+
+  if (list.length > batch.length) {
+    failed.push({
+      url: '',
+      reason: `一次最多 ${MEDIA_BATCH_MAX} 个，剩下的 ${list.length - batch.length} 个请再点一次`,
+    });
+  }
+
+  diagnostics.info('MEDIA_SAVE', `保存页面媒体：成功 ${saved.length} 条，失败 ${failed.length} 条`, {
+    dir,
+    saved: saved.length,
+    failed: failed.length,
+  });
+
+  return {
+    ok: true,
+    dir,
+    saved: saved.length,
+    failed,
+    files: saved,
+    summary: mediaCollector.summarizeDownload({ saved: saved.length, failed }),
+  };
+}
+
+/** 预览图上限：超过就不取（列表里给一句"太大，先存下来再看"） */
+const MEDIA_THUMB_MAX_BYTES = 2 * 1024 * 1024;
+const MEDIA_THUMB_TIMEOUT_MS = 8000;
+
+/**
+ * 给列表里的一条媒体取一张预览图（返回 data: URL，界面直接用）。
+ *
+ * 为什么要经过主进程：界面页面的 CSP 是 `img-src 'self' data:`，
+ * 直接写远程地址会被拦下（而且隐私模式下那样也绕过了代理）。
+ * 这里用 electronNet.fetch —— 走 Chromium 网络栈，跟随已配置的代理。
+ *
+ * 三条边界：
+ *   1. 隐私模式一律拒绝：net.fetch 走的是默认 session，拿不到隐私分区那条链路，
+ *      与其冒险发一次可能带真实 IP 的请求，不如明说"这里不预览"；
+ *   2. 只取图片，最大 2 MB，8 秒超时；
+ *   3. 内联矢量图（data:）不需要联网，直接原样回。
+ */
+async function loadMediaThumb(payload) {
+  const url = String((payload && payload.url) || '').trim();
+  if (!url) return { ok: false, error: '没有地址' };
+
+  if (/^data:image\/svg\+xml/i.test(url)) return { ok: true, dataUrl: url, inline: true };
+
+  if (!/^https?:\/\//i.test(url)) {
+    return { ok: false, error: '这个地址不能预览（不是 http/https 链接）' };
+  }
+  if (/^blob:/i.test(url)) return { ok: false, error: '页面内临时地址取不到预览，只能直接保存' };
+
+  if (sessions.getMode() === 'private') {
+    return {
+      ok: false,
+      error: '隐私模式下不额外取图预览：预览要单独发一次请求，走的是默认网络链路，可能绕开代理。需要看就直接保存。',
+    };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), MEDIA_THUMB_TIMEOUT_MS);
+  try {
+    const response = await electronNet.fetch(url, {
+      signal: controller.signal,
+      headers: { accept: 'image/*' },
+    });
+    if (!response.ok) return { ok: false, error: `取图失败：HTTP ${response.status}` };
+
+    const type = String(response.headers.get('content-type') || '').toLowerCase();
+    if (!/^image\//.test(type)) return { ok: false, error: `这个地址返回的不是图片（${type || '未知类型'}）` };
+
+    const length = Number(response.headers.get('content-length') || 0);
+    if (length > MEDIA_THUMB_MAX_BYTES) {
+      return { ok: false, error: `图太大（${Math.round(length / 1024)} KB），不在这里预览，可以直接保存` };
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length > MEDIA_THUMB_MAX_BYTES) {
+      return { ok: false, error: `图太大（${Math.round(buffer.length / 1024)} KB），不在这里预览，可以直接保存` };
+    }
+    if (!buffer.length) return { ok: false, error: '取回来的图是空的' };
+
+    return { ok: true, dataUrl: `data:${type};base64,${buffer.toString('base64')}`, bytes: buffer.length };
+  } catch (err) {
+    if (err && err.name === 'AbortError') return { ok: false, error: '取图超时（8 秒），可以直接保存' };
+    return { ok: false, error: `取图失败：${err.message}` };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** 生成目录内不冲突的保存路径：重名时追加 (1)(2)… 递增后缀 */
@@ -9632,6 +9817,11 @@ function registerToolboxIpc() {
 
   ipcMain.handle('nyx:tb:download', (_event, payload) =>
     downloadResource(payload && payload.url));
+
+  /* 本页媒体：扫一遍 DOM 把看得见的图列出来，勾选后存到用户选的目录 */
+  ipcMain.handle('nyx:tb:media-scan', () => scanPageMedia());
+  ipcMain.handle('nyx:tb:media-save', (_event, payload) => downloadSelectedMedia(payload));
+  ipcMain.handle('nyx:tb:media-thumb', (_event, payload) => loadMediaThumb(payload));
 
   /* 视频增强：倍速解锁 / 进度解锁 / 鼠标保活 */
 

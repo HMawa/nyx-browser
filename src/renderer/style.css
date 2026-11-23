@@ -1246,6 +1246,134 @@ body.private-mode .shell {
   gap: 5px;
 }
 
+/* ---------------- 本页媒体：扫描出来逐条勾选保存 ---------------- */
+
+.media-box {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--tb-card);
+}
+
+.media-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.media-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-tab);
+  font-size: calc(11px * var(--font-scale));
+}
+
+.media-item.is-off {
+  opacity: 0.55;
+}
+
+.media-item input[type='checkbox'] {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.media-kind {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--bg-tab-active);
+  color: var(--text-dim);
+  font-size: calc(10px * var(--font-scale));
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.media-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-main);
+}
+
+.media-size {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font-size: calc(10px * var(--font-scale));
+  font-variant-numeric: tabular-nums;
+}
+
+.media-note {
+  flex: 0 0 auto;
+  color: var(--accent-soft);
+  font-size: calc(10px * var(--font-scale));
+}
+
+/* 缩略图：占位与真图同尺寸，加载完不跳版 */
+.media-thumb {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input, var(--bg-tab));
+  object-fit: cover;
+  cursor: zoom-in;
+}
+
+.media-thumb.is-empty {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.media-thumb.is-failed {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.media-preview {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-tab);
+}
+
+.media-preview img {
+  max-width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: var(--bg-input, var(--bg-tab));
+}
+
+.media-preview-meta {
+  color: var(--text-dim);
+  font-size: calc(10px * var(--font-scale));
+  line-height: 1.5;
+  word-break: break-all;
+}
+
 .tb-item {
   display: flex;
   gap: 8px;

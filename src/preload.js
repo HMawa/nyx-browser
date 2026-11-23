@@ -537,6 +537,15 @@ contextBridge.exposeInMainWorld('nyx', {
   /** 下载资源到系统下载目录：{ url } */
   downloadToolboxResource: (payload) => ipcRenderer.invoke('nyx:tb:download', payload || {}),
 
+  /** 扫描本页面上看得见的图片 / 图标 / 背景图 / 矢量图 / 视频封面 */
+  mediaScan: () => ipcRenderer.invoke('nyx:tb:media-scan'),
+
+  /** 把勾选的那几条存到用户选的目录：{ items: [{ url, name }] } */
+  mediaSave: (payload) => ipcRenderer.invoke('nyx:tb:media-save', payload || {}),
+
+  /** 取一条媒体的预览图（回 data: URL）：{ url } */
+  mediaThumb: (payload) => ipcRenderer.invoke('nyx:tb:media-thumb', payload || {}),
+
   /* 调试：修改页面 HTML 与控制台 */
 
   /** 读取 / 应用 / 还原页面 HTML：{ action: 'read'|'apply'|'revert', html? } */

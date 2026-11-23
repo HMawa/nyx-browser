@@ -32,6 +32,15 @@
     sniffSearch: document.getElementById('sniff-search'),
     sniffMeta: document.getElementById('sniff-meta'),
     sniffList: document.getElementById('sniff-list'),
+    mediaScan: document.getElementById('media-scan'),
+    mediaAll: document.getElementById('media-all'),
+    mediaNone: document.getElementById('media-none'),
+    mediaSave: document.getElementById('media-save'),
+    mediaMeta: document.getElementById('media-meta'),
+    mediaList: document.getElementById('media-list'),
+    mediaPreview: document.getElementById('media-preview'),
+    mediaPreviewImg: document.getElementById('media-preview-img'),
+    mediaPreviewMeta: document.getElementById('media-preview-meta'),
 
     paneNet: document.getElementById('pane-net'),
     netPause: document.getElementById('net-pause'),
@@ -161,6 +170,14 @@
     netNodes: new Map(),
     sniffKind: 'media',
     sniffQuery: '',
+    /**
+     * 本页扫描出来的媒体：Map<url, { item, checked }>。
+     * 勾选状态记在这里而不是 DOM 上——重渲染（换筛选、重新扫描）后勾选不能丢。
+     */
+    mediaItems: new Map(),
+    /** 预览图缓存：url → { status, dataUrl, error }；一次扫描内复用，重新扫描清空 */
+    mediaThumbs: new Map(),
+    mediaScanning: false,
     netType: 'all',
     netQuery: '',
     /** 只看失败请求（与类型、搜索是「与」关系，v1.8.0） */
@@ -871,6 +888,16 @@
     subtitle: '字幕',
   };
 
+  /** 本页媒体清单的种类名（与 src/core/media-collector.js 的 KIND_LABELS 对齐） */
+  const KIND_LABEL_MEDIA = {
+    image: '图片',
+    icon: '图标',
+    svg: '矢量图',
+    background: '背景图',
+    poster: '视频封面',
+    video: '视频',
+  };
+
   function ruleOf(list, key) {
     return list.find((item) => item.key === key) || list[0];
   }
@@ -1099,6 +1126,310 @@
     tb.netSlowOnly = value;
     syncNetExtras();
     rebuildNet();
+  }
+
+  /* ============================ 本页媒体（扫描 + 勾选保存） ============================ */
+
+  function mediaCheckedCount() {
+    let n = 0;
+    for (const entry of tb.mediaItems.values()) if (entry.checked) n += 1;
+    return n;
+  }
+
+  function syncMediaButtons() {
+    const total = tb.mediaItems.size;
+    const picked = mediaCheckedCount();
+    if (els.mediaAll) els.mediaAll.disabled = total === 0 || tb.mediaScanning;
+    if (els.mediaNone) els.mediaNone.disabled = picked === 0 || tb.mediaScanning;
+    if (els.mediaSave) {
+      els.mediaSave.disabled = picked === 0 || tb.mediaScanning;
+      els.mediaSave.textContent = picked ? `保存选中（${picked}）` : '保存选中';
+    }
+  }
+
+  function setMediaNote(text) {
+    if (els.mediaMeta) els.mediaMeta.textContent = text;
+  }
+
+  function buildMediaNode(item) {
+    const entry = tb.mediaItems.get(item.url) || { item, checked: true };
+    const row = el('li', `media-item${entry.checked ? '' : ' is-off'}`);
+    row.dataset.url = item.url;
+
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = entry.checked;
+    box.setAttribute('aria-label', `选中 ${item.name}`);
+    box.addEventListener('change', () => {
+      const cur = tb.mediaItems.get(item.url);
+      if (cur) cur.checked = box.checked;
+      row.classList.toggle('is-off', !box.checked);
+      syncMediaButtons();
+    });
+    row.appendChild(box);
+
+    // 缩略图：先占位，滚到可见处再取（一次最多 3 个并发，别把下载队列压死）
+    const thumb = document.createElement('img');
+    thumb.className = 'media-thumb is-empty';
+    thumb.alt = '';
+    thumb.dataset.thumbUrl = item.url;
+    thumb.title = '点一下看大图';
+    thumb.addEventListener('click', () => {
+      const state = tb.mediaThumbs.get(item.url);
+      if (state && state.dataUrl) showMediaPreview(item, state.dataUrl);
+      else if (state && state.status === 'error') toast(`没有预览：${state.error}`, 'err');
+      else toast('预览还在取，一秒后再点', 'err');
+    });
+    row.appendChild(thumb);
+
+    row.appendChild(el('span', 'media-kind', KIND_LABEL_MEDIA[item.kind] || '图片'));
+    const name = el('span', 'media-name', item.name);
+    name.title = `${item.name}\n${item.url}${item.alt ? `\n替代文字：${item.alt}` : ''}`;
+    row.appendChild(name);
+
+    if (item.width && item.height) {
+      row.appendChild(el('span', 'media-size', `${item.width}×${item.height}`));
+    } else {
+      row.appendChild(el('span', 'media-size', '—'));
+    }
+
+    if (item.ephemeral) row.appendChild(el('span', 'media-note', '页面内临时地址'));
+    else if (!/^https?:/i.test(item.url)) row.appendChild(el('span', 'media-note', '内联'));
+
+    return row;
+  }
+
+  /* ---------------------------- 预览（缩略图 / 大图） ---------------------------- */
+
+  /** 一次最多同时取几张：再多会把下载队列和网络栈一起压死 */
+  const MEDIA_THUMB_CONCURRENCY = 3;
+  /** 同一次扫描最多自动取多少张预览（列表可以很长，全取等于把整页图再下一次） */
+  const MEDIA_THUMB_AUTO_MAX = 60;
+
+  let thumbActive = 0;
+  const thumbQueue = [];
+  let thumbAutoLeft = MEDIA_THUMB_AUTO_MAX;
+  let thumbObserver = null;
+
+  function applyThumb(url, state) {
+    const nodes = els.mediaList ? els.mediaList.querySelectorAll(`img[data-thumb-url="${cssEscapeAttr(url)}"]`) : [];
+    for (const node of nodes) {
+      if (state.status === 'ok' && state.dataUrl) {
+        node.src = state.dataUrl;
+        node.classList.remove('is-empty', 'is-failed');
+      } else if (state.status === 'error') {
+        node.classList.remove('is-empty');
+        node.classList.add('is-failed');
+        node.title = `没有预览：${state.error}`;
+      }
+    }
+  }
+
+  function cssEscapeAttr(value) {
+    return String(value).replace(/["\\]/g, '\\$&');
+  }
+
+  function pumpThumbs() {
+    while (thumbActive < MEDIA_THUMB_CONCURRENCY && thumbQueue.length) {
+      const url = thumbQueue.shift();
+      const state = tb.mediaThumbs.get(url);
+      if (!state || state.status !== 'waiting') continue;
+      thumbActive += 1;
+      state.status = 'loading';
+      (async () => {
+        let res = null;
+        try {
+          res = await window.nyx.mediaThumb({ url });
+        } catch (err) {
+          res = { ok: false, error: err && err.message ? err.message : String(err) };
+        }
+        thumbActive -= 1;
+        // 重新扫描会把 map 清空：这条回包已经过期，直接丢掉（否则旧图会贴到新列表上）
+        if (tb.mediaThumbs.get(url) !== state) {
+          pumpThumbs();
+          return;
+        }
+        if (res && res.ok && res.dataUrl) {
+          state.status = 'ok';
+          state.dataUrl = res.dataUrl;
+          applyThumb(url, state);
+        } else {
+          state.status = 'error';
+          state.error = (res && res.error) || '取不到';
+          applyThumb(url, state);
+        }
+        pumpThumbs();
+      })();
+    }
+  }
+
+  function requestThumb(url) {
+    const known = tb.mediaThumbs.get(url);
+    if (known) return;
+    tb.mediaThumbs.set(url, { status: 'waiting' });
+    thumbQueue.push(url);
+    pumpThumbs();
+  }
+
+  function showMediaPreview(item, dataUrl) {
+    if (!els.mediaPreview || !els.mediaPreviewImg) return;
+    els.mediaPreviewImg.src = dataUrl;
+    els.mediaPreviewImg.alt = item.alt || item.name;
+    const bits = [item.name, `${item.width || '?'}×${item.height || '?'}`, KIND_LABEL_MEDIA[item.kind] || '图片'];
+    els.mediaPreviewMeta.textContent = `${bits.join(' · ')}\n${item.url}`;
+    els.mediaPreview.hidden = false;
+  }
+
+  function resetMediaPreview() {
+    if (els.mediaPreview) els.mediaPreview.hidden = true;
+    if (els.mediaPreviewImg) els.mediaPreviewImg.removeAttribute('src');
+    if (els.mediaPreviewMeta) els.mediaPreviewMeta.textContent = '';
+  }
+
+  /** 列表重渲染时重建观察器：看不到的行不取预览 */
+  function observeThumbs() {
+    if (thumbObserver) thumbObserver.disconnect();
+    if (!els.mediaList) return;
+    if (typeof IntersectionObserver !== 'function') {
+      // 老内核没有观察器：退化成"前 N 张全取"
+      for (const row of Array.from(els.mediaList.children).slice(0, 20)) {
+        if (row.dataset.url) requestThumb(row.dataset.url);
+      }
+      return;
+    }
+    thumbObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const url = entry.target.dataset.url;
+          if (!url) continue;
+          if (thumbAutoLeft <= 0) {
+            thumbObserver.unobserve(entry.target);
+            continue;
+          }
+          thumbAutoLeft -= 1;
+          requestThumb(url);
+          thumbObserver.unobserve(entry.target);
+        }
+      },
+      { root: els.mediaList, rootMargin: '80px 0px' },
+    );
+    for (const row of Array.from(els.mediaList.children)) thumbObserver.observe(row);
+  }
+
+  function renderMediaList() {
+    if (!els.mediaList) return;
+    els.mediaList.textContent = '';
+    if (!tb.mediaItems.size) {
+      els.mediaList.hidden = true;
+      syncMediaButtons();
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    for (const entry of tb.mediaItems.values()) frag.appendChild(buildMediaNode(entry.item));
+    els.mediaList.appendChild(frag);
+    els.mediaList.hidden = false;
+    syncMediaButtons();
+    observeThumbs();
+  }
+
+  async function scanMedia() {
+    if (tb.mediaScanning) return;
+    if (!window.nyx || typeof window.nyx.mediaScan !== 'function') {
+      setMediaNote('这个版本的界面没有接上扫描接口，需要更新到带这条功能的版本。');
+      return;
+    }
+    tb.mediaScanning = true;
+    if (els.mediaScan) els.mediaScan.disabled = true;
+    setMediaNote('正在扫描这一页…');
+    syncMediaButtons();
+
+    let res = null;
+    try {
+      res = await window.nyx.mediaScan();
+    } catch (err) {
+      res = { ok: false, error: err && err.message ? err.message : String(err) };
+    } finally {
+      tb.mediaScanning = false;
+      if (els.mediaScan) els.mediaScan.disabled = false;
+      syncMediaButtons();
+    }
+
+    if (!res || res.ok !== true) {
+      setMediaNote(`扫描失败：${(res && res.error) || '页面没有返回结果。'}（可以等页面加载完再试一次）`);
+      return;
+    }
+
+    tb.mediaItems.clear();
+    for (const item of res.items || []) tb.mediaItems.set(item.url, { item, checked: true });
+    // 换了页面就是新的一批图：旧预览连同队列一起作废（in-flight 的回包会因为状态被删而自动忽略）
+    tb.mediaThumbs.clear();
+    thumbQueue.length = 0;
+    thumbAutoLeft = MEDIA_THUMB_AUTO_MAX;
+    resetMediaPreview();
+
+    const bits = [res.summary || ''];
+    if (res.page && res.page.title) bits.push(`页面：${res.page.title.slice(0, 40)}`);
+    if (res.dropped && res.dropped.count) {
+      const why = Object.keys(res.dropped.reasons || {}).slice(0, 3).join('、');
+      bits.push(`略过 ${res.dropped.count} 条（${why}）`);
+    }
+    if (res.truncated) bits.push(`超过 ${res.items.length} 条上限，另有 ${res.truncated} 条未列出`);
+    setMediaNote(bits.filter(Boolean).join(' · '));
+
+    renderMediaList();
+  }
+
+  async function saveMedia() {
+    const picked = [];
+    for (const entry of tb.mediaItems.values()) {
+      if (entry.checked) picked.push({ url: entry.item.url, name: entry.item.name });
+    }
+    if (!picked.length) {
+      toast('先勾选要保存的图', 'err');
+      return;
+    }
+    if (!window.nyx || typeof window.nyx.mediaSave !== 'function') {
+      toast('这个版本的界面没有接上保存接口', 'err');
+      return;
+    }
+
+    if (els.mediaSave) els.mediaSave.disabled = true;
+    setMediaNote(`正在保存 ${picked.length} 个，选好目录后不要关这个面板…`);
+
+    let res = null;
+    try {
+      res = await window.nyx.mediaSave({ items: picked });
+    } catch (err) {
+      res = { ok: false, error: err && err.message ? err.message : String(err) };
+    }
+
+    syncMediaButtons();
+
+    if (!res || res.ok !== true) {
+      const why = (res && res.error) || '未知原因';
+      setMediaNote(`没有保存：${why}`);
+      if (!(res && res.cancelled)) toast(`没有保存：${why}`, 'err');
+      return;
+    }
+
+    const failed = Array.isArray(res.failed) ? res.failed : [];
+    const firstFail = failed.length ? `；第一个失败原因：${failed[0].reason}` : '';
+    setMediaNote(`${res.summary || `已保存 ${res.saved} 个`} → ${res.dir}${firstFail}`);
+    toast(res.summary || `已保存 ${res.saved} 个`, failed.length ? 'err' : 'ok');
+  }
+
+  function setAllMedia(checked) {
+    for (const entry of tb.mediaItems.values()) entry.checked = checked;
+    renderMediaList();
+  }
+
+  function wireMedia() {
+    if (els.mediaScan) els.mediaScan.addEventListener('click', () => scanMedia());
+    if (els.mediaAll) els.mediaAll.addEventListener('click', () => setAllMedia(true));
+    if (els.mediaNone) els.mediaNone.addEventListener('click', () => setAllMedia(false));
+    if (els.mediaSave) els.mediaSave.addEventListener('click', () => saveMedia());
+    syncMediaButtons();
   }
 
   /* ============================ 资源嗅探 ============================ */
@@ -3893,6 +4224,8 @@
   bindSiteIconPush();
   // 慢请求阈值以主进程为准：启动拉一次 + 订阅设置页的改动（v1.16.0）
   bindSlowMsPush();
+  // 本页媒体：扫描、全选/反选、保存（含缩略图懒加载与点开大图）
+  wireMedia();
   if (nyx.onToolboxPane) {
     nyx.onToolboxPane((payload) => {
       // 书签栏「管理」等入口：确保工具箱可见，再切到指定页签

@@ -190,6 +190,25 @@
 
       <!-- ==================== 资源嗅探 ==================== -->
       <section class="tb-pane" id="pane-sniff">
+        <!--
+          本页媒体：嗅探只看得见"网络真的请求过"的资源，CSS 背景图、内联矢量图、
+          favicon、以及懒加载还没发出的图都不在其中——所以这里直接回 DOM 里数。
+        -->
+        <div class="media-box" id="media-box">
+          <div class="tb-bar">
+            <button class="tb-btn" id="media-scan" title="扫描这一页上看得见的图片、图标、背景图、矢量图与视频封面">扫描本页图片</button>
+            <button class="tb-btn" id="media-all" title="全选（只选当前筛选出来的）" disabled>全选</button>
+            <button class="tb-btn" id="media-none" title="取消全选" disabled>全不选</button>
+            <button class="tb-btn tb-btn-primary" id="media-save" title="把勾选的存到你选的目录" disabled>保存选中</button>
+          </div>
+          <div class="tb-meta" id="media-meta" role="status" aria-live="polite">还没有扫描。点「扫描本页图片」把这一页上的图列出来。</div>
+          <ul class="media-list" id="media-list" hidden></ul>
+          <!-- 点缩略图在这里看大图：预览图由主进程取回 data: URL，避免绕过代理或撞 CSP -->
+          <div class="media-preview" id="media-preview" hidden>
+            <img id="media-preview-img" alt="" />
+            <div class="media-preview-meta" id="media-preview-meta"></div>
+          </div>
+        </div>
         <div class="tb-chips" id="sniff-kinds"></div>
         <input class="tb-input" id="sniff-search" placeholder="过滤：关键词 / 域名 / 后缀" spellcheck="false" />
         <div class="tb-meta" id="sniff-meta">等待页面加载…</div>

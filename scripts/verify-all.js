@@ -57,6 +57,7 @@
  * 51. scripts/verify-extensions-wiring.js（扩展接线：分区元素与导航配套、settings.js 调用的 nyx 接口都在 preload、preload 声明的扩展通道都在主进程注册、扩展管理器只面向普通分区，8 项；纯 Node，不启动 Electron）
  * 52. scripts/verify-extensions-startup.js（扩展启动自检：隔离 profile 预置扩展后真实启动主程序，核对主窗口、普通分区装载、隐私分区零扩展、索引仍为启用、子进程环境已清 ELECTRON_RUN_AS_NODE，10 项）
  * 53. scripts/verify-extensions-e2e.js（扩展注入 e2e：MV2/MV3 内容脚本真的注入页面、隐私分区零扩展且页面不被改写、停用后不再注入，7 项；必须由 Electron 二进制执行）
+ * 54. scripts/verify-media-collector.js（本页媒体收集：采集脚本只读页面、地址补全与去重、drop 有理由、文件名能落 Windows、种类兜底、排序与截断、筛选与汇总、坏输入兜住、接线三条通道、保存三约束、预览的隐私与上限，16 项；纯 Node）
  *
  * 行为约定：
  *   - 每个脚本跑在独立子进程里，stdio 直通（输出不捕获、不吞），一个失败不影响后续；
@@ -430,6 +431,12 @@ const STEPS = [
     // 用 node 跑会在 require('electron') 处拿到路径字符串，一上来就崩。
     runner: 'electron',
     timeoutMs: 180000,
+  },
+  {
+    label: '本页媒体收集',
+    script: 'verify-media-collector.js',
+    items: '16 项',
+    timeoutMs: 60000,
   },
 ];
 
