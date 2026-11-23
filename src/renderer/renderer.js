@@ -69,6 +69,7 @@ const els = {
   digestRun: document.getElementById('digest-run'),
   digestCopy: document.getElementById('digest-copy'),
   digestExport: document.getElementById('digest-export'),
+  digestExportImages: document.getElementById('digest-export-images'),
   digestExportCsv: document.getElementById('digest-export-csv'),
   digestStatus: document.getElementById('digest-status'),
   digestBody: document.getElementById('digest-body'),
@@ -1788,10 +1789,11 @@ async function copyDigest() {
  * 复制是给人看的纯文本，导出是要存下来的文件：两者必须来自同一次抽取，
  * 所以送出去的是整个 payload，而不是把屏幕上已有的文本再拼一遍。
  */
-async function exportDigest(format) {
+async function exportDigest(format, options) {
   const isCsv = format === 'csv';
+  const includeImages = !isCsv && Boolean(options && options.includeImages);
   const kind = isCsv ? '网络统计' : '摘要';
-  const button = isCsv ? els.digestExportCsv : els.digestExport;
+  const button = isCsv ? els.digestExportCsv : includeImages ? els.digestExportImages : els.digestExport;
   if (!lastDigestPayload) {
     setDigestStatus(`还没有${kind}可以导出，先生成一次。`, 'warn');
     return;
@@ -1802,9 +1804,14 @@ async function exportDigest(format) {
   }
   if (button) button.disabled = true;
   try {
-    const res = await window.nyx.digestExport(lastDigestPayload, isCsv ? 'csv' : 'md');
+    const res = await window.nyx.digestExport(
+      lastDigestPayload,
+      isCsv ? 'csv' : 'md',
+      { includeImages },
+    );
     if (res && res.ok) {
-      setDigestStatus(`已导出：${res.path}（${res.bytes} 字节）`, 'ok');
+      const extra = res.summary ? `；${res.summary}` : '';
+      setDigestStatus(`已导出：${res.path}（${res.bytes} 字节）${extra}`, 'ok');
     } else if (res && res.canceled) {
       setDigestStatus('已取消导出。', '');
     } else {
@@ -1988,6 +1995,9 @@ if (els.agentPanelSettings) {
 if (els.digestRun) els.digestRun.addEventListener('click', () => { runDigest(); });
 if (els.digestCopy) els.digestCopy.addEventListener('click', () => { copyDigest(); });
 if (els.digestExport) els.digestExport.addEventListener('click', () => { exportDigest('md'); });
+if (els.digestExportImages) {
+  els.digestExportImages.addEventListener('click', () => { exportDigest('md', { includeImages: true }); });
+}
 if (els.digestExportCsv) els.digestExportCsv.addEventListener('click', () => { exportDigest('csv'); });
 if (els.digestEnabled) {
   els.digestEnabled.addEventListener('change', async () => {

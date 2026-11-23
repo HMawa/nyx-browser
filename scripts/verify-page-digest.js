@@ -16,6 +16,7 @@ const path = require('node:path');
 const {
   DIGEST_LIMITS,
   buildDigestText,
+  buildDigestMarkdown,
   buildExtractScript,
   classifyBlocked,
   digestDisabledPayload,
@@ -24,6 +25,7 @@ const {
   summarize,
   summarizeNetwork,
 } = require('../src/core/page-digest');
+const digestAssets = require('../src/core/digest-assets');
 
 const ROOT = path.join(__dirname, '..');
 const checks = [];
@@ -377,7 +379,7 @@ async function main() {
     assert.ok(/canceled: true/.test(body), '用户取消要和失败区分开');
     assert.ok(main.includes('digestFileName'), '默认文件名要用 digestFileName');
     const preload = readFile('src/preload.js');
-    assert.ok(/digestExport: \(result, format\) =>/.test(preload), 'preload 要暴露 digestExport（带格式）');
+    assert.ok(/digestExport: \(result, format(?:, options)?\) =>/.test(preload), 'preload 要暴露 digestExport（带格式）');
     const html = readFile('src/renderer/index.html');
     assert.ok(html.includes('id="digest-export"'), '侧栏要有「导出 .md」按钮');
     const renderer = readFile('src/renderer/renderer.js');
@@ -440,6 +442,133 @@ async function main() {
     const renderer = readFile('src/renderer/renderer.js');
     assert.ok(/exportDigest\('csv'\)/.test(renderer), 'CSV 按钮要传 csv');
     assert.ok(/exportDigest\('md'\)/.test(renderer), 'Markdown 按钮要传 md');
+  });
+
+  await check('摘要导出连图：只挑图片，视频与临时地址都点名跳过（M2）', async () => {
+    const plan = digestAssets.pickAssets([
+      { url: 'https://a.test/1.jpg', kind: 'image', width: 100, height: 80, alt: '图一' },
+      { url: 'https://a.test/1.jpg', kind: 'image' },
+      { url: 'https://a.test/v.mp4', kind: 'video' },
+      { url: 'blob:https://a.test/x', kind: 'background' },
+      { url: 'https://a.test/logo.svg', kind: 'svg' },
+    ]);
+    assert.equal(plan.ok, true);
+    assert.equal(plan.items.length, 2, '去重后只该有两张图');
+    assert.ok(plan.items.every((item) => item.kind !== 'video'), '视频不该进图片清单');
+    assert.ok(
+      plan.skipped.some((item) => /blob/i.test(item.reason)),
+      '临时地址跳过时要说明它只在页面打开时有效',
+    );
+    assert.ok(
+      plan.skipped.some((item) => /video/.test(item.reason)),
+      '非图片要写清是什么不是图片',
+    );
+  });
+
+  await check('摘要导出连图：一次最多 40 张，超出的逐条记原因（M2）', async () => {
+    const many = [];
+    for (let i = 0; i < 45; i += 1) many.push({ url: `https://a.test/${i}.png`, kind: 'image' });
+    const plan = digestAssets.pickAssets(many);
+    assert.equal(plan.items.length, digestAssets.MAX_ASSETS);
+    assert.equal(plan.skipped.length, 45 - digestAssets.MAX_ASSETS);
+    assert.ok(plan.skipped.every((item) => /上限/.test(item.reason)), '超出上限要说清是上限');
+  });
+
+  await check('摘要导出连图：文件名序号在前、Windows 安全、扩展名兜底（M2）', async () => {
+    const name = digestAssets.assetFileName({ url: 'https://a.test/x.JPEG', kind: 'image', alt: 'a/b:c' }, 2);
+    assert.match(name, /^03-/, '序号要在最前面且从 1 起');
+    assert.ok(!/[\\/:*?"<>|]/.test(name), `文件名不能带 Windows 保留字符：${name}`);
+    assert.match(name, /\.jpeg$/i, '扩展名要跟地址一致');
+    const noExt = digestAssets.assetFileName({ url: 'https://a.test/pic', kind: 'image' }, 0);
+    assert.match(noExt, /\.(png|jpg)$/i, '认不出扩展名时按种类兜底');
+    const anonymous = digestAssets.assetFileName({ url: 'data:image/svg+xml,x', kind: 'svg' }, 0);
+    assert.match(anonymous, /^01-[^.]+\.\w+$/, `没有名字时要有兜底名：${anonymous}`);
+  });
+
+  await check('摘要导出连图：图片目录名跟着 md 文件名走（M2）', async () => {
+    const dir = digestAssets.assetDirName('C:\\Users\\a\\Documents\\页面摘要-2026-11-23-10-00.md');
+    assert.equal(dir, '页面摘要-2026-11-23-10-00_assets');
+    const posix = digestAssets.assetDirName('/tmp/摘要.md');
+    assert.equal(posix, '摘要_assets');
+  });
+
+  await check('摘要导出连图：Markdown 追加「本页图片」在署名之前，原因按条数归并（M2）', async () => {
+    const base = buildDigestMarkdown(
+      { page: { title: '示例页', url: 'https://a.test/p', bullets: ['一句话'] } },
+      { now: new Date('2026-11-23T10:00:00Z') },
+    );
+    const out = digestAssets.appendImageSection(
+      base,
+      [{ url: 'https://a.test/1.jpg', file: '01-图一.jpg', alt: '图一', width: 640, height: 480 }],
+      [
+        { url: 'https://a.test/v.mp4', reason: 'video 不是图片' },
+        { url: 'blob:https://a.test/x', reason: 'blob: 地址只在页面打开时有效' },
+      ],
+      { dirName: '示例_assets' },
+    );
+    assert.ok(out.includes('## 本页图片'), '要追加图片小节');
+    assert.ok(out.includes('![图一](示例_assets/01-图一.jpg)'), '要用相对路径引用');
+    assert.ok(out.includes('640×480'), '尺寸要写出来');
+    assert.ok(out.includes('还有 2 张没存下来'), '跳过数量要写进文件');
+    const imageAt = out.indexOf('## 本页图片');
+    const signAt = out.indexOf('这份摘要由 Nyx 的「页面摘要」功能生成');
+    assert.ok(imageAt > 0 && signAt > imageAt, '图片小节要在署名之前');
+  });
+
+  await check('摘要导出连图：一张都没存、全部跳过时也只写说明不造空小节（M2）', async () => {
+    const base = buildDigestMarkdown({ page: { title: 'x' } }, { now: new Date('2026-11-23T10:00:00Z') });
+    const none = digestAssets.appendImageSection(base, [], [{ url: 'https://a.test/v.mp4', reason: 'video 不是图片' }], {
+      dirName: 'x_assets',
+    });
+    assert.ok(!none.includes('![]'), '没有图片时不该出现空图片语法');
+    assert.ok(none.includes('还有 1 张没存下来'), '跳过原因仍要写清');
+    assert.equal(digestAssets.appendImageSection(base, [], [], { dirName: 'x' }), base, '既没存也没跳过时原样返回');
+  });
+
+  await check('摘要导出连图：主进程隐私模式不取图、先建目录再串行落盘、走已配代理的网络栈（M2）', async () => {
+    const main = readFile('src/main.js');
+    const at = main.indexOf('async function exportDigestAssets(');
+    assert.ok(at > 0, '缺少 exportDigestAssets');
+    const body = main.slice(at, at + 2600);
+    const guardAt = body.indexOf("sessions.getMode() === 'private'");
+    const scanAt = body.indexOf('scanPageMedia(');
+    assert.ok(guardAt > 0, '隐私模式必须先判');
+    assert.ok(guardAt < scanAt, '隐私判断要在扫描之前，不能先发请求再拒绝');
+    assert.ok(/隐私模式下不额外发请求取图/.test(body), '隐私模式的理由要写成人话');
+    assert.ok(/fs\.mkdirSync\(dirPath, \{ recursive: true \}\)/.test(body), '要先把目录建出来');
+    assert.ok(/await fetchImageToFile\(/.test(body), '取图要逐张 await（串行）');
+
+    const fetchAt = main.indexOf('async function fetchImageToFile(');
+    assert.ok(fetchAt > 0, '缺少 fetchImageToFile');
+    const fetchBody = main.slice(fetchAt, fetchAt + 2200);
+    assert.ok(/electronNet\.fetch\(/.test(fetchBody), '取图要走 electronNet（跟随已配置代理）');
+    assert.ok(/MAX_ASSET_BYTES/.test(fetchBody), '单张要有上限');
+    assert.ok(/content-type/.test(fetchBody), '要检查返回类型');
+    const dataAt = fetchBody.indexOf('data:image');
+    const httpAt = fetchBody.indexOf('^https?');
+    assert.ok(dataAt > 0, '内联矢量图要有本地分支');
+    assert.ok(dataAt < httpAt, '内联矢量图要在联网之前处理掉，不该发请求');
+
+    const exportAt = main.indexOf("ipcMain.handle('nyx:digest:export'");
+    assert.ok(exportAt > 0, '缺少导出通道');
+    const exportBody = main.slice(exportAt, exportAt + 3400);
+    assert.ok(/input\.includeImages === true/.test(exportBody), '导出通道要认 includeImages');
+    assert.ok(/appendImageSection\(/.test(exportBody), '要把图片小节接进 Markdown');
+
+    const preload = readFile('src/preload.js');
+    assert.ok(/includeImages: Boolean\(options && options\.includeImages\)/.test(preload), 'preload 要把开关透传下去');
+    const html = readFile('src/renderer/index.html');
+    assert.ok(html.includes('id="digest-export-images"'), '侧栏要有「导出 .md（含图片）」按钮');
+    assert.ok(/隐私模式下不取图/.test(html), '按钮提示要写明隐私模式不取图');
+    const renderer = readFile('src/renderer/renderer.js');
+    assert.ok(/exportDigest\('md', \{ includeImages: true \}\)/.test(renderer), '按钮要传 includeImages');
+  });
+
+  await check('摘要导出连图：状态栏有话说，且不会把空结果说成成功（M2）', async () => {
+    assert.ok(/没有存下图片/.test(digestAssets.describeAssetExport({ saved: 0, skipped: 2 })));
+    assert.ok(/已存 3 张/.test(digestAssets.describeAssetExport({ saved: 3, skipped: 0 })));
+    assert.ok(/另有 2 张/.test(digestAssets.describeAssetExport({ saved: 3, skipped: 2 })));
+    assert.ok(/没有找到/.test(digestAssets.describeAssetExport({ saved: 0, skipped: 0 })));
   });
 
   const failed = checks.filter((item) => !item.ok);

@@ -63,6 +63,7 @@ const nodeOs = require('node:os');
 const privacyCheck = require('./core/privacy-check');
 const privacyBaseline = require('./core/privacy-baseline');
 const mediaCollector = require('./core/media-collector');
+const digestAssets = require('./core/digest-assets');
 // 设备权限的默认档位：自检里的 D3 要看"普通模式默认放行了什么"
 const { baselineFor } = require('./core/permissions');
 const { PrivacyHardening } = require('./core/privacy-hardening');
@@ -2863,6 +2864,130 @@ async function loadMediaThumb(payload) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * 取一张图并写到指定文件（摘要导出连图时用）。
+ *
+ * 与预览的差别只有一个：这里要**落到磁盘**，所以额外做长度上限与"取回来是空的"检查，
+ * 任何一步失败都返回中文原因，由调用方按张记进 Markdown（不静默吞掉）。
+ */
+async function fetchImageToFile(url, filePath) {
+  const target = String(url || '');
+  if (/^data:image\/svg\+xml/i.test(target)) {
+    const comma = target.indexOf(',');
+    const meta = comma > 0 ? target.slice(5, comma) : '';
+    const payload = comma > 0 ? target.slice(comma + 1) : '';
+    try {
+      const buffer = /;base64,/i.test(meta)
+        ? Buffer.from(payload, 'base64')
+        : Buffer.from(decodeURIComponent(payload), 'utf8');
+      if (!buffer.length) return { ok: false, error: '内联矢量图是空的' };
+      fs.writeFileSync(filePath, buffer);
+      return { ok: true, bytes: buffer.length };
+    } catch (err) {
+      return { ok: false, error: `内联矢量图取不出来：${err.message}` };
+    }
+  }
+  if (!/^https?:\/\//i.test(target)) return { ok: false, error: '不是 http/https 地址，取不到' };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), MEDIA_THUMB_TIMEOUT_MS);
+  try {
+    const response = await electronNet.fetch(target, {
+      signal: controller.signal,
+      headers: { accept: 'image/*' },
+    });
+    if (!response.ok) return { ok: false, error: `取图失败：HTTP ${response.status}` };
+    const type = String(response.headers.get('content-type') || '').toLowerCase();
+    if (!/^image\//.test(type)) return { ok: false, error: `返回的不是图片（${type || '未知类型'}）` };
+    const length = Number(response.headers.get('content-length') || 0);
+    if (length > digestAssets.MAX_ASSET_BYTES) {
+      return { ok: false, error: `图太大（${Math.round(length / 1024)} KB）` };
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (!buffer.length) return { ok: false, error: '取回来的图是空的' };
+    if (buffer.length > digestAssets.MAX_ASSET_BYTES) {
+      return { ok: false, error: `图太大（${Math.round(buffer.length / 1024)} KB）` };
+    }
+    fs.writeFileSync(filePath, buffer);
+    return { ok: true, bytes: buffer.length };
+  } catch (err) {
+    if (err && err.name === 'AbortError') return { ok: false, error: '取图超时（8 秒）' };
+    return { ok: false, error: `取图失败：${err.message}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 摘要导出「连图片一起存」：扫一遍当前页，把挑中的图落到 md 旁边的 `_assets/` 目录。
+ *
+ * 隐私模式在这里**不发任何请求**：取图走的是 electronNet.fetch（默认 session），
+ * 那条链路不在隐私分区的代理之下，硬取等于拿真实 IP 换一张缩略图。
+ * 这时不报错中断，只把"没取图"的原因写进 Markdown。
+ */
+async function exportDigestAssets(markdownPath) {
+  const dirName = digestAssets.assetDirName(markdownPath);
+  const dirPath = path.join(path.dirname(markdownPath), dirName);
+
+  if (sessions.getMode() === 'private') {
+    return {
+      ok: true,
+      skipped: [{ url: '', reason: '隐私模式下不额外发请求取图（取图走默认网络链路，可能绕开代理）' }],
+      saved: [],
+      dirName,
+      dirPath,
+      folderCreated: false,
+    };
+  }
+
+  const scan = await scanPageMedia();
+  if (!scan.ok) {
+    return {
+      ok: true,
+      saved: [],
+      skipped: [{ url: '', reason: `这一页扫不到图片：${scan.error || '未知原因'}` }],
+      dirName,
+      dirPath,
+      folderCreated: false,
+    };
+  }
+
+  const plan = digestAssets.pickAssets(scan.items, { maxCount: digestAssets.MAX_ASSETS });
+  const saved = [];
+  const skipped = plan.skipped.slice();
+  if (!plan.items.length) {
+    return { ok: true, saved, skipped, dirName, dirPath, folderCreated: false };
+  }
+
+  try {
+    fs.mkdirSync(dirPath, { recursive: true });
+  } catch (err) {
+    diagnostics.error('DIGEST_ASSETS_DIR_FAILED', '建不了摘要图片目录', { dir: dirPath, error: err.message });
+    return { ok: false, error: `建不了图片目录：${err.message}` };
+  }
+
+  for (let index = 0; index < plan.items.length; index += 1) {
+    const item = plan.items[index];
+    const file = digestAssets.assetFileName(item, index);
+    const target = path.join(dirPath, file);
+    // eslint-disable-next-line no-await-in-loop —— 串行更稳：几十张图并发会把对端站点打成 DDoS
+    const result = await fetchImageToFile(item.url, target);
+    if (result.ok) {
+      saved.push({ url: item.url, file, alt: item.alt || '', width: item.width, height: item.height });
+    } else {
+      skipped.push({ url: item.url, reason: result.error });
+    }
+  }
+
+  diagnostics.info('DIGEST_ASSETS', `摘要导出连图：成功 ${saved.length} 张，跳过 ${skipped.length} 张`, {
+    dir: dirPath,
+    saved: saved.length,
+    skipped: skipped.length,
+  });
+
+  return { ok: true, saved, skipped, dirName, dirPath, folderCreated: true };
 }
 
 /** 生成目录内不冲突的保存路径：重名时追加 (1)(2)… 递增后缀 */
@@ -12157,15 +12282,40 @@ function registerDigestIpc() {
       return { ok: false, error: `打不开保存对话框：${err && err.message ? err.message : err}` };
     }
     if (!target) return { ok: false, canceled: true, error: '已取消导出。' };
+    // 连图片存只对 Markdown 有意义（CSV 只导网络统计，图片塞不进去）
+    const includeImages = input.includeImages === true && format === 'md';
     try {
-      const body =
+      let body =
         format === 'csv' ? buildDigestCsv(result) : buildDigestMarkdown(result, { now: new Date() });
+      let assets = null;
+      if (includeImages) {
+        assets = await exportDigestAssets(target);
+        if (assets.ok) {
+          body = digestAssets.appendImageSection(body, assets.saved, assets.skipped, {
+            dirName: assets.dirName,
+          });
+        }
+      }
       fs.writeFileSync(target, body, 'utf8');
       diagnostics.info('DIGEST_EXPORTED', format === 'csv' ? '导出了页面摘要的网络统计（CSV）' : '导出了页面摘要（Markdown）', {
         path: target,
         bytes: Buffer.byteLength(body, 'utf8'),
+        images: assets && assets.ok ? assets.saved.length : 0,
       });
-      return { ok: true, path: target, bytes: Buffer.byteLength(body, 'utf8'), format };
+      return {
+        ok: true,
+        path: target,
+        bytes: Buffer.byteLength(body, 'utf8'),
+        format,
+        images: assets && assets.ok ? { saved: assets.saved.length, skipped: assets.skipped.length, dir: assets.dirName } : null,
+        imageError: assets && !assets.ok ? assets.error : '',
+        summary:
+          includeImages && assets
+            ? assets.ok
+              ? digestAssets.describeAssetExport({ saved: assets.saved.length, skipped: assets.skipped.length })
+              : `摘要已导出，但图片没存成：${assets.error}`
+            : '',
+      };
     } catch (err) {
       diagnostics.error('DIGEST_EXPORT_FAILED', '摘要没能写到磁盘', {
         path: target,

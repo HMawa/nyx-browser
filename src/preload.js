@@ -248,8 +248,12 @@ contextBridge.exposeInMainWorld('nyx', {
   digestSet: (payload) => ipcRenderer.invoke('nyx:digest:set', payload || {}),
   digestRun: (payload) => ipcRenderer.invoke('nyx:digest:run', payload || {}),
   digestCopy: (text) => ipcRenderer.invoke('nyx:digest:copy', { text: String(text || '') }),
-  digestExport: (result, format) =>
-    ipcRenderer.invoke('nyx:digest:export', { result: result || null, format: format === 'csv' ? 'csv' : 'md' }),
+  digestExport: (result, format, options) =>
+    ipcRenderer.invoke('nyx:digest:export', {
+      result: result || null,
+      format: format === 'csv' ? 'csv' : 'md',
+      includeImages: Boolean(options && options.includeImages),
+    }),
 
   /** 标签休眠阈值（分钟，0 = 不自动休眠）：读 / 改，改完立刻生效 */
   tabSleep: () => ipcRenderer.invoke('nyx:tabs:sleep'),
